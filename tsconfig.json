@@ -16,8 +16,7 @@
     "verbatimModuleSyntax": false,
     "skipLibCheck": true,
     "esModuleInterop": true,
-    "isolatedModules": true,
-    "types": ["node"]
+    "isolatedModules": true
   },
   "include": ["src"]
 }
