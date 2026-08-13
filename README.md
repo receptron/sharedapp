@@ -20,17 +20,22 @@ work could continue. In the 90 days before the split, **24 commits went that way
 MulmoClaude itself used none of this code: it neither writes nor reads a shared
 collection.
 
-So it is distributed by **git ref, never npm**. An npm release would put back the exact
-gate this module exists to remove — which is why `package.json` is `private` and
-`prepublishOnly` refuses. **Do not publish this.** There is nothing to publish: consumers
-pin a sha, and `prepare` builds on their machine.
-
 ```json
-"sharedapp": "github:receptron/sharedapp#<sha>"
+"@receptron/sharedapp": "^0.1.0"
 ```
 
-`prepare` builds on install, so consumers get `dist/` without this repository publishing
-anything.
+## Why npm, when the point was to escape a publish
+
+It was going to be a git-ref dependency — pin a sha, `prepare` builds on install, nobody
+publishes anything. That does not work here, and the reason is MulmoTerminal: **it is
+itself an npm package** (`npx mulmoterminal`) and it ships `server/`, which imports this at
+runtime. A git dependency would make every end user clone this repository and run `tsc`
+before their terminal starts.
+
+So this is published — but the gate it replaces is not the one it escapes. Releasing this
+is ONE package with no dependents to bump, no plugin peer ranges, no changelog check and no
+e2e suite. Releasing `@mulmoclaude/core` was eight packages and a full CI matrix, and every
+`app.json` key paid it.
 
 ## What is NOT here
 

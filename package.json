@@ -1,7 +1,6 @@
 {
-  "name": "sharedapp",
+  "name": "@receptron/sharedapp",
   "version": "0.1.0",
-  "private": true,
   "description": "The shared-app compiler: app.json to Firestore documents, and what publish refuses.",
   "license": "MIT",
   "repository": {
@@ -26,7 +25,7 @@
     "format:check": "prettier --check \"{src,test}/**/*.ts\" \"*.{json,md}\"",
     "lint": "eslint src test",
     "prepare": "tsc -p tsconfig.json",
-    "prepublishOnly": "node -e \"console.error('sharedapp is distributed by git ref, never npm. Consumers pin git+https://github.com/receptron/sharedapp.git#<sha> and prepare builds on install. Publishing would put back the human release gate this module exists to remove. See README.'); process.exit(1)\"",
+    "prepublishOnly": "tsc -p tsconfig.json",
     "test": "tsx --test ./test/test_*.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p test/tsconfig.json --noEmit"
   },
@@ -45,5 +44,8 @@
     "tsx": "^4.0.0",
     "typescript": "^5.9.0",
     "typescript-eslint": "^8.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
