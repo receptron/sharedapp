@@ -1,0 +1,1002 @@
+// What publish REFUSES, and why the refusal lives here rather than in a linter.
+//
+// A linter runs on the author's machine, when the author remembers to run it.
+// Publish is the only gate every published byte passes through, so the
+// guarantees are put here — the same argument the rules make for themselves
+// against `require` in an action ("a linter is not a substitute for a rule").
+//
+// Two kinds of refusal, and the difference matters when reading this file:
+//
+//   SECURITY invariants — the declaration is internally consistent and the
+//   rules will happily enforce it, but what it permits is not what the author
+//   meant. `submitOnly` is the archetype: without it the rules do exactly as
+//   told, and the owner can fabricate records in a collection whose entire
+//   meaning is "the submitter said this".
+//
+//   FAIL-CLOSED traps — the rules will refuse EVERY write the declaration was
+//   written to allow, and refuse it silently. `initialStatus` without a
+//   `statusField` is not a weaker app, it is an app where nobody can submit
+//   and nothing says why. These are worth as much as the security ones,
+//   because a permission denial carries no explanation to the person hitting
+//   it, and the author is not the person hitting it.
+//
+// Every check returns a LINE the author can act on, and every check has a test
+// for the refusal AND a test for the neighbouring declaration that must still
+// pass. A refusal test on its own is satisfied by a function that refuses
+// everything, which is the one bug this file could have that would look like
+// safety.
+
+import type { CollectionFieldSpec, CollectionSchema } from "@mulmoclaude/core/collection";
+import { isSafeCustomViewPath } from "@mulmoclaude/core/collection/server";
+import { normalizeViews, participantScope, type NormalizedView } from "./appViews.js";
+import type { AuthoredApp, AuthoredCollectionConfig, AuthoredSubmit } from "./publishManifest.js";
+import { stagedRuleConfig, type StagedSchemaDoc } from "./publishProject.js";
+
+/** What publish knows about a shared collection in this repository, as far as
+ *  these checks are concerned: its cid and the schema key its records are
+ *  identified by. The whole schema is deliberately not threaded in — these
+ *  checks are about the DECLARATION, and the primary key is the one part of
+ *  the schema the declaration can contradict. */
+export interface PublishableCollection {
+  cid: string;
+  primaryKey: string;
+}
+
+/** Does this submit declaration bind a record to the submitter's identity?
+ *
+ *  The condition for requiring `submitOnly`, and deliberately NOT "declares an
+ *  `audience`": `audience` appears only in the rules' public-create branch, so
+ *  an owner or editor never meets it and can add records freely. `immutable`
+ *  is the wrong condition too — a survey's responses are not immutable and
+ *  can be padded exactly the same way.
+ *
+ *  What these four have in common is that each one makes the record MEAN "the
+ *  person who submitted it said this": a per-uid id, a per-uid+field id, a
+ *  row stamped with the submitter's verified address, or a submission
+ *  restricted to a named participant. A record created through the writer
+ *  branch carries the same shape and none of that meaning. */
+export function bindsSubmitterIdentity(submit: AuthoredSubmit): boolean {
+  return submit.idFrom === "auth.uid" || submit.idFrom === "auth.uid+field" || submit.emailField !== undefined || submit.audience === "participant";
+}
+
+/** The fields a rule actually CHECKS the value of, for one collection.
+ *
+ *  `keyFields` pins a value against a declared set, `gateOn.match` pins it
+ *  against the session's current question, and the status field is pinned by
+ *  the transition machine. An aggregation grouped by anything else is grouped
+ *  by a field any submitter may write anything into — so the published
+ *  aggregate is whatever the noisiest respondent decided it should be. */
+function checkedFields(collection: AuthoredCollectionConfig | undefined, submit: AuthoredSubmit | undefined): Set<string> {
+  const fields = new Set<string>();
+  for (const keyField of submit?.validate?.keyFields ?? []) fields.add(keyField.field);
+  if (submit?.gateOn) fields.add(submit.gateOn.match);
+  if (collection?.statusField) fields.add(collection.statusField);
+  return fields;
+}
+
+/** INVARIANT 1 — a submission bound to its submitter needs `submitOnly`. */
+function submitOnlyProblems(app: AuthoredApp): string[] {
+  const problems: string[] = [];
+  for (const [cid, submit] of Object.entries(app.public?.submit ?? {})) {
+    if (!bindsSubmitterIdentity(submit)) continue;
+    if (app.collections?.[cid]?.submitOnly === true) continue;
+    problems.push(
+      `collections.${cid}.submitOnly must be true: public.submit.${cid} binds each record to its submitter ` +
+        `(${identityBindings(submit).join(", ")}), so a record created any other way would carry that meaning without having earned it. ` +
+        `Without submitOnly the rules let an owner or editor write rows directly into ${cid}.`,
+    );
+  }
+  return problems;
+}
+
+function identityBindings(submit: AuthoredSubmit): string[] {
+  const bindings: string[] = [];
+  if (submit.idFrom === "auth.uid" || submit.idFrom === "auth.uid+field") bindings.push(`idFrom: "${submit.idFrom}"`);
+  if (submit.emailField !== undefined) bindings.push(`emailField: "${submit.emailField}"`);
+  if (submit.audience === "participant") bindings.push(`audience: "participant"`);
+  return bindings;
+}
+
+/** INVARIANT 2 — every aggregation key is a field some rule checks. */
+function aggregateProblems(app: AuthoredApp): string[] {
+  const problems: string[] = [];
+  for (const [cid, collection] of Object.entries(app.collections ?? {})) {
+    const keys = collection.aggregate?.by;
+    if (!keys) continue;
+    const checked = checkedFields(collection, app.public?.submit?.[cid]);
+    const loose = keys.filter((field) => !checked.has(field));
+    const spelled = loose.map((field) => `'${field}'`).join(", ");
+    if (loose.length > 0) {
+      problems.push(
+        `collections.${cid}.aggregate.by names ${spelled}, which no rule checks the value of. ` +
+          `An aggregation key must appear in public.submit.${cid}.validate.keyFields, in gateOn.match, or be the statusField — ` +
+          `otherwise a submitter chooses their own bucket and the published aggregate is not a count of anything.`,
+      );
+    }
+  }
+  return problems;
+}
+
+/** INVARIANT 3 — `auth: "verifiedEmail"` only.
+ *
+ *  A product decision, not a rules limitation: the rules keep all three stages
+ *  and the emulator tests keep exercising them, because deleting a stage from
+ *  the rules turns a change of mind into a cross-repo deploy. Publish is where
+ *  the current decision is expressed, and it is one line to move. */
+function authProblems(app: AuthoredApp): string[] {
+  return Object.entries(app.public?.submit ?? {})
+    .filter(([, submit]) => submit.auth !== "verifiedEmail")
+    .map(
+      ([cid, submit]) =>
+        `public.submit.${cid}.auth is "${submit.auth}": only "verifiedEmail" may be published. ` +
+        `The rules still implement "none" and "anonymous" — this is a product decision, and lifting it is a change here, not a rules deploy.`,
+    );
+}
+
+/** INVARIANT 5 — a mail transition's origins and destination must be disjoint.
+ *
+ *  Overlap means the same write can satisfy the same template twice over, and
+ *  the deterministic mail id is the only other thing stopping a duplicate
+ *  send. The rules also require the status to have CHANGED, so an overlapping
+ *  declaration is not merely redundant: `from` containing `to` is a transition
+ *  that can never fire, which is a mail nobody ever receives. */
+function mailProblems(app: AuthoredApp): string[] {
+  return Object.entries(app.collections ?? {}).flatMap(([cid, collection]) => collectionMailProblems(cid, collection));
+}
+
+function collectionMailProblems(cid: string, collection: AuthoredCollectionConfig): string[] {
+  const { mail } = collection;
+  if (!mail) return [];
+  const problems: string[] = [];
+  if (!collection.statusField) {
+    problems.push(
+      `collections.${cid}.mail needs collections.${cid}.statusField: the rules read the status before and after the write to decide the mail is warranted.`,
+    );
+  }
+  for (const [template, transition] of Object.entries(mail.on)) {
+    problems.push(...templateMailProblems(cid, collection, template, transition));
+  }
+  return problems;
+}
+
+function templateMailProblems(cid: string, collection: AuthoredCollectionConfig, template: string, transition: { from: string[]; to: string }): string[] {
+  const problems: string[] = [];
+  if (transition.from.includes(transition.to)) {
+    problems.push(
+      `collections.${cid}.mail.on.${template} lists "${transition.to}" in both \`from\` and \`to\`. ` +
+        "The rules require the status to CHANGE in the same write, so this template can never send.",
+    );
+  }
+  const allowed = collection.transitions;
+  if (allowed) {
+    const unreachable = transition.from.filter((from) => !(allowed[from] ?? []).includes(transition.to));
+    const spelled = unreachable.map((from) => `'${from}' -> '${transition.to}'`).join(", ");
+    if (unreachable.length > 0) {
+      problems.push(
+        `collections.${cid}.mail.on.${template} sends on ${spelled}, ` +
+          `which collections.${cid}.transitions does not allow. The record write is refused first, so the mail never fires.`,
+      );
+    }
+  }
+  return problems;
+}
+
+/** INVARIANTS 6 and 7 — the window is a real interval, and `keyFields` fits
+ *  the unrolled check in the rules. */
+function submitShapeProblems(app: AuthoredApp): string[] {
+  return Object.entries(app.public?.submit ?? {}).flatMap(([cid, submit]) => [...windowProblems(cid, submit), ...keyFieldCountProblems(cid, submit)]);
+}
+
+function windowProblems(cid: string, submit: AuthoredSubmit): string[] {
+  const { window } = submit;
+  if (window?.from === undefined || window.until === undefined) return [];
+  if (Date.parse(window.until) > Date.parse(window.from)) return [];
+  return [`public.submit.${cid}.window closes at or before it opens (${window.from} -> ${window.until}): nothing could ever be submitted.`];
+}
+
+function keyFieldCountProblems(cid: string, submit: AuthoredSubmit): string[] {
+  const keyFields = submit.validate?.keyFields ?? [];
+  if (keyFields.length <= 2) return [];
+  return [
+    `public.submit.${cid}.validate.keyFields declares ${keyFields.length}; the rules check at most 2. ` +
+      "Rules have no iteration, so the check is unrolled — a third would be published and never enforced.",
+  ];
+}
+
+/** The fail-closed traps: declarations the rules read together, where the
+ *  missing half denies every write instead of loosening one. */
+function coherenceProblems(app: AuthoredApp): string[] {
+  const fromSubmits = Object.entries(app.public?.submit ?? {}).flatMap(([cid, submit]) => submitCoherenceProblems(app, cid, submit));
+  const fromCollections = Object.entries(app.collections ?? {}).flatMap(([cid, collection]) => gateCoherenceProblems(cid, collection));
+  return [...fromSubmits, ...fromCollections];
+}
+
+/** `initialStatus` is read together with the collection's `statusField` and
+ *  with `createFields`; miss either and every submission is refused. */
+function statusCoherenceProblems(cid: string, submit: AuthoredSubmit, collection: AuthoredCollectionConfig | undefined): string[] {
+  if (submit.initialStatus === undefined) return [];
+  if (!collection?.statusField) {
+    return [
+      `public.submit.${cid}.initialStatus needs collections.${cid}.statusField: the rules look the status up by that name, and refuse every submission without it.`,
+    ];
+  }
+  if (new Set(submit.createFields).has(collection.statusField)) return [];
+  return [
+    `public.submit.${cid}.createFields must include "${collection.statusField}": a submission may carry ONLY the createFields, ` +
+      "and the rules also require the status field to be present and equal to initialStatus. As written, every submission is refused.",
+  ];
+}
+
+/** Every field a RULE reads off a submitted record, other than the status
+ *  field (which `statusCoherenceProblems` words for itself).
+ *
+ *  `emailField` and `idField` belong here for exactly the reason `required`
+ *  and `keyFields` do, and forgetting them was the same oversight twice: the
+ *  rules read `request.resource.data[s.emailField]` and rebuild the document
+ *  id from `s.idField`, while `hasOnly(createFields)` decides what a
+ *  submission may carry at all. A field in one list and not the other is a
+ *  contradiction the submitter cannot resolve — including it is refused,
+ *  omitting it fails the check. */
+function ruleReadFields(submit: AuthoredSubmit): { field: string; why: string }[] {
+  const fields: { field: string; why: string }[] = [];
+  if (submit.emailField !== undefined) {
+    fields.push({ field: submit.emailField, why: `public.submit.<cid>.emailField — the rules compare it to the submitter's verified address` });
+  }
+  if ((submit.idFrom === "auth.uid+field" || submit.idFrom === "field") && submit.idField !== undefined) {
+    fields.push({ field: submit.idField, why: `public.submit.<cid>.idField — the rules rebuild the document id from it` });
+  }
+  return fields;
+}
+
+/** A checked field a submission is not allowed to carry can never be
+ *  satisfied: carrying it fails `hasOnly`, omitting it fails the check. */
+function createFieldProblems(cid: string, submit: AuthoredSubmit): string[] {
+  const createFields = new Set(submit.createFields);
+  const ruleRead = ruleReadFields(submit)
+    .filter((entry) => !createFields.has(entry.field))
+    .map(
+      (entry) =>
+        `public.submit.${cid}.createFields must include "${entry.field}" (${entry.why.replace("<cid>", cid)}): ` +
+        "a submission may carry only the createFields, so as written every submission is refused whether or not it carries the field.",
+    );
+  const required = (submit.validate?.required ?? [])
+    .filter((field) => !createFields.has(field))
+    .map(
+      (field) =>
+        `public.submit.${cid}.validate.required names "${field}", which is not in createFields: a submission may carry only the createFields, so the requirement can never be met.`,
+    );
+  const keyFields = (submit.validate?.keyFields ?? [])
+    .filter((keyField) => !createFields.has(keyField.field))
+    .map(
+      (keyField) =>
+        `public.submit.${cid}.validate.keyFields checks "${keyField.field}", which is not in createFields: a submission carrying it is refused, and one omitting it fails the check.`,
+    );
+  return [...ruleRead, ...required, ...keyFields];
+}
+
+function submitCoherenceProblems(app: AuthoredApp, cid: string, submit: AuthoredSubmit): string[] {
+  const collection = app.collections?.[cid];
+  const problems = [...statusCoherenceProblems(cid, submit, collection), ...createFieldProblems(cid, submit)];
+  if (submit.idFrom === "auth.uid+field" && submit.idField === undefined) {
+    problems.push(
+      `public.submit.${cid}.idFrom is "auth.uid+field" but no idField is declared: the rules rebuild the document id from that field and refuse every create.`,
+    );
+  }
+  problems.push(...fieldIdProblems(cid, submit));
+  if ((submit.selfUpdate !== undefined || submit.selfTransitions !== undefined) && !collection?.statusField) {
+    problems.push(
+      `public.submit.${cid}.selfUpdate / selfTransitions are declared per CURRENT STATUS, but collections.${cid} declares no statusField: ` +
+        "the rules read the current status first and refuse every self-edit without it.",
+    );
+  }
+  if (submit.audience === "participant" && Object.keys(app.members).length === 0) {
+    problems.push(
+      `public.submit.${cid}.audience is "participant" but the roster is empty: the rules resolve the submitter's role from members, so every submission is refused.`,
+    );
+  }
+  return problems;
+}
+
+/** `idFrom: "field"` makes the document id a CLAIM ABOUT ANOTHER RECORD, and
+ *  the claim is only worth what is checked.
+ *
+ *  `idIn` is required rather than optional, and that is the whole point of
+ *  refusing here: without it the id is any string a stranger likes, so the app
+ *  quietly accepts bookings for slots that do not exist. Nothing downstream
+ *  ever notices — the booking is real, its slot is not — which is exactly the
+ *  kind of hole a gate is for and a rule cannot state.
+ *
+ *  `idIn` without the mode is refused for the opposite reason: the rules read
+ *  it only in that branch, so an author who wrote it believes a check is
+ *  running that is not. */
+function fieldIdProblems(cid: string, submit: AuthoredSubmit): string[] {
+  const problems: string[] = [];
+  if (submit.idFrom === "field") {
+    if (submit.idField === undefined) {
+      problems.push(
+        `public.submit.${cid}.idFrom is "field" but no idField is declared: the rules take the document id from that field and refuse every create.`,
+      );
+    }
+    if (submit.idIn === undefined) {
+      problems.push(
+        `public.submit.${cid}.idFrom is "field" but no idIn is declared: the document id is then any string a submitter chooses, so the app accepts records ` +
+          `pointing at things that do not exist. Name the collection the id must be found in — and, when only some of those records may be claimed, the state ` +
+          `they must be in: "idIn": { "collection": "slots", "where": { "field": "state", "equals": "open" } }.`,
+      );
+    }
+  } else if (submit.idIn !== undefined) {
+    const mode = submit.idFrom === undefined ? "absent" : JSON.stringify(submit.idFrom);
+    problems.push(
+      `public.submit.${cid}.idIn is declared but idFrom is ${mode}: the rules read idIn only for ` +
+        `idFrom "field", so as written nothing checks the referenced record and the declaration promises a check it does not perform.`,
+    );
+  }
+  return problems;
+}
+
+/** Every `idIn` target, checked against the collections this repository has.
+ *
+ *  Separate from {@link fieldIdProblems} for the reason the file is split at
+ *  all: that one reads the declaration alone, this one needs to know what
+ *  exists. */
+function idTargetProblems(app: AuthoredApp, collections: readonly PublishableCollection[]): string[] {
+  const known = new Set(collections.map((collection) => collection.cid));
+  const names = known.size > 0 ? [...known].sort().join(", ") : "(none)";
+  return Object.entries(app.public?.submit ?? {}).flatMap(([cid, submit]) => idInTargetProblems(cid, submit, known, names));
+}
+
+/** Where a `field` id says its record must be found.
+ *
+ *  A typo passes every other check: the rules look the record up in a
+ *  collection that does not exist, the lookup can never succeed, and every
+ *  submission is refused with no explanation anywhere. A collection pointing
+ *  at ITSELF is worse than a typo — on a create the document being written
+ *  does not exist yet, so it is a declaration that can never accept anything. */
+function idInTargetProblems(cid: string, submit: AuthoredSubmit, known: ReadonlySet<string>, names: string): string[] {
+  const target = submit.idIn?.collection;
+  if (target === undefined) return [];
+  if (target === cid) {
+    return [
+      `public.submit.${cid}.idIn.collection names '${cid}' itself: a create writes a document that does not exist yet, so the record can never be found ` +
+        "and every submission is refused. Name the collection of the thing being claimed (the slots, the seats, the assets).",
+    ];
+  }
+  if (!known.has(target)) {
+    return [
+      `public.submit.${cid}.idIn.collection names '${target}', which is not a shared collection in this repository. The rules look the record up there, ` +
+        `so nothing can ever be submitted. Shared collections here: ${names}.`,
+    ];
+  }
+  return [];
+}
+
+/** The staged reveal reads its flag off the PARENT record, so the path to that
+ *  parent is not optional decoration — without it the gate never opens. */
+function gateCoherenceProblems(cid: string, collection: AuthoredCollectionConfig): string[] {
+  if (collection.revealGated !== true) return [];
+  if (collection.gatedFrom !== undefined && collection.revealBy !== undefined) return [];
+  return [
+    `collections.${cid}.revealGated needs both gatedFrom and revealBy: the flag is read off the PARENT record, and without the path the gate never opens.`,
+  ];
+}
+
+/** The publisher must be able to write what they are about to write.
+ *
+ *  On a first publish the rules require the creator to name themselves owner,
+ *  in the roster, under `'*'`. Getting this wrong produces a bare permission
+ *  error from Firestore with nothing in it about rosters — worth one line
+ *  here instead. */
+function publisherProblems(app: AuthoredApp, publisherEmail: string): string[] {
+  const roles = app.members[publisherEmail];
+  if (roles?.["*"] === "owner") return [];
+  return [
+    `members must give you app-wide owner: add "${publisherEmail}": { "*": "owner" }. ` +
+      `The rules require the publisher to hold that role (and to name themselves owner when the app is first created); otherwise the write is refused with no explanation.`,
+  ];
+}
+
+/** Every cid the declaration mentions must be a collection that exists.
+ *
+ *  A typo'd cid is not an error anywhere else: the app document simply carries
+ *  a configuration for a collection nobody publishes, and the collection the
+ *  author meant is published with no configuration at all — i.e. with the
+ *  status machine and the submit path silently absent. */
+function unknownCidProblems(app: AuthoredApp, collections: readonly PublishableCollection[]): string[] {
+  const known = new Set(collections.map((collection) => collection.cid));
+  const mentions: [string, string[]][] = [
+    ["collections", Object.keys(app.collections ?? {})],
+    ["public.read", app.public?.read ?? []],
+    ["public.submit", Object.keys(app.public?.submit ?? {})],
+    ["participantRead", app.participantRead ?? []],
+    // A member's per-collection keys are cids too, and a typo there is the
+    // quietest of the lot: the member holds the role on a collection that does
+    // not exist, and on the one they were meant to hold it on they fall back
+    // to their `'*'` role — or, holding none, to nothing at all.
+    ["members", [...new Set(Object.values(app.members).flatMap((roles) => Object.keys(roles)))].filter((key) => key !== "*")],
+  ];
+  return mentions.flatMap(([where, cids]) =>
+    cids
+      .filter((cid) => !known.has(cid))
+      .map(
+        (cid) =>
+          `${where} names '${cid}', which is not a shared collection in this repository. ` +
+          `Shared collections here: ${known.size > 0 ? [...known].sort().join(", ") : '(none - a schema needs storage.type "firestore")'}.`,
+      ),
+  );
+}
+
+/** Everything publish refuses, as lines the author can act on.
+ *
+ *  All of them, every time. Publish is a manual step with a human waiting on
+ *  it; stopping at the first problem turns one review into five. */
+export function publishProblems(app: AuthoredApp, collections: readonly PublishableCollection[], publisherEmail: string): string[] {
+  return [
+    ...unknownCidProblems(app, collections),
+    ...publisherProblems(app, publisherEmail),
+    ...submitOnlyProblems(app),
+    ...aggregateProblems(app),
+    ...authProblems(app),
+    ...mailProblems(app),
+    ...submitShapeProblems(app),
+    ...coherenceProblems(app),
+    ...primaryKeyProblems(app, collections),
+    ...assigneeProblems(app),
+    ...stampProblems(app),
+    ...windowRefProblems(app, collections),
+    ...idTargetProblems(app, collections),
+    ...mirrorProblems(app, collections),
+    ...viewProblems(app, collections),
+  ];
+}
+
+/** A public submission must NOT be allowed to name its own primary key.
+ *
+ *  The rules constrain the DOCUMENT ID (`idFrom`) and cannot constrain the
+ *  value of a field — nothing compares `request.resource.data[primaryKey]`
+ *  with the path being written. So a submit path that accepts the primary key
+ *  as a `createField` lets a submitter write at their one permitted document
+ *  id while CLAIMING another record's identity, or a duplicate.
+ *
+ *  It is refused rather than tolerated because there is nothing for the field
+ *  to do: `firestoreStore` takes a shared record's identity from the document
+ *  id and overwrites the field on read, so a submitted value is either equal
+ *  to the id (noise) or a lie (silently discarded). Publishing a form field
+ *  whose value is thrown away is worse than not having it — the author will
+ *  believe submitters choose their ids.
+ *
+ *  This is the second answer to the same question. The first was the reverse —
+ *  REQUIRE the key, because a record without one was rejected by every reader
+ *  — and it was right about the symptom and wrong about the cure: the identity
+ *  belongs to the id the rules can pin, not to a field they cannot. */
+function primaryKeyProblems(app: AuthoredApp, collections: readonly PublishableCollection[]): string[] {
+  const primaryKeyOf = new Map(collections.map((collection) => [collection.cid, collection.primaryKey]));
+  return Object.entries(app.public?.submit ?? {}).flatMap(([cid, submit]) => {
+    const primaryKey = primaryKeyOf.get(cid);
+    if (primaryKey === undefined || !submit.createFields.includes(primaryKey)) return [];
+    return [
+      `public.submit.${cid}.createFields must NOT include "${primaryKey}", the schema's primaryKey: the rules can pin the document id but not the value of a field, ` +
+        "so a submitter could write at their own id while claiming another record's. A shared record's identity is its document id — the store fills the field from it, " +
+        "and a submitted value is either the same thing or a lie that is thrown away.",
+    ];
+  });
+}
+
+/** `assignee` without the field that says which rows are theirs.
+ *
+ *  A FAIL-CLOSED trap of the worst kind, because it fails closed for one
+ *  person and nobody else: the rules ask `collections[cid].assigneeField` for
+ *  the field to compare, find nothing, and refuse every write that member
+ *  makes. The app works for the owner who set it up, and the member it was set
+ *  up for is told only "permission denied".
+ *
+ *  `'*': "assignee"` is refused outright rather than checked against every
+ *  collection. The role means "the rows assigned to you", and what counts as
+ *  assigned is per collection — an app-wide one would need the same field name
+ *  to be right everywhere, and where it is missing it silently means "no
+ *  access to this collection" rather than "no scoping here".
+ */
+function assigneeProblems(app: AuthoredApp): string[] {
+  return Object.entries(app.members).flatMap(([email, roles]) =>
+    Object.entries(roles).flatMap(([cid, role]) => {
+      if (role !== "assignee") return [];
+      if (cid === "*") {
+        return [
+          `members["${email}"] holds "assignee" under "*", and the role cannot be app-wide: which rows are yours is declared per collection ` +
+            '(`collections.<cid>.assigneeField`). Name the collections instead — { "bookings": "assignee" }.',
+        ];
+      }
+      if (app.collections?.[cid]?.assigneeField !== undefined) return [];
+      return [
+        `members["${email}"] holds "assignee" on '${cid}', but collections.${cid}.assigneeField does not say which field names the member a row belongs to. ` +
+          `Add it (assigneeField: "<a field holding an address>"), or give a role that is not row-scoped. Without it the rules have nothing to compare and refuse ` +
+          "every write that member makes, while the app keeps working for everybody else.",
+      ];
+    }),
+  );
+}
+
+/** A server-stamped field the submitter cannot write, or can rewrite later.
+ *
+ *  Both failures are silent in opposite directions. Left out of
+ *  `createFields`, the rules refuse every submission (`hasOnly(createFields)`
+ *  rejects the key the stamp check requires) — an app nobody can use. Left IN
+ *  a `selfUpdate` list, the field the queue is ordered by becomes editable by
+ *  the person standing in the queue. */
+function stampProblems(app: AuthoredApp): string[] {
+  return Object.entries(app.public?.submit ?? {}).flatMap(([cid, submit]) => {
+    const stamp = submit.stampField;
+    if (stamp === undefined) return [];
+    const problems: string[] = [];
+    if (!submit.createFields.includes(stamp)) {
+      problems.push(
+        `public.submit.${cid}.stampField names '${stamp}', which is not in createFields. The rules require the record to CARRY the server time in that field, ` +
+          "and refuse any key outside createFields — so every submission is denied. Add it to createFields; the page fills it in, not the person.",
+      );
+    }
+    for (const [status, fields] of Object.entries(submit.selfUpdate ?? {})) {
+      if (!fields.includes(stamp)) continue;
+      problems.push(
+        `public.submit.${cid}.selfUpdate.${status} lets the submitter write '${stamp}', which is the field stampField pins to the server clock. ` +
+          "Whatever that field orders — a first-come queue, an audit trail — could then be rewritten by the person it ranks. Remove it from selfUpdate.",
+      );
+    }
+    return problems;
+  });
+}
+
+/** A per-record window bound pointing at a collection or a field the submitter
+ *  never writes.
+ *
+ *  `fromField` makes the rules read another record, and every part of that
+ *  read is fail-closed: an unknown collection, or a `ref` the submission does
+ *  not carry, means the bound can never be satisfied and the form is shut for
+ *  good. */
+function windowRefProblems(app: AuthoredApp, collections: readonly PublishableCollection[]): string[] {
+  const known = new Set(collections.map((collection) => collection.cid));
+  return Object.entries(app.public?.submit ?? {}).flatMap(([cid, submit]) => [
+    ...windowBoundProblems(cid, submit, known, "fromField", submit.window?.fromField, "opening"),
+    ...windowBoundProblems(cid, submit, known, "untilField", submit.window?.untilField, "closing"),
+  ]);
+}
+
+/** Both bounds, checked identically. `untilField` arrived with the booking
+ *  desk and reads exactly like its twin, so a check that knew only about
+ *  `fromField` would let the closing half through unchecked — and a closing
+ *  bound that names nothing does not leave the door ajar, it refuses every
+ *  submission with no explanation. */
+function windowBoundProblems(
+  cid: string,
+  submit: AuthoredSubmit,
+  known: ReadonlySet<string>,
+  key: string,
+  ref: { ref: string; collection: string; field: string } | undefined,
+  which: string,
+): string[] {
+  if (ref === undefined) return [];
+  const problems: string[] = [];
+  if (!known.has(ref.collection)) {
+    problems.push(
+      `public.submit.${cid}.window.${key}.collection names '${ref.collection}', which is not a shared collection in this repository. ` +
+        `The rules read the ${which} time off a record there, so nothing can ever be submitted. Shared collections here: ${known.size > 0 ? [...known].sort().join(", ") : "(none)"}.`,
+    );
+  }
+  if (!submit.createFields.includes(ref.ref)) {
+    problems.push(
+      `public.submit.${cid}.window.${key}.ref names '${ref.ref}', which is not in createFields. The rules take the target record's id from that field ON THE ` +
+        "SUBMISSION — if the submitter never writes it, there is nothing to look up and every submission is refused.",
+    );
+  }
+  return problems;
+}
+
+/** The two halves of a mirror, checked as the pair they only work as.
+ *
+ *  `mirror` on the submission and `mirrorOf` on the projection are separate
+ *  keys in separate places, and each is inert without the other: a booking
+ *  whose slot declares no `mirrorOf` can never be created (the rules demand a
+ *  paired write that the projection's own rule will refuse), and a projection
+ *  whose authority declares no `mirror` drifts unbounded because nothing makes
+ *  the two move together. Both failures are silent, and one of them —
+ *  advertising a slot somebody already holds — is the exact thing the mirror
+ *  exists to prevent.
+ *
+ *  Also refuses a collection mirroring ITSELF, which reads as a typo and
+ *  behaves as an unwritable collection: every create would have to prove its
+ *  own document is simultaneously taken and open. */
+function mirrorProblems(app: AuthoredApp, collections: readonly PublishableCollection[]): string[] {
+  const known = new Set(collections.map((collection) => collection.cid));
+  const names = known.size > 0 ? [...known].sort().join(", ") : "(none)";
+  return [
+    ...Object.entries(app.public?.submit ?? {}).flatMap(([cid, submit]) => mirrorClaimProblems(app, cid, submit, known, names)),
+    ...Object.entries(app.collections ?? {}).flatMap(([cid, collection]) => mirrorOfProblems(app, cid, collection, known, names)),
+  ];
+}
+
+/** The submission side: `public.submit[cid].mirror`. */
+function mirrorClaimProblems(app: AuthoredApp, cid: string, submit: AuthoredSubmit, known: ReadonlySet<string>, names: string): string[] {
+  const { mirror } = submit;
+  if (mirror === undefined) return [];
+  if (mirror === cid) {
+    return [`public.submit.${cid}.mirror names its own collection: the projection is a SEPARATE record, and as written no create can satisfy the rules.`];
+  }
+  if (!known.has(mirror)) {
+    return [
+      `public.submit.${cid}.mirror names '${mirror}', which is not a shared collection in this repository. ` +
+        `The rules require the projection to move in the same write, so every submission is refused. Shared collections here: ${names}.`,
+    ];
+  }
+  if (app.collections?.[mirror]?.mirrorOf !== cid) {
+    return [
+      `public.submit.${cid}.mirror names '${mirror}', but collections.${mirror} does not declare mirrorOf: "${cid}". ` +
+        "The two halves only work as a pair — the submission side demands the projection move with it, and the projection side is what allows that move — " +
+        "so as written every submission is refused.",
+    ];
+  }
+  return [];
+}
+
+/** The projection side: `collections[cid].mirrorOf`. */
+function mirrorOfProblems(app: AuthoredApp, cid: string, collection: AuthoredCollectionConfig, known: ReadonlySet<string>, names: string): string[] {
+  const authority = collection.mirrorOf;
+  if (authority === undefined) return [];
+  if (!known.has(authority)) {
+    return [
+      `collections.${cid}.mirrorOf names '${authority}', which is not a shared collection in this repository. ` +
+        `Nothing can then be true of it, so the projection's state may never be written. Shared collections here: ${names}.`,
+    ];
+  }
+  if (app.public?.submit?.[authority]?.mirror !== cid) {
+    return [
+      `collections.${cid}.mirrorOf names '${authority}', but public.submit.${authority} does not declare mirror: "${cid}". ` +
+        "Only the pair keeps the projection honest: without the other half a record can be created without moving this one, and the public page goes on " +
+        "offering something that is already taken.",
+    ];
+  }
+  return [];
+}
+
+/** What each view is handed, and whether its audience can actually read it.
+ *
+ *  Declared, never inferred — a view whose datasets were guessed from
+ *  `public.read` renders perfectly and draws an empty grid, with nothing in
+ *  the page, the rules or the log to say why.
+ *
+ *  The reachability check below is that same failure, once per audience. A
+ *  `public` view naming a collection outside `public.read` draws nothing; a
+ *  `participant` view naming one the participant reaches by neither
+ *  `participantRead` nor their own row is worse, because an unscoped list on
+ *  an own-row collection is DENIED rather than narrowed — the page does not
+ *  render less, it fails.
+ *
+ *  There is deliberately no such check for `member`. Every read a role opens
+ *  is unscoped, and WHICH role a given member holds is not a property of the
+ *  declaration: a stylist scoped to `bookings` and an owner read the same
+ *  projection. That one is settled at the entrance, by trying the read. */
+/** The path, for one view. The SAME validator the host's own custom views use,
+ *  rather than a second opinion about what a safe view path is.
+ *
+ *  Two ad-hoc attempts were wrong here in the same afternoon: a prefix-and-
+ *  suffix test let `views/../../secrets.html` through, and `views/[^/]+\.html`
+ *  still let `views/..\..\secrets.html` through, because a backslash is not a
+ *  slash on this side of the check and IS a separator on Windows. This one
+ *  rejects `..`, backslashes, leading slashes and anything outside
+ *  `[A-Za-z0-9._-]` per segment.
+ *
+ *  It matters more here than for a host view: the host reads this path to
+ *  decide which file to copy onto a document other people read — for a public
+ *  view, a document whose rule is `allow read: if true`, so the blast radius of
+ *  a bad path is the world rather than the author's own iframe. Nested paths
+ *  ARE allowed by the shared validator; the extra `views/<one name>.html` shape
+ *  is this publisher's own narrowing, kept because there is no reason for a
+ *  published view to live in a subdirectory. */
+function viewPathProblems(view: NormalizedView): string[] {
+  if (isSafeCustomViewPath(view.path) && view.path.split("/").length === 2) return [];
+  return [
+    `${view.where}.path is '${view.path}': a published view is exactly one HTML file directly inside the collection's own views/ directory ` +
+      "(e.g. views/booking.html) — no sub-directories, and no segments that climb out of it. The host reads this as a file to publish.",
+  ];
+}
+
+/** One dataset, for one view: does it exist here, and can the audience it is
+ *  handed to actually read it? */
+function viewCollectionProblems(app: AuthoredApp, view: NormalizedView, cid: string, known: ReadonlySet<string>): string[] {
+  if (!known.has(cid)) {
+    return [
+      `${view.where}.collections names '${cid}', which is not a shared collection in this repository. ` +
+        `Shared collections here: ${known.size > 0 ? [...known].sort().join(", ") : "(none)"}.`,
+    ];
+  }
+  if (view.audience === "public" && !(app.public?.read ?? []).includes(cid)) {
+    return [
+      `${view.where}.collections names '${cid}', which is not in public.read: the page reads these with the VISITOR's permissions, so the rules refuse the ` +
+        "read and the view draws an empty page. Nothing errors — this is the failure that looks like a working view with no data.",
+    ];
+  }
+  // No participant check here. Whether a participant reaches a collection
+  // depends on `participantRead`, and publish does not promote the manifest's
+  // — it promotes the STAGED schemas'. That check belongs with the other
+  // promoted-pair ones, in `promotedRoleProblems`.
+  return [];
+}
+
+function viewProblems(app: AuthoredApp, collections: readonly PublishableCollection[]): string[] {
+  const normalized = normalizeViews(app);
+  if (!normalized.ok) return normalized.problems;
+  const known = new Set(collections.map((collection) => collection.cid));
+  return normalized.views.flatMap((view) => [...viewPathProblems(view), ...view.collections.flatMap((cid) => viewCollectionProblems(app, view, cid, known))]);
+}
+
+/** What publish will actually promote, checked as the PAIR it becomes.
+ *
+ *  `publishProblems` reads the manifest, where `members` and `collections` sit
+ *  side by side and agree. Publish does not write that pair. It writes the
+ *  roster from the manifest and the collection configuration from what DEPLOY
+ *  staged, so the app that lands is one half of each — and no check has ever
+ *  looked at that combination.
+ *
+ *  The sequence that gets through: deploy revision A with no `assigneeField`,
+ *  add the field AND the member in revision B, publish without redeploying.
+ *  Every manifest-level check passes on a declaration that is internally sound,
+ *  while what lands is A's field-less configuration beside B's roster — an
+ *  assignee with nothing to be compared against, refused every write, in an app
+ *  that keeps working for everybody else. That is the precise trap
+ *  `assigneeProblems` exists to prevent, reached by the one route it cannot
+ *  see.
+ *
+ *  Separate from `publishProblems` because it needs what deploy staged, which
+ *  is a Firestore read the host makes and this package does not. It is checked
+ *  against `stagedRuleConfig` — the same function the projection uses — rather
+ *  than against a re-derivation, so the value validated is the value written.
+ *
+ *  Only the staged half can be stale, so only that half is named and the fix is
+ *  "deploy again" rather than "fix the declaration". */
+export function promotedRoleProblems(app: AuthoredApp, staged: { cid: string; doc: StagedSchemaDoc }[]): string[] {
+  const promoted = stagedRuleConfig(staged).collections ?? {};
+  const stagedCids = new Set(staged.map((entry) => entry.cid));
+  return [
+    ...promotedAssigneeProblems(app, promoted, stagedCids),
+    ...promotedMirrorProblems(app, promoted, stagedCids),
+    ...promotedRefFieldProblems(app, staged),
+    ...promotedParticipantViewProblems(app, staged),
+  ];
+}
+
+/** A participant's page, checked against the `participantRead` publish will
+ *  actually PROMOTE.
+ *
+ *  Not against the manifest's. `projectPublish` overwrites `participantRead`
+ *  with what the staged schemas carry, so a cid added to the manifest since the
+ *  last deploy is not in the rules — and a page written for it would be
+ *  published, offered, and then refused the read. The manifest half of this
+ *  file cannot see that; the promoted half can, which is why the check lives
+ *  here rather than beside the other view checks. */
+function promotedParticipantViewProblems(app: AuthoredApp, staged: { cid: string; doc: StagedSchemaDoc }[]): string[] {
+  const normalized = normalizeViews(app);
+  if (!normalized.ok) return [];
+  const participantRead = stagedRuleConfig(staged).participantRead ?? [];
+  return normalized.views
+    .filter((view) => view.audience === "participant")
+    .flatMap((view) =>
+      view.collections
+        .filter((cid) => participantScope(app, cid, participantRead) === null)
+        .map(
+          (cid) =>
+            `${view.where}.collections names '${cid}', which a participant cannot read once this publishes: it is not in the participantRead that DEPLOY ` +
+            `staged, and public.submit.${cid} declares neither an emailField nor idFrom "auth.uid", so there is no row the rules would call theirs. ` +
+            "The page would be refused the read, not handed fewer records. (Adding it to participantRead in app.json is not enough — deploy first.)",
+        ),
+    );
+}
+
+/** The FIELDS a rule reads off another record — `idIn.where.field` and the two
+ *  window bounds — checked against the schema publish is about to promote.
+ *
+ *  These are checked here rather than in `publishProblems` because that gate
+ *  is given a cid and a primary key per collection and nothing else, on
+ *  purpose: it reads the DECLARATION. A field name can only be judged against
+ *  a schema, and the schema that matters is the STAGED one — the version
+ *  publish promotes — not whatever the working tree says now.
+ *
+ *  What a typo costs: `where: { field: "staet" }` publishes cleanly, the
+ *  rules' comparison can never match, and every submission is denied with no
+ *  message. The author's own app looks broken with nothing to read.
+ *
+ *  Only fields the schema DECLARES are accepted. A record may carry more than
+ *  its schema does, but a shared collection's records are written through it,
+ *  and "the field exists on some rows" is not something a gate can promise. */
+function promotedRefFieldProblems(app: AuthoredApp, staged: { cid: string; doc: StagedSchemaDoc }[]): string[] {
+  const schemaOf = new Map(staged.map((entry) => [entry.cid, entry.doc.publishedSchema]));
+  return Object.entries(app.public?.submit ?? {}).flatMap(([cid, submit]) => submitRefProblems(schemaOf, cid, submit));
+}
+
+function submitRefProblems(schemaOf: ReadonlyMap<string, CollectionSchema>, cid: string, submit: AuthoredSubmit): string[] {
+  return [
+    ...idInRefProblems(schemaOf, cid, submit),
+    ...boundRefProblems(schemaOf, cid, "fromField", submit.window?.fromField),
+    ...boundRefProblems(schemaOf, cid, "untilField", submit.window?.untilField),
+  ];
+}
+
+function idInRefProblems(schemaOf: ReadonlyMap<string, CollectionSchema>, cid: string, submit: AuthoredSubmit): string[] {
+  const where = submit.idIn?.where;
+  if (where === undefined) return [];
+  return [
+    ...refFieldProblem(schemaOf, cid, "idIn.where.field", submit.idIn?.collection, where.field),
+    ...comparableProblem(schemaOf, cid, submit.idIn?.collection, where),
+  ];
+}
+
+function boundRefProblems(
+  schemaOf: ReadonlyMap<string, CollectionSchema>,
+  cid: string,
+  key: string,
+  ref: { ref: string; collection: string; field: string } | undefined,
+): string[] {
+  if (ref === undefined) return [];
+  return [...refFieldProblem(schemaOf, cid, `window.${key}.field`, ref.collection, ref.field), ...millisProblem(schemaOf, cid, `window.${key}.field`, ref)];
+}
+
+/** The field spec a reference points at, or undefined when there is nothing
+ *  staged to judge it against (the host refuses that separately, naming every
+ *  missing collection at once). */
+function referencedField(
+  schemaOf: ReadonlyMap<string, CollectionSchema>,
+  target: string | undefined,
+  field: string | undefined,
+): CollectionFieldSpec | undefined {
+  if (target === undefined || field === undefined) return undefined;
+  return schemaOf.get(target)?.fields?.[field];
+}
+
+/** An enum's domain, or undefined for every other kind. Narrowed by the key
+ *  rather than asserted: `fields` is a discriminated union and only some of
+ *  its members carry `values`. */
+function enumValues(spec: CollectionFieldSpec): readonly string[] | undefined {
+  return spec.type === "enum" ? spec.values : undefined;
+}
+
+function refFieldProblem(
+  schemaOf: ReadonlyMap<string, CollectionSchema>,
+  cid: string,
+  key: string,
+  target: string | undefined,
+  field: string | undefined,
+): string[] {
+  if (target === undefined || field === undefined) return [];
+  const schema = schemaOf.get(target);
+  if (schema === undefined || referencedField(schemaOf, target, field) !== undefined) return [];
+  const known = Object.keys(schema.fields ?? {})
+    .sort()
+    .join(", ");
+  return [
+    `public.submit.${cid}.${key} names '${field}', which the STAGED schema of '${target}' — the one publish promotes — does not declare. ` +
+      `The rules read that field off the record and compare it, so as written every submission is refused with nothing to explain it. ` +
+      `Fields on '${target}': ${known.length > 0 ? known : "(none)"}.`,
+  ];
+}
+
+/** A comparison the rules can never satisfy is as dead as a missing field, and
+ *  looks even more correct on the page: an `enum` whose domain does not contain
+ *  the value, or a boolean field compared with a string. */
+function comparableProblem(
+  schemaOf: ReadonlyMap<string, CollectionSchema>,
+  cid: string,
+  target: string | undefined,
+  where: { field: string; equals: string | number | boolean },
+): string[] {
+  const spec = referencedField(schemaOf, target, where.field);
+  if (spec === undefined) return [];
+  const said = JSON.stringify(where.equals);
+  const values = enumValues(spec);
+  if (values !== undefined) {
+    if (values.includes(String(where.equals))) return [];
+    return [
+      `public.submit.${cid}.idIn.where.equals is ${said}, which is not one of the values '${where.field}' can hold on '${String(target)}' ` +
+        `(${values.join(", ") || "(none)"}). The comparison can never be true, so every submission is refused.`,
+    ];
+  }
+  const wanted = spec.type === "number" ? "number" : spec.type === "boolean" ? "boolean" : "string";
+  if (typeof where.equals === wanted) return [];
+  return [
+    `public.submit.${cid}.idIn.where.equals is ${said}, and '${where.field}' on '${String(target)}' is a ${spec.type} field. ` +
+      `The rules compare the stored value with this one and never coerce, so the comparison can never be true and every submission is refused.`,
+  ];
+}
+
+/** A per-record window bound is EPOCH MILLIS, because the rules have no date
+ *  arithmetic and do not coerce: they compare `request.time.toMillis()` with
+ *  whatever is stored. A `datetime` field holds an ISO string, which is a type
+ *  error that fails closed — the window never opens, and nothing says so. */
+function millisProblem(
+  schemaOf: ReadonlyMap<string, CollectionSchema>,
+  cid: string,
+  key: string,
+  ref: { collection: string; field: string } | undefined,
+): string[] {
+  const spec = referencedField(schemaOf, ref?.collection, ref?.field);
+  if (spec === undefined || spec.type === "number") return [];
+  return [
+    `public.submit.${cid}.${key} names '${String(ref?.field)}' on '${String(ref?.collection)}', which is a ${spec.type} field. A per-record bound is ` +
+      `EPOCH MILLIS: the rules compare it with request.time.toMillis() and never coerce, so anything else is a type error that refuses every ` +
+      `submission — the window simply never opens. Store the instant as a number.`,
+  ];
+}
+
+function promotedAssigneeProblems(app: AuthoredApp, promoted: Record<string, AuthoredCollectionConfig>, stagedCids: ReadonlySet<string>): string[] {
+  return Object.entries(app.members).flatMap(([email, roles]) =>
+    Object.entries(roles).flatMap(([cid, role]) => {
+      // A cid with nothing staged at all is the host's "not staged, so there is
+      // no reviewed version to promote" refusal, which names every missing
+      // collection at once. Repeating it per member would bury it.
+      if (role !== "assignee" || cid === "*" || !stagedCids.has(cid)) return [];
+      if (promoted[cid]?.assigneeField !== undefined) return [];
+      return [
+        `members["${email}"] holds "assignee" on '${cid}', and the STAGED version of '${cid}' — the one publish promotes — carries no assigneeField, even if ` +
+          `app.json declares one now. Publish writes the roster from app.json and the collection configuration from the deploy, so that member would land with ` +
+          `nothing to be compared against: refused every write, while the app keeps working for everybody else. ` +
+          "Run deploy again, so the version being published is the one the declaration describes.",
+      ];
+    }),
+  );
+}
+
+/** The mirror's other half, checked against what publish will actually
+ *  promote — the same trap as the assignee's field, reached by the same route.
+ *
+ *  `mirror` is published from the MANIFEST (it lives in `public.submit`) while
+ *  `mirrorOf` is promoted from what DEPLOY staged. Add both halves to
+ *  `app.json` and publish without redeploying, and what lands is a submission
+ *  demanding a paired projection write beside a projection whose rule config
+ *  does not allow it: every booking is refused, and the declaration on disk
+ *  looks perfectly sound.
+ *
+ *  Refused in the reverse direction too. Removing `mirrorOf` from a live app
+ *  and publishing without a deploy leaves the projection accepting nothing —
+ *  and removing it FROM the staged side while the submission still demands it
+ *  is the drift this pair exists to prevent. */
+function promotedMirrorProblems(app: AuthoredApp, promoted: Record<string, AuthoredCollectionConfig>, stagedCids: ReadonlySet<string>): string[] {
+  return [...addedMirrorProblems(app, promoted, stagedCids), ...strandedMirrorProblems(app, promoted)];
+}
+
+/** The manifest asks for a projection the promoted configuration will not
+ *  allow: every submission denied, and nothing on the page to say why. */
+function addedMirrorProblems(app: AuthoredApp, promoted: Record<string, AuthoredCollectionConfig>, stagedCids: ReadonlySet<string>): string[] {
+  return Object.entries(app.public?.submit ?? {}).flatMap(([cid, submit]) => {
+    const { mirror } = submit;
+    // Nothing staged at all is the host's own refusal, which names every
+    // missing collection at once.
+    if (mirror === undefined || !stagedCids.has(mirror)) return [];
+    if (promoted[mirror]?.mirrorOf === cid) return [];
+    return [
+      `public.submit.${cid}.mirror names '${mirror}', and the STAGED version of '${mirror}' — the one publish promotes — does not declare mirrorOf: "${cid}", ` +
+        "even if app.json declares it now. Publish writes the submission side from app.json and the collection side from the deploy, so what lands is a " +
+        "booking that must move its projection beside a projection that refuses to move: every submission is denied, with nothing on the page to say why. " +
+        "Run deploy again, so the version being published is the one the declaration describes.",
+    ];
+  });
+}
+
+/** The other direction, and the DANGEROUS one.
+ *
+ *  Take a live pair, delete BOTH halves from `app.json`, and publish without
+ *  redeploying. The submission side comes from the manifest, so nothing
+ *  requires the projection to move any more; the collection side comes from
+ *  staging, which still says `mirrorOf`, so the projection stays writable.
+ *  Bookings are then created while the public row goes on saying `open` — the
+ *  precise failure the pair exists to prevent, arrived at by removing it.
+ *
+ *  Refused rather than tolerated because the app keeps WORKING: submissions
+ *  succeed. Only the public page is wrong, and only to the people reading it. */
+function strandedMirrorProblems(app: AuthoredApp, promoted: Record<string, AuthoredCollectionConfig>): string[] {
+  return Object.entries(promoted).flatMap(([cid, config]) => {
+    const authority = config.mirrorOf;
+    if (authority === undefined) return [];
+    if (app.public?.submit?.[authority]?.mirror === cid) return [];
+    return [
+      `the STAGED version of '${cid}' — the one publish promotes — declares mirrorOf: "${authority}", and app.json no longer declares ` +
+        `public.submit.${authority}.mirror: "${cid}". What lands is a projection that is still writable beside submissions that no longer have to move it, ` +
+        `so records can be created while '${cid}' goes on advertising them as available. Nothing fails: the app works and the public page lies. ` +
+        "Run deploy again, so the version being published is the one the declaration describes.",
+    ];
+  });
+}

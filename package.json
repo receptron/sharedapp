@@ -1,0 +1,46 @@
+{
+  "name": "sharedapp",
+  "version": "0.1.0",
+  "description": "The shared-app compiler: app.json to Firestore documents, and what publish refuses.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/receptron/sharedapp.git"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepare": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p test/tsconfig.json --noEmit",
+    "test": "tsx --test ./test/test_*.ts",
+    "lint": "eslint src test",
+    "format": "prettier --write \"{src,test}/**/*.ts\" \"*.{json,md}\"",
+    "format:check": "prettier --check \"{src,test}/**/*.ts\" \"*.{json,md}\""
+  },
+  "dependencies": {
+    "zod": "^4.1.13"
+  },
+  "peerDependencies": {
+    "@mulmoclaude/core": ">=3.15.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "@mulmoclaude/core": "3.15.0",
+    "eslint": "^9.0.0",
+    "prettier": "^3.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.9.0",
+    "typescript-eslint": "^8.0.0"
+  }
+}

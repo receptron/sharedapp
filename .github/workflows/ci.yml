@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: ["22.x", "24.x"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: yarn install --frozen-lockfile
+      - run: yarn format:check
+      - run: yarn lint
+      - run: yarn typecheck
+      - run: yarn test
+
+  # Consumers install this by git ref, which runs `prepare` on THEIR machine.
+  # A build that only works with the repo's own node_modules already present
+  # would break every `yarn install` in MulmoTerminal and MulmoServer, and it
+  # would break there rather than here.
+  consumable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+      - run: yarn install --frozen-lockfile
+      - run: yarn pack --filename package.tgz
+      - run: tar -tzf package.tgz | grep -q 'package/dist/index.js'
+      - run: tar -tzf package.tgz | grep -q 'package/dist/index.d.ts'
