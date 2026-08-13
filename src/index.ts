@@ -25,8 +25,15 @@
 // documents tell a page what exists so it can draw the controls that work, and
 // let a refusal name itself instead of arriving as a bare permission error.
 //
-// Distributed by git ref, never npm — an npm release would put back the human
-// publish gate this module exists to remove.
+// PUBLISHED TO npm, and that is not the gate this module escaped. It was going
+// to be a git ref — pin a sha, `prepare` builds on install, nobody publishes
+// anything — and MulmoTerminal makes that impossible: it is itself an npm
+// package (`npx mulmoterminal`) shipping `server/`, which imports this at
+// runtime, so a git dependency would make every end user clone this repository
+// and run `tsc` before their terminal starts. Releasing THIS is one package
+// with no dependents to bump, no peer ranges and no e2e matrix; releasing
+// `@mulmoclaude/core` was eight packages and a full CI run, and every
+// `app.json` key paid it.
 //
 // Design: mulmoterminal `plans/refactor-shared-app-module.md`
 

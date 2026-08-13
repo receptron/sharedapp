@@ -299,6 +299,20 @@ test("selfUpdate without a statusField denies every self-edit", () => {
   );
 });
 
+test("a participant submission with nobody on the roster refuses every submission", () => {
+  // The rules resolve the submitter's role from `members` before they look at
+  // anything else, so an empty roster is not a smaller app — it is a form that
+  // silently rejects everyone who fills it in. A fail-closed trap, and the
+  // author is never the person who hits it.
+  const roster = {
+    collections: { answers: { submitOnly: true } },
+    public: { submit: { answers: { auth: "verifiedEmail", createFields: ["a"], audience: "participant" } } },
+  };
+  refuses(publishProblems(app({ ...roster, members: {} }), CIDS, OWNER), "the roster is empty");
+  // The same declaration with somebody on the roster publishes.
+  assert.deepEqual(problemsFor(roster), []);
+});
+
 test("revealGated needs the parent it reads the flag off", () => {
   refuses(problemsFor({ collections: { answers: { revealGated: true } } }), "revealGated needs both gatedFrom and revealBy");
   assert.deepEqual(problemsFor({ collections: { answers: { revealGated: true, gatedFrom: "responses", revealBy: "revealed" } } }), []);
@@ -625,6 +639,20 @@ test("refuses a mirror of itself and a mirror of nothing", () => {
       draft.collections.slots = {};
     }),
     "not a shared collection",
+  );
+});
+
+test("refuses a projection whose authority is not a collection here", () => {
+  // The other direction from the test above: `mirror` names the projection,
+  // `mirrorOf` names the authority, and this is the authority half. Nothing can
+  // be true of a collection that does not exist, so the rules would never let
+  // the projection's `state` be written at all — the public page keeps
+  // advertising whatever it last said.
+  refuses(
+    salon((draft) => {
+      draft.collections.slots.mirrorOf = "ghosts";
+    }),
+    "collections.slots.mirrorOf names 'ghosts'",
   );
 });
 

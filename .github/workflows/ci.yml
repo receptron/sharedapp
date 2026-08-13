@@ -22,10 +22,10 @@ jobs:
       - run: yarn typecheck
       - run: yarn test
 
-  # Consumers install this by git ref, which runs `prepare` on THEIR machine.
-  # A build that only works with the repo's own node_modules already present
-  # would break every `yarn install` in MulmoTerminal and MulmoServer, and it
-  # would break there rather than here.
+  # Consumers get `dist/` from the published tarball and never build it, so a
+  # `files` list or a `prepublishOnly` that stopped emitting would ship an
+  # empty package — MulmoTerminal's `server/` imports this at runtime, so it
+  # would break on `npx mulmoterminal` rather than here.
   consumable:
     runs-on: ubuntu-latest
     steps:
