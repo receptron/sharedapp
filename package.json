@@ -1,6 +1,7 @@
 {
   "name": "sharedapp",
   "version": "0.1.0",
+  "private": true,
   "description": "The shared-app compiler: app.json to Firestore documents, and what publish refuses.",
   "license": "MIT",
   "repository": {
@@ -21,12 +22,13 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "prepare": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p test/tsconfig.json --noEmit",
-    "test": "tsx --test ./test/test_*.ts",
-    "lint": "eslint src test",
     "format": "prettier --write \"{src,test}/**/*.ts\" \"*.{json,md}\"",
-    "format:check": "prettier --check \"{src,test}/**/*.ts\" \"*.{json,md}\""
+    "format:check": "prettier --check \"{src,test}/**/*.ts\" \"*.{json,md}\"",
+    "lint": "eslint src test",
+    "prepare": "tsc -p tsconfig.json",
+    "prepublishOnly": "node -e \"console.error('sharedapp is distributed by git ref, never npm. Consumers pin git+https://github.com/receptron/sharedapp.git#<sha> and prepare builds on install. Publishing would put back the human release gate this module exists to remove. See README.'); process.exit(1)\"",
+    "test": "tsx --test ./test/test_*.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p test/tsconfig.json --noEmit"
   },
   "dependencies": {
     "zod": "^4.1.13"

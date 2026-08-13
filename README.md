@@ -21,7 +21,9 @@ MulmoClaude itself used none of this code: it neither writes nor reads a shared
 collection.
 
 So it is distributed by **git ref, never npm**. An npm release would put back the exact
-gate this module exists to remove.
+gate this module exists to remove — which is why `package.json` is `private` and
+`prepublishOnly` refuses. **Do not publish this.** There is nothing to publish: consumers
+pin a sha, and `prepare` builds on their machine.
 
 ```json
 "sharedapp": "github:receptron/sharedapp#<sha>"
