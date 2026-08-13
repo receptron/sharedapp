@@ -13,7 +13,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { projectDeploy, projectPublish, promoteSchema, appSchemasPath, appStagingPath } from "../src/publishProject.js";
+import {
+  projectDeploy,
+  projectPublish,
+  promoteSchema,
+  appSchemasPath,
+  appStagingPath,
+  appConfigPath,
+  appViewTierPath,
+  viewConfigDocId,
+} from "../src/publishProject.js";
 import { parseAuthoredApp } from "../src/publishManifest.js";
 import { CollectionSchemaZ } from "@mulmoclaude/core/collection/server";
 
@@ -95,6 +104,38 @@ test("staged and published schemas live at separate paths", () => {
   // A field beside `publishedSchema` could not work: rules cannot hide a field,
   // so a draft inside a document the public page reads is a published draft.
   assert.notEqual(appStagingPath(app.aid), appSchemasPath(app.aid));
+});
+
+test("every parent under the app is a place of its own", () => {
+  // These are the addresses `firestore.rules` matches on, and each one carries a
+  // DIFFERENT audience: `config` is world-readable, `member` needs a role,
+  // `roster` needs only to be listed, `staging` and `collections` are the draft
+  // and the published schema. Two of them colliding would not fail loudly — it
+  // would publish one audience's documents under another's rule.
+  const parents = [
+    appStagingPath(app.aid),
+    appSchemasPath(app.aid),
+    appConfigPath(app.aid),
+    appViewTierPath(app.aid, "member"),
+    appViewTierPath(app.aid, "roster"),
+  ];
+  assert.equal(new Set(parents).size, parents.length, `two parents collide: ${parents.join(", ")}`);
+  for (const parent of parents) assert.ok(parent.startsWith(`apps/${app.aid}/`), `${parent} is not under the app`);
+});
+
+test("the staff tier and the roster tier are not the same place", () => {
+  // Named separately because it is the collision that matters: a rule cannot
+  // hide a field, so a staff page landing where participants read IS the leak —
+  // the addresses are the only thing keeping the two audiences apart.
+  assert.notEqual(appViewTierPath(app.aid, "member"), appViewTierPath(app.aid, "roster"));
+});
+
+test("a tier's projection carries the stage, so a draft never overwrites the live one", () => {
+  // The projection tells a page which datasets its view may query. Publishing a
+  // staged one over the live document would hand every current reader the
+  // draft's answer before anyone published it.
+  assert.notEqual(viewConfigDocId("live"), viewConfigDocId("staged"));
+  assert.equal(viewConfigDocId("live"), "live:config");
 });
 
 test("deploy carries the live public face through, because the write REPLACES", () => {
