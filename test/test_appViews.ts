@@ -290,6 +290,19 @@ test("the statuses a submitter may withdraw from reach the participant tier only
   assert.equal(writeOf(withdrawable, "member")[0]?.selfDelete, undefined);
 });
 
+test("the collection a withdrawal must reopen travels with the permission", () => {
+  // The rules refuse a delete that leaves the mirror saying `taken`, so the
+  // page needs the name of the collection to reopen — with the permission and
+  // without it, every withdrawal it draws is refused.
+  const slotted = salon({
+    public: { submit: { bookings: { ...SALON_PUBLIC.submit.bookings, mirror: "slots", selfDelete: ["pending"] } } },
+  });
+  assert.equal(writeOf(slotted, "roster")[0]?.withdrawMirror, "slots");
+  // An app with no contested slot has no mirror, and the key stays off.
+  const plain = salon({ public: { submit: { bookings: { ...SALON_PUBLIC.submit.bookings, selfDelete: ["pending"] } } } });
+  assert.equal(writeOf(plain, "roster")[0]?.withdrawMirror, undefined);
+});
+
 test("withdrawal with no status field to read it against is nothing", () => {
   // The rules take the CURRENT status off the record before consulting the
   // list, so the key without a field grants nothing however it is written —

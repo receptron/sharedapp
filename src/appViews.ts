@@ -295,6 +295,13 @@ export interface ProjectedViewWrite {
    *  about is real: the row is gone afterwards, and with `mirror` the slot is
    *  back on the grid. */
   selfDelete?: string[];
+  /** The projection collection the withdrawal must reopen IN THE SAME BATCH
+   *  (`public.submit[cid].mirror`). Rides with `selfDelete` and only with it:
+   *  the rules refuse a delete that leaves the mirror saying `taken`, so a page
+   *  handed the permission and not the collection name can only ever produce a
+   *  refusal. Absent when the app declares no mirror, which is the ordinary
+   *  case for anything that is not a contested slot. */
+  withdrawMirror?: string;
 }
 
 /** The role a member holds on one collection, by the rules' own resolution:
@@ -367,9 +374,11 @@ function transitionPart(app: AuthoredApp, audience: Exclude<ViewAudience, "publi
  *  record before consulting the list, so a collection without one grants
  *  nothing however the key is written (publish refuses that pair). */
 function withdrawPart(app: AuthoredApp, audience: Exclude<ViewAudience, "public">, cid: string): Partial<ProjectedViewWrite> {
-  const selfDelete = app.public?.submit?.[cid]?.selfDelete;
+  const submit = app.public?.submit?.[cid];
+  const selfDelete = submit?.selfDelete;
   if (audience !== "participant" || selfDelete === undefined || app.collections?.[cid]?.statusField === undefined) return {};
-  return { selfDelete };
+  if (submit?.mirror === undefined) return { selfDelete };
+  return { selfDelete, withdrawMirror: submit.mirror };
 }
 
 function assignPart(app: AuthoredApp, audience: Exclude<ViewAudience, "public">, cid: string): Partial<ProjectedViewWrite> {
