@@ -285,6 +285,16 @@ export interface ProjectedViewWrite {
   /** `member` tier only: the rules let only a writer (or the row's own
    *  assignee) queue mail, so a participant handed this could only be refused. */
   mail?: AuthoredMail;
+  /** The statuses a submitter may DELETE their own row from
+   *  (`public.submit[cid].selfDelete`). `roster` tier only: the rules answer a
+   *  withdrawal from the RECORD, and staff already delete by role.
+   *
+   *  It rides beside `transitions` rather than inside it because it is not a
+   *  move — there is no `to`. A page reading it draws "withdraw" where the
+   *  transitions draw "cancel", and the difference the reader is being asked
+   *  about is real: the row is gone afterwards, and with `mirror` the slot is
+   *  back on the grid. */
+  selfDelete?: string[];
 }
 
 /** The role a member holds on one collection, by the rules' own resolution:
@@ -352,6 +362,16 @@ function transitionPart(app: AuthoredApp, audience: Exclude<ViewAudience, "publi
  *  `rowWriters` rides here rather than beside `writers`, because the
  *  `assignee` role grants nothing at all without a field to compare against
  *  (`isAssigned` in the rules requires one, and publish refuses the pair). */
+/** The withdrawal half. `roster` only, and only where the collection has a
+ *  status field to read it against — the rules take the CURRENT status off the
+ *  record before consulting the list, so a collection without one grants
+ *  nothing however the key is written (publish refuses that pair). */
+function withdrawPart(app: AuthoredApp, audience: Exclude<ViewAudience, "public">, cid: string): Partial<ProjectedViewWrite> {
+  const selfDelete = app.public?.submit?.[cid]?.selfDelete;
+  if (audience !== "participant" || selfDelete === undefined || app.collections?.[cid]?.statusField === undefined) return {};
+  return { selfDelete };
+}
+
 function assignPart(app: AuthoredApp, audience: Exclude<ViewAudience, "public">, cid: string): Partial<ProjectedViewWrite> {
   const assigneeField = app.collections?.[cid]?.assigneeField;
   if (audience !== "member" || assigneeField === undefined) return {};
@@ -365,7 +385,7 @@ function assignPart(app: AuthoredApp, audience: Exclude<ViewAudience, "public">,
  *  it; they agree that the status field is the collection's, since the rules
  *  read one field either way. */
 export function writeFor(app: AuthoredApp, audience: Exclude<ViewAudience, "public">, cid: string): ProjectedViewWrite | null {
-  const write: ProjectedViewWrite = { cid, ...transitionPart(app, audience, cid), ...assignPart(app, audience, cid) };
+  const write: ProjectedViewWrite = { cid, ...transitionPart(app, audience, cid), ...assignPart(app, audience, cid), ...withdrawPart(app, audience, cid) };
   if (Object.keys(write).length === 1) return null;
   // Only the staff tier: a participant writes their own row, which the rules
   // answer from the record rather than from a role, and publishing the roster's

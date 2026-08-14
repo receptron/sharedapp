@@ -280,6 +280,40 @@ test("the assignee role with no field to compare grants nothing, and says so", (
   assert.deepEqual(staff[0]?.writers, [OWNER, RECEPTION].sort(), "the unscoped writers are still named");
 });
 
+test("the statuses a submitter may withdraw from reach the participant tier only", () => {
+  // Staff already delete by role, and the rules answer a withdrawal from the
+  // RECORD — so this belongs to the tier whose reader owns the row.
+  const withdrawable = salon({
+    public: { submit: { bookings: { ...SALON_PUBLIC.submit.bookings, selfDelete: ["pending"] } } },
+  });
+  assert.deepEqual(writeOf(withdrawable, "roster")[0]?.selfDelete, ["pending"]);
+  assert.equal(writeOf(withdrawable, "member")[0]?.selfDelete, undefined);
+});
+
+test("withdrawal with no status field to read it against is nothing", () => {
+  // The rules take the CURRENT status off the record before consulting the
+  // list, so the key without a field grants nothing however it is written —
+  // and a projected list would draw a button that is always refused.
+  const noField = salon({
+    collections: { bookings: {} },
+    public: { submit: { bookings: { ...SALON_PUBLIC.submit.bookings, selfDelete: ["pending"] } } },
+  });
+  assert.deepEqual(writeOf(noField, "roster"), []);
+});
+
+test("withdrawal alone is enough to publish an entry", () => {
+  // `writeFor` returns null when nothing is writable. A collection whose only
+  // participant-side power is giving the row back still needs its entry, or
+  // the page is handed nothing and draws no button.
+  const onlyWithdraw = salon({
+    collections: { bookings: { statusField: "status", transitions: { initial: ["pending"] } } },
+    public: { submit: { bookings: { auth: "verifiedEmail", emailField: "email", createFields: ["email"], selfDelete: ["pending"] } } },
+  });
+  const theirs = writeOf(onlyWithdraw, "roster");
+  assert.deepEqual(theirs[0]?.selfDelete, ["pending"]);
+  assert.equal(theirs[0]?.transitions, undefined);
+});
+
 test("the mail a transition queues reaches the staff tier only", () => {
   // The rules let only a writer (or the row's own assignee) queue mail, so a
   // participant handed this could only ever be refused.

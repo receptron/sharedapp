@@ -283,18 +283,48 @@ function submitCoherenceProblems(app: AuthoredApp, cid: string, submit: Authored
     );
   }
   problems.push(...fieldIdProblems(cid, submit));
-  if ((submit.selfUpdate !== undefined || submit.selfTransitions !== undefined) && !collection?.statusField) {
+  if ((submit.selfUpdate !== undefined || submit.selfTransitions !== undefined || submit.selfDelete !== undefined) && !collection?.statusField) {
     problems.push(
-      `public.submit.${cid}.selfUpdate / selfTransitions are declared per CURRENT STATUS, but collections.${cid} declares no statusField: ` +
+      `public.submit.${cid}.selfUpdate / selfTransitions / selfDelete are declared per CURRENT STATUS, but collections.${cid} declares no statusField: ` +
         "the rules read the current status first and refuse every self-edit without it.",
     );
   }
+  problems.push(...selfDeleteProblems(cid, submit, collection));
   if (submit.audience === "participant" && Object.keys(app.members).length === 0) {
     problems.push(
       `public.submit.${cid}.audience is "participant" but the roster is empty: the rules resolve the submitter's role from members, so every submission is refused.`,
     );
   }
   return problems;
+}
+
+/** `selfDelete` names statuses, and a status nothing can reach grants nothing.
+ *
+ *  Worth refusing rather than leaving to the author to notice, because the
+ *  declaration and its silence look identical from the outside: the page draws
+ *  no withdraw button, the rules refuse the write, and the only symptom is a
+ *  member ringing the desk about a slot they cannot give back. The same is
+ *  true of the empty list, which reads as "yes, they may" and means the
+ *  opposite.
+ *
+ *  Reachability is judged against the collection's own table, not against
+ *  `selfTransitions`: a booking the desk approved is somewhere the submitter
+ *  never moved it to, and withdrawing from THERE is a normal thing to allow. */
+function selfDeleteProblems(cid: string, submit: AuthoredSubmit, collection: AuthoredCollectionConfig | undefined): string[] {
+  const states = submit.selfDelete;
+  if (states === undefined) return [];
+  if (states.length === 0) {
+    return [`public.submit.${cid}.selfDelete is an empty list, which allows nothing. Name the statuses a submitter may withdraw from, or remove the key.`];
+  }
+  const transitions = collection?.transitions;
+  if (transitions === undefined) return [];
+  const reachable = new Set(Object.values(transitions).flat());
+  const unreachable = states.filter((state) => !reachable.has(state));
+  if (unreachable.length === 0) return [];
+  return [
+    `public.submit.${cid}.selfDelete names ${unreachable.map((state) => `"${state}"`).join(", ")}, ` +
+      `which collections.${cid}.transitions never reaches: no record is ever in that status, so the declaration allows nothing.`,
+  ];
 }
 
 /** `idFrom: "field"` makes the document id a CLAIM ABOUT ANOTHER RECORD, and
