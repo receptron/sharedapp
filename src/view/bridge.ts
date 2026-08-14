@@ -16,18 +16,31 @@ import { VIEW_MESSAGE } from "./protocol.js";
 // NO FRAMEWORK. This module held three `ref`s when it lived in mulmoserver, and
 // keeping them would have made a compiler package depend on Vue — which the two
 // hosts resolve separately, and two copies of Vue in one page is a reactivity
-// bug that reads as "the confirmation never appears". So the state cells are
-// INJECTED: a host passes whatever its templates already track, and `Ref<T>`
-// satisfies `Signal<T>` structurally. Nothing here reads `.value` in a way that
-// depends on which framework produced it.
+// bug that reads as "the confirmation never appears".
+//
+// So the HOST OWNS THE CELLS and passes them in. Not a factory: a factory would
+// hand them back widened to `Signal<T>`, and a Vue template only unwraps a real
+// `Ref` — the confirmation panel would have bound to an object with a `.value`
+// on it and rendered nothing, which is the failure this whole module exists to
+// prevent. Passing the cells in leaves their host types where the host can see
+// them, and leaves this module owning only the rules.
 
 /** One observable cell, as this module needs it. Vue's `Ref<T>` is one. */
 export interface Signal<T> {
   value: T;
 }
 
-/** How a host makes one. Passed in rather than imported, per the note above. */
-export type SignalFactory = <T>(initial: T) => Signal<T>;
+/** Everything this bridge tracks, created by the host so the host's own
+ *  templates can bind to it. */
+export interface BridgeCells {
+  /** A submission awaiting the visitor's answer, drawn as the confirmation. */
+  pending: Signal<PendingSubmit | null>;
+  /** A write in flight. Not derived from `pending`: it is what makes decline
+   *  refuse, and the two must not be able to disagree. */
+  sending: Signal<boolean>;
+  /** The document in the frame has answered on the channel. */
+  readied: Signal<boolean>;
+}
 
 /** The error, as a string, without deciding what to do about it. Kept private
  *  and tiny rather than shared: every host already has this three-line function
@@ -84,8 +97,7 @@ const refusalFor = (read: SubmitRead, open: boolean): { requestId: string; reaso
 
 /** Answering the frame: the two messages the parent sends, and the rule that
  *  state is only ever sent to a view that asked for it once. */
-const replies = (ports: BridgePorts, nonce: () => string, signal: SignalFactory) => {
-  const readied = signal(false);
+const replies = (ports: BridgePorts, nonce: () => string, readied: Signal<boolean>) => {
   /** The channel, once the document that received it has answered on it. */
   let open: Channel | null = null;
   /** Offered and not yet answered. Kept so a second `ready` does not offer
@@ -152,7 +164,7 @@ const replies = (ports: BridgePorts, nonce: () => string, signal: SignalFactory)
     readied.value = false;
   };
 
-  return { readied, answer, sendState, greet, forget };
+  return { answer, sendState, greet, forget };
 };
 
 /** Everything that arrives FROM the frame, both ways in.
@@ -197,10 +209,9 @@ const incoming = (deps: {
   };
 };
 
-export const viewBridge = (ports: BridgePorts, config: () => ViewSubmitConfig | null, nonce: () => string, signal: SignalFactory) => {
-  const pending = signal<PendingSubmit | null>(null);
-  const sending = signal(false);
-  const { readied, answer, sendState, greet, forget } = replies(ports, nonce, signal);
+export const viewBridge = (ports: BridgePorts, config: () => ViewSubmitConfig | null, nonce: () => string, cells: BridgeCells) => {
+  const { pending, sending } = cells;
+  const { answer, sendState, greet, forget } = replies(ports, nonce, cells.readied);
 
   /** One place where a confirmation stops being open, so the two refs cannot
    *  drift apart. */
@@ -252,5 +263,7 @@ export const viewBridge = (ports: BridgePorts, config: () => ViewSubmitConfig | 
     forget();
   };
 
-  return { pending, sending, readied, receive, accept, decline, sendState, restart };
+  // The cells are NOT returned. The host made them and already holds them;
+  // handing them back would only invite a second name for one cell.
+  return { receive, accept, decline, sendState, restart };
 };

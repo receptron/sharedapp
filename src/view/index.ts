@@ -29,5 +29,5 @@ export {
   type ViewDataset,
   type ViewSubmitConfig,
 } from "./message.js";
-export { viewBridge, type BridgePorts, type Channel, type Signal, type SignalFactory } from "./bridge.js";
+export { viewBridge, type BridgeCells, type BridgePorts, type Channel, type Signal } from "./bridge.js";
 export { portChannel, asIs, type Cloneable } from "./channel.js";
