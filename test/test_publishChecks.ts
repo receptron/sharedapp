@@ -299,6 +299,56 @@ test("selfUpdate without a statusField denies every self-edit", () => {
   );
 });
 
+test("selfDelete without a statusField denies every withdrawal", () => {
+  // Same shape as selfUpdate above: the rules read the CURRENT status first.
+  refuses(
+    problemsFor({
+      collections: { bookings: {} },
+      public: { submit: { bookings: { auth: "verifiedEmail", createFields: ["a"], selfDelete: ["pending"] } } },
+    }),
+    "declares no statusField",
+  );
+});
+
+test("selfDelete naming a status nothing reaches allows nothing", () => {
+  // The declaration and its absence look identical from outside — no button,
+  // a refused write — and the author is never the person holding the phone.
+  refuses(
+    problemsFor({
+      collections: { bookings: { statusField: "status", transitions: { initial: ["pending"], pending: ["cancelled"] } } },
+      public: { submit: { bookings: { auth: "verifiedEmail", createFields: ["status"], selfDelete: ["withdrawn"] } } },
+    }),
+    "never reaches",
+  );
+});
+
+test("selfDelete with no statuses at all is refused rather than read as yes", () => {
+  refuses(
+    problemsFor({
+      collections: { bookings: { statusField: "status", transitions: { initial: ["pending"] } } },
+      public: { submit: { bookings: { auth: "verifiedEmail", createFields: ["status"], selfDelete: [] } } },
+    }),
+    "allows nothing",
+  );
+});
+
+test("selfDelete from a status only the STAFF can reach is allowed", () => {
+  // Reachability is judged against the collection's table, not the
+  // submitter's: withdrawing a booking the desk approved is the normal case,
+  // and judging it against selfTransitions would refuse exactly that.
+  assert.deepEqual(
+    problemsFor({
+      collections: { bookings: { statusField: "status", transitions: { initial: ["pending"], pending: ["approved"] } } },
+      public: {
+        submit: {
+          bookings: { auth: "verifiedEmail", createFields: ["status"], selfTransitions: { pending: ["cancelled"] }, selfDelete: ["approved"] },
+        },
+      },
+    }),
+    [],
+  );
+});
+
 test("a participant submission with nobody on the roster refuses every submission", () => {
   // The rules resolve the submitter's role from `members` before they look at
   // anything else, so an empty roster is not a smaller app — it is a form that

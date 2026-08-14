@@ -256,6 +256,19 @@ const SubmitZ = z
      *  an approved booking's `startAt` without anyone re-approving it. */
     selfUpdate: z.record(z.string().trim().min(1), z.array(z.string().trim().min(1))).optional(),
     selfTransitions: z.record(z.string().trim().min(1), z.array(z.string().trim().min(1))).optional(),
+    /** The statuses a submitter may DELETE their own row from.
+     *
+     *  Per status like the two above, and for a sharper reason: with
+     *  `idFrom: "field"` the record's id IS the exclusivity, so a cancelled
+     *  booking goes on holding the slot it no longer wants. This is the only
+     *  declaration that gives the slot back without an operator.
+     *
+     *  What it spends is the record. The row is gone — no history of who
+     *  withdrew and when, and no `mail` can be bound to the move, because the
+     *  queue rule reads the document AFTER the write and there is none. An app
+     *  that would rather keep the record names no status here and sends its
+     *  members to the desk. */
+    selfDelete: z.array(z.string().trim().min(1)).optional(),
     finalize: z.boolean().optional(),
     audience: z.literal("participant").optional(),
     gateOn: z
