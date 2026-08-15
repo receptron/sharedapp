@@ -24,6 +24,10 @@
 //   a declared MIRROR must travel in the same write. The rules read it with `getAfter()`, so a
 //   mirror written singly is refused — safely, and with nothing to tell the person about it.
 //
+//   the SERVER'S CLOCK is what decides a queue. `stampField` is checked on every create
+//   (`stampOk` in `firestore.rules`), so a record without it is refused — and the value cannot come
+//   from the page, because a page that could write it could write yesterday into it.
+//
 // Design: mulmoterminal `plans/feat-shared-app-preview.md` section 5.
 
 /** What this needs from the signed-in account, and nothing more. */
@@ -47,6 +51,12 @@ export interface SubmitSpec {
   idField?: string | undefined;
   /** A collection whose same-id record is flipped to `taken` by the SAME write. */
   mirror?: string | undefined;
+  /** The field the rules pin to the SERVER's clock on create, and freeze afterwards.
+   *
+   *  Declared, every create must carry it — the writer branch included — so a host that does not
+   *  fill it in writes a record the rules refuse, with nothing on the page to say which field it
+   *  was. `recordOf` is the one place it is filled in, for that reason. */
+  stampField?: string | undefined;
 }
 
 /** One collection's published form: what a page may draw, and the field publish pinned meaning to. */
@@ -81,14 +91,35 @@ export const writableFields = (drawn: DrawnForm, createFields: readonly string[]
 export const missingRequired = (fields: readonly WritableField[], values: Record<string, string>): string[] =>
   fields.filter((field) => field.required && (values[field.name] ?? "") === "").map((field) => field.label);
 
-/** The document to write: the fields the declaration allows, plus the two the rules stamp meaning
- *  onto. An empty value is OMITTED rather than written as `""` — the rules test presence. */
+/** The value this host writes where the rules require the SERVER's clock — Firestore's
+ *  `serverTimestamp()` in both hosts today.
+ *
+ *  A function rather than a value, and injected rather than imported: this module is pure and has
+ *  no Firestore in it (see the note at the top of `./index.ts`), and a sentinel is produced by the
+ *  SDK the host resolved. Called only where the declaration asks for one, so a host with no
+ *  submission to stamp never has to produce it. */
+export type ServerTime = () => unknown;
+
+/** The document to write: the fields the declaration allows, plus the three the rules stamp
+ *  meaning onto. An empty value is OMITTED rather than written as `""` — the rules test presence.
+ *
+ *  `serverTime` is REQUIRED rather than optional, and that is the whole of the fix it arrived with.
+ *  Optional, a host that simply did not pass it would go on building a record that looks complete
+ *  and is refused by `stampOk` on every create — which is what shipped: `stampField` was declared,
+ *  checked at publish, published to `config/public`, and then written by nobody, so a first-come
+ *  app refused every public submission with "Missing or insufficient permissions" and named
+ *  nothing. Required, a host that has not decided cannot compile.
+ *
+ *  The stamp goes on LAST. It is kept out of the drawn form by publish, so nothing should be able
+ *  to carry a value for it — and if something ever does, the server's clock is the one that has to
+ *  win, because it is the one the rules compare against. */
 export const recordOf = (
   fields: readonly WritableField[],
   drawn: DrawnForm,
   submit: SubmitSpec,
   values: Record<string, string>,
   account: Submitter | null,
+  serverTime: ServerTime,
 ): Record<string, unknown> => {
   const written = fields.flatMap((field) => {
     const value = values[field.name] ?? "";
@@ -96,7 +127,8 @@ export const recordOf = (
   });
   const email = submit.emailField !== undefined && account?.email != null ? [[submit.emailField, account.email] as const] : [];
   const status = submit.initialStatus !== undefined && drawn.statusField !== undefined ? [[drawn.statusField, submit.initialStatus] as const] : [];
-  return Object.fromEntries([...written, ...email, ...status]);
+  const stamp = submit.stampField !== undefined ? [[submit.stampField, serverTime()] as const] : [];
+  return Object.fromEntries([...written, ...email, ...status, ...stamp]);
 };
 
 /** The record's value for a field, as the rules would read it. A non-string is empty rather than
