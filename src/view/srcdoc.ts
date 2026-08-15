@@ -131,7 +131,17 @@ const channelScript = (): string => `
  *  A host that merely EXPLAINS `notices-dropped` to a reader should not quote
  *  this figure: the runtime deploys separately from anything that republished
  *  the page, so a number copied into prose is one that can be out of date while
- *  looking authoritative. */
+ *  looking authoritative.
+ *
+ *  PART OF THE CONTRACT rather than a tuning knob, which is why it is exported
+ *  at all: a host that keeps notices has to bound its own storage against an
+ *  untrusted page, and the only alternative to reading this is guessing — a
+ *  guess one too small drops the marker, which is the one message that says the
+ *  list is incomplete.
+ *
+ *  IT MUST BE AT LEAST 2. One is spent on the marker, so a value of 1 reports
+ *  nothing but "the rest were not sent" and a value of 0 reports nothing at
+ *  all, silently — which is the failure this whole file exists to remove. */
 export const MAX_NOTICES = 20;
 
 /** The half that reports the frame to the parent: the failures a sandbox
