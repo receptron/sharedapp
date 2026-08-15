@@ -17,7 +17,7 @@
 //
 // Design: mulmoterminal `plans/feat-shared-app-preview.md`, section 1.
 export { VIEW_MESSAGE } from "./protocol.js";
-export { publicViewBootstrap, publicViewSrcdoc, viewNonce } from "./srcdoc.js";
+export { MAX_NOTICES, publicViewBootstrap, publicViewSrcdoc, viewNonce } from "./srcdoc.js";
 export {
   isReady,
   isRecord,

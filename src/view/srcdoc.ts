@@ -115,20 +115,24 @@ const channelScript = (): string => `
   });
 `;
 
-/** How many notices ONE document may send.
+/** The most messages ONE document can send, the overflow marker INCLUDED.
  *
  *  A page whose `onState` throws on every row sends one per row; a loop that
  *  throws sends one per turn. The first few say what is wrong and the rest say
- *  it again, so the budget is small and the host is told when it ran out
+ *  it again, so there is a cap — and the host is told when it was reached
  *  (`notices-dropped`) rather than left with a list that looks complete.
  *
- *  EXPORTED so a host that keeps notices can size its own buffer against the
- *  most one document can produce, and so a test can drive the bootstrap past
- *  it. A host that merely explains `notices-dropped` to a reader should NOT
- *  quote this number: the runtime deploys separately from anything that
- *  republished the page, so a figure copied into a host's prose is one that
- *  can be out of date while looking authoritative. */
-export const NOTICE_BUDGET = 20;
+ *  THE MARKER COUNTS AGAINST IT, which is the whole reason this is phrased as a
+ *  maximum rather than as a budget for ordinary notices. A host sizing a buffer
+ *  to a number that excluded the marker would drop exactly the line that says
+ *  the list is incomplete — an incomplete list, silently, which is the failure
+ *  the marker exists to prevent. One number, and it is the true ceiling.
+ *
+ *  A host that merely EXPLAINS `notices-dropped` to a reader should not quote
+ *  this figure: the runtime deploys separately from anything that republished
+ *  the page, so a number copied into prose is one that can be out of date while
+ *  looking authoritative. */
+export const MAX_NOTICES = 20;
 
 /** The half that reports the frame to the parent: the failures a sandbox
  *  swallows.
@@ -161,12 +165,13 @@ const noticeScript = (): string => `
   const post = (code, detail) => {
     parent.postMessage({ type: ${JSON.stringify(VIEW_MESSAGE.notice)}, nonce, code, detail: String(detail).slice(0, ${NOTICE_DETAIL_LIMIT}) }, "*");
   };
-  let noticesLeft = ${NOTICE_BUDGET};
+  let noticesLeft = ${MAX_NOTICES};
+  // The LAST one is spent on saying the rest were dropped, so the total can
+  // never exceed the maximum a host sized its buffer to. A list that stops
+  // without saying so reads as the whole of what happened.
   const notify = (code, detail) => {
-    if (noticesLeft > 0) { noticesLeft -= 1; post(code, detail); return; }
-    // Once, on the way past the budget. A list that stops without saying so
-    // reads as the whole of what happened.
-    if (noticesLeft === 0) { noticesLeft = -1; post("notices-dropped", "more than ${NOTICE_BUDGET}; the rest were not sent"); }
+    if (noticesLeft > 1) { noticesLeft -= 1; post(code, detail); return; }
+    if (noticesLeft === 1) { noticesLeft = 0; post("notices-dropped", "one page may report ${MAX_NOTICES} times; the rest were not sent"); }
   };
   window.addEventListener("error", (event) => {
     const line = typeof event.lineno === "number" && event.lineno > 0 ? " (line " + event.lineno + ")" : "";

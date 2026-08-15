@@ -18,7 +18,7 @@ import vm from "node:vm";
 import { viewBridge, type BridgeCells, type Channel } from "../src/view/bridge.js";
 import { NOTICE_DETAIL_LIMIT, readNotice, type ViewNotice } from "../src/view/message.js";
 import { VIEW_MESSAGE } from "../src/view/protocol.js";
-import { NOTICE_BUDGET, publicViewBootstrap } from "../src/view/srcdoc.js";
+import { MAX_NOTICES, publicViewBootstrap } from "../src/view/srcdoc.js";
 
 const NONCE = "nonce-1";
 const notice = (fields: Record<string, unknown>) => ({ type: VIEW_MESSAGE.notice, nonce: NONCE, ...fields });
@@ -170,17 +170,18 @@ test("the running bootstrap says WHAT a promise was rejected with, not [object O
   );
 });
 
-test("a page in an error loop is cut off, and the cut is announced", () => {
+test("a page in an error loop is cut off, and the cut is announced WITHIN the maximum", () => {
   const frame = runBootstrap(NONCE);
-  for (let n = 0; n < NOTICE_BUDGET + 10; n += 1) frame.handlers.error?.({ message: `throw ${n}`, lineno: 1 });
+  for (let n = 0; n < MAX_NOTICES + 10; n += 1) frame.handlers.error?.({ message: `throw ${n}`, lineno: 1 });
   const notices = frame.notices();
-  // The budget's worth, then ONE line saying the rest were dropped, then silence. A list that
-  // stopped without saying so would read as the whole of what happened — and the ones kept are the
-  // earliest, which are usually the cause of the rest.
-  assert.equal(notices.length, NOTICE_BUDGET + 1);
+  // The marker is spent out of the same allowance, so a host that sized a buffer to `MAX_NOTICES`
+  // still receives it. Sized to a figure that excluded it, the host would drop exactly the line
+  // saying the list is incomplete — an incomplete list, silently, which is what the marker is for.
+  assert.equal(notices.length, MAX_NOTICES);
+  // The ones kept are the EARLIEST, which are usually the cause of the rest.
   assert.equal(notices[0]?.detail, "throw 0 (line 1)");
-  assert.equal(notices[NOTICE_BUDGET]?.code, "notices-dropped");
-  assert.ok(String(notices[NOTICE_BUDGET]?.detail).includes(String(NOTICE_BUDGET)));
+  assert.equal(notices[MAX_NOTICES - 1]?.code, "notices-dropped");
+  assert.equal(notices.filter((message) => message.code === "notices-dropped").length, 1);
 });
 
 test("the bootstrap still hands the page its bridge under both names", () => {
