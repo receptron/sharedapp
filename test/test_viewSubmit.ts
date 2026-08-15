@@ -38,6 +38,16 @@ test("the record carries what the visitor typed, their verified address and the 
   assert.deepEqual(record, { memberName: "A", memberEmail: "visitor@example.com", status: "requested" });
 });
 
+test("no address is written for a submission nobody signed in for", () => {
+  // `auth: "none"` is a mode the rules support, and `emailField` is filled from the ACCOUNT — so
+  // with nobody signed in the key has to be absent rather than empty. The rules read a public
+  // create with `hasOnly(createFields)` and compare the address to `request.auth.token.email`; an
+  // empty string would be a value that matches nobody.
+  assert.deepEqual(recordOf(fields(), drawn, submit, { memberName: "A" }, null, serverTime), { memberName: "A", status: "requested" });
+  const noAddress = { uid: "uid_visitor", email: null };
+  assert.deepEqual(recordOf(fields(), drawn, submit, { memberName: "A" }, noAddress, serverTime), { memberName: "A", status: "requested" });
+});
+
 test("a declared stampField is written, with the value the HOST produced", () => {
   // `stampOk` refuses a create unless the field is present AND equal to `request.time`, so a
   // record without this key is refused for every first-come app there is.
