@@ -17,16 +17,21 @@
 //
 // Design: mulmoterminal `plans/feat-shared-app-preview.md`, section 1.
 export { VIEW_MESSAGE } from "./protocol.js";
-export { publicViewBootstrap, publicViewSrcdoc, viewNonce } from "./srcdoc.js";
+export { MAX_NOTICES, publicViewBootstrap, publicViewSrcdoc, viewNonce } from "./srcdoc.js";
 export {
   isReady,
   isRecord,
+  NOTICE_DETAIL_LIMIT,
+  readNotice,
   readSubmitMessage,
+  VIEW_NOTICE_CODES,
   type PendingSubmit,
   type SubmitRead,
   type SubmitRefusal,
   type SubmitDeclaration,
   type ViewDataset,
+  type ViewNotice,
+  type ViewNoticeCode,
   type ViewSubmitConfig,
 } from "./message.js";
 export { viewBridge, type BridgeCells, type BridgePorts, type Channel, type Signal } from "./bridge.js";

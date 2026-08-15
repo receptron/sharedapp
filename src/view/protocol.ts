@@ -25,4 +25,15 @@ export const VIEW_MESSAGE = {
   /** The answer to a `submit` OR an `intent` — one name, because the view
    *  settles both from the same map keyed by `requestId`. */
   result: "mc-public-view:submitResult",
+  /** The frame reporting something about ITSELF that the browser would
+   *  otherwise swallow: an uncaught error, a rejected promise nobody handled,
+   *  a modal the sandbox ignores.
+   *
+   *  It travels on the WINDOW rather than the private channel, and that is the
+   *  whole point. The worst of these happen before `ready` — a script that
+   *  throws while the document is being parsed never calls it — so a notice
+   *  that waited for the port would be lost in exactly the case an author most
+   *  needs it. Nothing of the app's travels with it: it is page to parent, one
+   *  way, carrying only a fixed code and a short string. */
+  notice: "mc-public-view:notice",
 } as const;

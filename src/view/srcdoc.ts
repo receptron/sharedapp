@@ -1,3 +1,4 @@
+import { NOTICE_DETAIL_LIMIT } from "./message.js";
 import { VIEW_MESSAGE } from "./protocol.js";
 
 // What the sandboxed frame is handed: our bootstrap, then the author's HTML.
@@ -114,6 +115,92 @@ const channelScript = (): string => `
   });
 `;
 
+/** The most messages ONE document can send, the overflow marker INCLUDED.
+ *
+ *  A page whose `onState` throws on every row sends one per row; a loop that
+ *  throws sends one per turn. The first few say what is wrong and the rest say
+ *  it again, so there is a cap — and the host is told when it was reached
+ *  (`notices-dropped`) rather than left with a list that looks complete.
+ *
+ *  THE MARKER COUNTS AGAINST IT, which is the whole reason this is phrased as a
+ *  maximum rather than as a budget for ordinary notices. A host sizing a buffer
+ *  to a number that excluded the marker would drop exactly the line that says
+ *  the list is incomplete — an incomplete list, silently, which is the failure
+ *  the marker exists to prevent. One number, and it is the true ceiling.
+ *
+ *  A host that merely EXPLAINS `notices-dropped` to a reader should not quote
+ *  this figure: the runtime deploys separately from anything that republished
+ *  the page, so a number copied into prose is one that can be out of date while
+ *  looking authoritative.
+ *
+ *  PART OF THE CONTRACT rather than a tuning knob, which is why it is exported
+ *  at all: a host that keeps notices has to bound its own storage against an
+ *  untrusted page, and the only alternative to reading this is guessing — a
+ *  guess one too small drops the marker, which is the one message that says the
+ *  list is incomplete.
+ *
+ *  IT MUST BE AT LEAST 2. One is spent on the marker, so a value of 1 reports
+ *  nothing but "the rest were not sent" and a value of 0 reports nothing at
+ *  all, silently — which is the failure this whole file exists to remove. */
+export const MAX_NOTICES = 20;
+
+/** The half that reports the frame to the parent: the failures a sandbox
+ *  swallows.
+ *
+ *  Every one of these is invisible today, and each is invisible in its own way.
+ *  An uncaught error and a rejected promise stop at the frame boundary, so the
+ *  author sees a page that stopped halfway and nothing else. `alert`,
+ *  `confirm` and `prompt` do not even fail: without `allow-modals` the browser
+ *  ignores the call, `confirm` answers false, and the page carries on as though
+ *  the visitor had said no. That last one cost a real app a release — the
+ *  static check in MulmoTerminal (`modalCall.ts`) exists because of it, and it
+ *  can only catch spellings it knows. This catches the CALL.
+ *
+ *  The modals are REPLACED rather than watched, which is the only way to see
+ *  them, and the replacements return exactly what the sandbox returns:
+ *  `undefined`, `false`, `null`. A page cannot tell the difference, and it must
+ *  not be able to — a preview that behaved better here than production would be
+ *  worth less than none.
+ *
+ *  `detail` for a modal is the FUNCTION NAME and never the message. The author
+ *  greps their own HTML for `confirm(` and finds the line; the text inside it
+ *  is a sentence the page wrote, and this payload is built to be copied out of
+ *  the host and pasted somewhere else. Give it no more untrusted surface than
+ *  the diagnosis needs.
+ *
+ *  BOUNDED, both ways. A page in an error loop would otherwise post until the
+ *  parent gave up, so a fixed number go out and the rest are dropped — the
+ *  first ones are the ones that explain the others. */
+const noticeScript = (): string => `
+  const post = (code, detail) => {
+    parent.postMessage({ type: ${JSON.stringify(VIEW_MESSAGE.notice)}, nonce, code, detail: String(detail).slice(0, ${NOTICE_DETAIL_LIMIT}) }, "*");
+  };
+  let noticesLeft = ${MAX_NOTICES};
+  // The LAST one is spent on saying the rest were dropped, so the total can
+  // never exceed the maximum a host sized its buffer to. A list that stops
+  // without saying so reads as the whole of what happened.
+  const notify = (code, detail) => {
+    if (noticesLeft > 1) { noticesLeft -= 1; post(code, detail); return; }
+    if (noticesLeft === 1) { noticesLeft = 0; post("notices-dropped", "one page may report ${MAX_NOTICES} times; the rest were not sent"); }
+  };
+  window.addEventListener("error", (event) => {
+    const line = typeof event.lineno === "number" && event.lineno > 0 ? " (line " + event.lineno + ")" : "";
+    notify("error", (event.message || "an error with no message") + line);
+  });
+  window.addEventListener("unhandledrejection", (event) => {
+    // NOT String(reason). A promise may be rejected with anything, and the
+    // common non-Error case -- an object -- stringifies to "[object Object]",
+    // which costs a debugging round to learn nothing. Say what it WAS instead.
+    const reason = event.reason;
+    if (reason && typeof reason.message === "string" && reason.message !== "") { notify("unhandled-rejection", reason.message); return; }
+    if (typeof reason === "string" && reason !== "") { notify("unhandled-rejection", reason); return; }
+    notify("unhandled-rejection", "rejected with a " + (reason === null ? "null" : typeof reason) + " carrying no message");
+  });
+  window.alert = () => { notify("modal-ignored", "alert"); };
+  window.confirm = () => { notify("modal-ignored", "confirm"); return false; };
+  window.prompt = () => { notify("modal-ignored", "prompt"); return null; };
+`;
+
 export const publicViewBootstrap = (nonce: string): string => `
 <script>
 (() => {
@@ -128,6 +215,7 @@ export const publicViewBootstrap = (nonce: string): string => `
   let onState = () => {};
   let channel = null;
 ${channelScript()}
+${noticeScript()}
   const send = (message) => { if (channel) channel.postMessage(message); else parent.postMessage(message, "*"); };
   const request = (message) => {
     const requestId = String(Date.now()) + ":" + String(Math.random());

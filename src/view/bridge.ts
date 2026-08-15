@@ -1,4 +1,14 @@
-import { isReady, isRecord, readSubmitMessage, type PendingSubmit, type SubmitRead, type ViewDataset, type ViewSubmitConfig } from "./message.js";
+import {
+  isReady,
+  isRecord,
+  readNotice,
+  readSubmitMessage,
+  type PendingSubmit,
+  type SubmitRead,
+  type ViewDataset,
+  type ViewNotice,
+  type ViewSubmitConfig,
+} from "./message.js";
 import { VIEW_MESSAGE } from "./protocol.js";
 
 // The parent's side of the conversation with a sandboxed view.
@@ -78,6 +88,18 @@ export interface BridgePorts {
   channel: () => Channel;
   submit: (pending: PendingSubmit) => Promise<{ ok: boolean; error?: string }>;
   state: () => Record<string, ViewDataset>;
+  /** Somewhere to put what the frame says about itself — an uncaught error, a
+   *  rejected promise, a modal the sandbox ignored.
+   *
+   *  OPTIONAL, and the default of dropping them is the honest one: a notice is
+   *  only worth carrying if the host has somewhere to put it that a person will
+   *  read, and a host that keeps them where nobody looks has built a place for
+   *  personal data to accumulate rather than a diagnostic. The public page may
+   *  well never take this; the author's own preview is what it was built for.
+   *
+   *  What arrives has a code from a FIXED list and a bounded `detail` that the
+   *  PAGE wrote (see `ViewNotice`). It is not the parent's word. */
+  notice?: ((notice: ViewNotice) => void) | undefined;
 }
 
 /** Why this message will not become a confirmation, or null when it will.
@@ -183,6 +205,7 @@ const incoming = (deps: {
   pending: Signal<PendingSubmit | null>;
   answer: (requestId: string, ok: boolean, error?: string) => void;
   greet: (onRequest: (data: unknown) => void) => void;
+  notice: (notice: ViewNotice) => void;
 }) => {
   /** A submission the frame sent, once it is known to be one. */
   const offer = (read: SubmitRead) => {
@@ -201,6 +224,17 @@ const incoming = (deps: {
   const dispatch = (data: unknown) => offer(readSubmitMessage(data, deps.config()));
   /** A message that has already been proven to come from our frame. */
   return (data: unknown) => {
+    // BEFORE the handshake is even considered, because the notices that matter
+    // most arrive before it: a page whose script throws while the document is
+    // being parsed never reaches `ready()`, and that page — stuck on its
+    // loading state, with the reason inside the frame — is the one an author
+    // cannot otherwise diagnose. Read first, too, or `dispatch` would judge a
+    // notice as a submission and answer nobody.
+    const notice = readNotice(data, deps.nonce());
+    if (notice !== null) {
+      deps.notice(notice);
+      return;
+    }
     if (isReady(data, deps.nonce())) {
       deps.greet(dispatch);
       return;
@@ -220,7 +254,7 @@ export const viewBridge = (ports: BridgePorts, config: () => ViewSubmitConfig | 
     pending.value = null;
   };
 
-  const receive = incoming({ nonce, config, pending, answer, greet });
+  const receive = incoming({ nonce, config, pending, answer, greet, notice: (report) => ports.notice?.(report) });
 
   const accept = async () => {
     const request = pending.value;
