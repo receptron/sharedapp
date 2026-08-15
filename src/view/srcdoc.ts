@@ -1,3 +1,4 @@
+import { NOTICE_DETAIL_LIMIT } from "./message.js";
 import { VIEW_MESSAGE } from "./protocol.js";
 
 // What the sandboxed frame is handed: our bootstrap, then the author's HTML.
@@ -114,6 +115,65 @@ const channelScript = (): string => `
   });
 `;
 
+/** How many notices ONE document may send.
+ *
+ *  A page whose `onState` throws on every row sends one per row; a loop that
+ *  throws sends one per turn. The first few say what is wrong and the rest say
+ *  it again, so the budget is small and the host is told when it ran out
+ *  (`notices-dropped`) rather than left with a list that looks complete. */
+const NOTICE_BUDGET = 20;
+
+/** The half that reports the frame to the parent: the failures a sandbox
+ *  swallows.
+ *
+ *  Every one of these is invisible today, and each is invisible in its own way.
+ *  An uncaught error and a rejected promise stop at the frame boundary, so the
+ *  author sees a page that stopped halfway and nothing else. `alert`,
+ *  `confirm` and `prompt` do not even fail: without `allow-modals` the browser
+ *  ignores the call, `confirm` answers false, and the page carries on as though
+ *  the visitor had said no. That last one cost a real app a release — the
+ *  static check in MulmoTerminal (`modalCall.ts`) exists because of it, and it
+ *  can only catch spellings it knows. This catches the CALL.
+ *
+ *  The modals are REPLACED rather than watched, which is the only way to see
+ *  them, and the replacements return exactly what the sandbox returns:
+ *  `undefined`, `false`, `null`. A page cannot tell the difference, and it must
+ *  not be able to — a preview that behaved better here than production would be
+ *  worth less than none.
+ *
+ *  `detail` for a modal is the FUNCTION NAME and never the message. The author
+ *  greps their own HTML for `confirm(` and finds the line; the text inside it
+ *  is a sentence the page wrote, and this payload is built to be copied out of
+ *  the host and pasted somewhere else. Give it no more untrusted surface than
+ *  the diagnosis needs.
+ *
+ *  BOUNDED, both ways. A page in an error loop would otherwise post until the
+ *  parent gave up, so a fixed number go out and the rest are dropped — the
+ *  first ones are the ones that explain the others. */
+const noticeScript = (): string => `
+  const post = (code, detail) => {
+    parent.postMessage({ type: ${JSON.stringify(VIEW_MESSAGE.notice)}, nonce, code, detail: String(detail).slice(0, ${NOTICE_DETAIL_LIMIT}) }, "*");
+  };
+  let noticesLeft = ${NOTICE_BUDGET};
+  const notify = (code, detail) => {
+    if (noticesLeft > 0) { noticesLeft -= 1; post(code, detail); return; }
+    // Once, on the way past the budget. A list that stops without saying so
+    // reads as the whole of what happened.
+    if (noticesLeft === 0) { noticesLeft = -1; post("notices-dropped", "more than ${NOTICE_BUDGET}; the rest were not sent"); }
+  };
+  window.addEventListener("error", (event) => {
+    const line = typeof event.lineno === "number" && event.lineno > 0 ? " (line " + event.lineno + ")" : "";
+    notify("error", (event.message || "an error with no message") + line);
+  });
+  window.addEventListener("unhandledrejection", (event) => {
+    const reason = event.reason;
+    notify("unhandled-rejection", reason && reason.message ? reason.message : String(reason));
+  });
+  window.alert = () => { notify("modal-ignored", "alert"); };
+  window.confirm = () => { notify("modal-ignored", "confirm"); return false; };
+  window.prompt = () => { notify("modal-ignored", "prompt"); return null; };
+`;
+
 export const publicViewBootstrap = (nonce: string): string => `
 <script>
 (() => {
@@ -128,6 +188,7 @@ export const publicViewBootstrap = (nonce: string): string => `
   let onState = () => {};
   let channel = null;
 ${channelScript()}
+${noticeScript()}
   const send = (message) => { if (channel) channel.postMessage(message); else parent.postMessage(message, "*"); };
   const request = (message) => {
     const requestId = String(Date.now()) + ":" + String(Math.random());

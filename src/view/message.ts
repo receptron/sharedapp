@@ -119,3 +119,52 @@ export const readSubmitMessage = (data: unknown, config: ViewSubmitConfig | null
   }
   return declaredValues(message.values, submit.createFields, message.requestId, message.cid);
 };
+
+/** What a frame may say about ITSELF, and the only codes a parent will hear.
+ *
+ *  A FIXED list, matched exactly. The frame holds untrusted HTML, so `code`
+ *  arrives as an arbitrary string of arbitrary length — and a notice is built
+ *  to be copied out of the host and read by somebody else, often a language
+ *  model. Passing the page's own word through would hand it a writing surface
+ *  on the diagnostic itself. Anything unrecognised becomes `unknown`, which is
+ *  the host's word, not the page's. */
+export const VIEW_NOTICE_CODES = ["error", "unhandled-rejection", "modal-ignored", "notices-dropped"] as const;
+
+export type ViewNoticeCode = (typeof VIEW_NOTICE_CODES)[number] | "unknown";
+
+/** How much of `detail` survives.
+ *
+ *  The bootstrap already truncates, and this truncates again rather than
+ *  trusting it: a document that replaced the injected one can post straight to
+ *  the parent, and it is not running our bootstrap at all. */
+export const NOTICE_DETAIL_LIMIT = 300;
+
+export interface ViewNotice {
+  code: ViewNoticeCode;
+  /** PAGE-AUTHORED and untrusted — an exception's message is whatever the HTML
+   *  threw, and `throw new Error(someone@example.com)` is a sentence the page
+   *  chose. A host showing this to anyone but the author must drop it; a host
+   *  showing it to the author should mark where it came from. This module
+   *  bounds its LENGTH and nothing else, because what is safe to show is a
+   *  question about the reader, and the reader is the host's. */
+  detail: string;
+}
+
+const isNoticeCode = (value: unknown): value is ViewNoticeCode => VIEW_NOTICE_CODES.some((code) => code === value);
+
+/** A notice from the document we injected, or null.
+ *
+ *  Nonce-checked like `ready`, for the same reason and with a smaller
+ *  consequence: only the injected bootstrap knows the value, so only it can
+ *  report. A document that replaced it and guessed would gain the ability to
+ *  lie in a diagnostic — not to read anything. */
+export const readNotice = (data: unknown, nonce: string): ViewNotice | null => {
+  if (!isRecord(data) || data.type !== VIEW_MESSAGE.notice) {
+    return null;
+  }
+  if (typeof data.nonce !== "string" || data.nonce !== nonce) {
+    return null;
+  }
+  const detail = typeof data.detail === "string" ? data.detail : "";
+  return { code: isNoticeCode(data.code) ? data.code : "unknown", detail: detail.slice(0, NOTICE_DETAIL_LIMIT) };
+};
