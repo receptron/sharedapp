@@ -13,11 +13,12 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import vm from "node:vm";
 
 import { viewBridge, type BridgeCells, type Channel } from "../src/view/bridge.js";
 import { NOTICE_DETAIL_LIMIT, readNotice, type ViewNotice } from "../src/view/message.js";
 import { VIEW_MESSAGE } from "../src/view/protocol.js";
-import { publicViewBootstrap } from "../src/view/srcdoc.js";
+import { NOTICE_BUDGET, publicViewBootstrap } from "../src/view/srcdoc.js";
 
 const NONCE = "nonce-1";
 const notice = (fields: Record<string, unknown>) => ({ type: VIEW_MESSAGE.notice, nonce: NONCE, ...fields });
@@ -95,20 +96,97 @@ test("a notice is not judged as a submission", () => {
   assert.deepEqual(answered, []);
 });
 
-test("the bootstrap replaces the three calls the sandbox ignores, and answers as the sandbox does", () => {
-  const script = publicViewBootstrap(NONCE);
-  // Replaced rather than watched: there is no event for a call the browser refuses to make.
-  for (const name of ["window.alert", "window.confirm", "window.prompt"]) {
-    assert.ok(script.includes(`${name} = `), `${name} is not replaced`);
-  }
-  // And the replacements answer what an ignored modal answers. A `confirm` that returned true here
-  // would make a page take a branch it never takes in production.
-  assert.ok(script.includes(`notify("modal-ignored", "confirm"); return false;`));
-  assert.ok(script.includes(`notify("modal-ignored", "prompt"); return null;`));
-  // The two the browser does raise, and which stop at the frame boundary.
-  assert.ok(script.includes(`addEventListener("error"`));
-  assert.ok(script.includes(`addEventListener("unhandledrejection"`));
-  // The nonce is what proves a notice came from this document, so it must be closed over here
-  // exactly as `ready` is.
-  assert.ok(script.includes(`type: "${VIEW_MESSAGE.notice}", nonce`));
+/** RUN the bootstrap, rather than read it.
+ *
+ *  A test that greps the generated string proves the characters are there and nothing about what
+ *  they do — and the closing lesson of the plan this feature comes from is exactly that: a test
+ *  that enters by a door the real thing does not use agrees with the implementation and not with
+ *  reality. The bootstrap is plain JavaScript whose only outside references are `window`, `parent`
+ *  and `document`, so it can be given all three and asked to behave. */
+const runBootstrap = (nonce: string) => {
+  const posted: Record<string, unknown>[] = [];
+  const handlers: Record<string, (event: Record<string, unknown>) => void> = {};
+  const win: Record<string, unknown> = {
+    addEventListener: (name: string, handler: (event: Record<string, unknown>) => void) => {
+      handlers[name] = handler;
+    },
+  };
+  const context = {
+    window: win,
+    parent: { postMessage: (message: Record<string, unknown>) => posted.push(message) },
+    // The real one removes the script element from the document. Nothing here has one, and the
+    // bootstrap already guards for it — a fragment can be parsed with no `currentScript` at all.
+    document: { currentScript: null },
+  };
+  vm.createContext(context);
+  vm.runInContext(
+    publicViewBootstrap(nonce)
+      .replace(/^\s*<script>/, "")
+      .replace(/<\/script>\s*$/, ""),
+    context,
+  );
+  const notices = () => posted.filter((message) => message.type === VIEW_MESSAGE.notice);
+  return { notices, handlers, win, nonce };
+};
+
+test("the running bootstrap answers a modal exactly as an ignored one does", () => {
+  const frame = runBootstrap(NONCE);
+  // Replaced rather than watched, because a call the browser refuses to make raises no event. The
+  // RETURN VALUES are the part that must not drift: a `confirm` answering true here would send a
+  // page down a branch it never takes in a published one, which is the "worked on my machine" this
+  // whole subsystem exists to prevent.
+  assert.equal((frame.win.alert as () => unknown)(), undefined);
+  assert.equal((frame.win.confirm as () => unknown)(), false);
+  assert.equal((frame.win.prompt as () => unknown)(), null);
+  assert.deepEqual(
+    frame.notices().map((message) => message.detail),
+    ["alert", "confirm", "prompt"],
+  );
+  // The nonce is what proves these came from the document the parent injected.
+  assert.ok(frame.notices().every((message) => message.nonce === NONCE && message.code === "modal-ignored"));
+});
+
+test("the running bootstrap names where an error happened", () => {
+  const frame = runBootstrap(NONCE);
+  frame.handlers.error?.({ message: "slot is not defined", lineno: 12 });
+  assert.equal(frame.notices()[0]?.detail, "slot is not defined (line 12)");
+  // A page can throw a thing with no message at all, and a blank detail would read as a notice
+  // this runtime failed to fill in rather than as one the page failed to explain.
+  frame.handlers.error?.({ message: "", lineno: 0 });
+  assert.equal(frame.notices()[1]?.detail, "an error with no message");
+});
+
+test("the running bootstrap says WHAT a promise was rejected with, not [object Object]", () => {
+  const frame = runBootstrap(NONCE);
+  frame.handlers.unhandledrejection?.({ reason: { message: "the write was refused" } });
+  frame.handlers.unhandledrejection?.({ reason: "a bare string" });
+  // The one that used to be useless. `String({})` is "[object Object]", which costs a debugging
+  // round to learn nothing — a promise may be rejected with anything at all.
+  frame.handlers.unhandledrejection?.({ reason: { code: 7 } });
+  frame.handlers.unhandledrejection?.({ reason: null });
+  assert.deepEqual(
+    frame.notices().map((message) => message.detail),
+    ["the write was refused", "a bare string", "rejected with a object carrying no message", "rejected with a null carrying no message"],
+  );
+});
+
+test("a page in an error loop is cut off, and the cut is announced", () => {
+  const frame = runBootstrap(NONCE);
+  for (let n = 0; n < NOTICE_BUDGET + 10; n += 1) frame.handlers.error?.({ message: `throw ${n}`, lineno: 1 });
+  const notices = frame.notices();
+  // The budget's worth, then ONE line saying the rest were dropped, then silence. A list that
+  // stopped without saying so would read as the whole of what happened — and the ones kept are the
+  // earliest, which are usually the cause of the rest.
+  assert.equal(notices.length, NOTICE_BUDGET + 1);
+  assert.equal(notices[0]?.detail, "throw 0 (line 1)");
+  assert.equal(notices[NOTICE_BUDGET]?.code, "notices-dropped");
+  assert.ok(String(notices[NOTICE_BUDGET]?.detail).includes(String(NOTICE_BUDGET)));
+});
+
+test("the bootstrap still hands the page its bridge under both names", () => {
+  // Not about notices, and here because this is the first test that RUNS the thing: everything
+  // above would pass just as well against a bootstrap that had stopped defining the contract.
+  const frame = runBootstrap(NONCE);
+  assert.equal(typeof (frame.win.__MC_APP_VIEW as { ready?: unknown } | undefined)?.ready, "function");
+  assert.equal(frame.win.__MC_APP_VIEW, frame.win.__MC_PUBLIC_VIEW);
 });

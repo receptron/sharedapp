@@ -120,8 +120,15 @@ const channelScript = (): string => `
  *  A page whose `onState` throws on every row sends one per row; a loop that
  *  throws sends one per turn. The first few say what is wrong and the rest say
  *  it again, so the budget is small and the host is told when it ran out
- *  (`notices-dropped`) rather than left with a list that looks complete. */
-const NOTICE_BUDGET = 20;
+ *  (`notices-dropped`) rather than left with a list that looks complete.
+ *
+ *  EXPORTED so a host that keeps notices can size its own buffer against the
+ *  most one document can produce, and so a test can drive the bootstrap past
+ *  it. A host that merely explains `notices-dropped` to a reader should NOT
+ *  quote this number: the runtime deploys separately from anything that
+ *  republished the page, so a figure copied into a host's prose is one that
+ *  can be out of date while looking authoritative. */
+export const NOTICE_BUDGET = 20;
 
 /** The half that reports the frame to the parent: the failures a sandbox
  *  swallows.
@@ -166,8 +173,13 @@ const noticeScript = (): string => `
     notify("error", (event.message || "an error with no message") + line);
   });
   window.addEventListener("unhandledrejection", (event) => {
+    // NOT String(reason). A promise may be rejected with anything, and the
+    // common non-Error case -- an object -- stringifies to "[object Object]",
+    // which costs a debugging round to learn nothing. Say what it WAS instead.
     const reason = event.reason;
-    notify("unhandled-rejection", reason && reason.message ? reason.message : String(reason));
+    if (reason && typeof reason.message === "string" && reason.message !== "") { notify("unhandled-rejection", reason.message); return; }
+    if (typeof reason === "string" && reason !== "") { notify("unhandled-rejection", reason); return; }
+    notify("unhandled-rejection", "rejected with a " + (reason === null ? "null" : typeof reason) + " carrying no message");
   });
   window.alert = () => { notify("modal-ignored", "alert"); };
   window.confirm = () => { notify("modal-ignored", "confirm"); return false; };
