@@ -24,8 +24,14 @@ export interface QueuedMail {
   data?: Record<string, unknown>;
 }
 
+/** The declared fields this record actually carries.
+ *
+ *  `Object.hasOwn` rather than `in`, because `dataFields` is a list of names an AUTHOR wrote and
+ *  `record` is a document read back from Firestore. `in` walks the prototype, so a declaration
+ *  naming `constructor` or `toString` would put a FUNCTION into the queued mail — which the rules
+ *  then refuse, with a permission error naming nothing, over a template that looks correct. */
 const pick = (record: Record<string, unknown>, fields: string[]): Record<string, unknown> => {
-  const entries = fields.filter((field) => field in record).map((field) => [field, record[field]] as const);
+  const entries = fields.filter((field) => Object.hasOwn(record, field)).map((field) => [field, record[field]] as const);
   return Object.fromEntries(entries);
 };
 

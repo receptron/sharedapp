@@ -103,7 +103,17 @@ export interface IntentAnswer {
   error?: string;
 }
 
-export type IntentRead = { ok: true; intent: JudgedIntent } | { ok: false; reason: IntentRefusal; requestId: string; asked?: AskedIntent };
+/** One message, read.
+ *
+ *  THREE branches rather than two, and the third is the point: a message that is not an intent at
+ *  all carries no request id, so it has none to be answered on — and answering it would be
+ *  answering something nobody asked. That used to be one refusal branch with `requestId: ""`
+ *  fabricated to satisfy the type, which no caller read but every caller was invited to. Splitting
+ *  it makes replying to a non-request impossible rather than discouraged. */
+export type IntentRead =
+  | { ok: true; intent: JudgedIntent }
+  | { ok: false; reason: "not-an-intent" }
+  | { ok: false; reason: Exclude<IntentRefusal, "not-an-intent">; requestId: string; asked: AskedIntent };
 
 const NOT_AN_INTENT = { ok: false, reason: "not-an-intent" } as const;
 
@@ -285,7 +295,7 @@ export interface Who {
 export const readIntentMessage = (data: unknown, write: ProjectedViewWrite[], record: RecordLookup, who: Who): IntentRead => {
   const asked = asIntent(data);
   if (asked === null) {
-    return { ...NOT_AN_INTENT, requestId: "" };
+    return NOT_AN_INTENT;
   }
   const declared = write.find((entry) => entry.cid === asked.cid);
   if (declared === undefined) {
