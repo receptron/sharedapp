@@ -10,7 +10,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { AuthoredAppZ } from "../src/publishManifest.js";
-import { publishProblems, promotedRoleProblems } from "../src/publishChecks.js";
+import { publishProblems, schemaRefProblems } from "../src/publishChecks.js";
 
 const OWNER = "owner@salon.jp";
 /** The repository's shared collections, as publish sees them: a cid and the
@@ -514,38 +514,6 @@ test("a per-record window bound must be reachable from the submission", () => {
 
 // --- the pair publish actually writes ---------------------------------------
 
-test("an assignee whose field never reached the deploy is refused at publish", () => {
-  // deploy A (no assigneeField) → edit B (add the field AND the member) →
-  // publish, without redeploying. Every manifest-level check passes on a
-  // declaration that is internally sound, while what lands is A's field-less
-  // configuration beside B's roster: that one member is refused every write and
-  // the app keeps working for everybody else.
-  const declared = app({
-    members: { [OWNER]: { "*": "owner" }, "anna@salon.jp": { bookings: "assignee" } },
-    collections: { bookings: { assigneeField: "stylistEmail" } },
-  });
-  const stagedDoc = (config: Record<string, unknown>) => ({
-    cid: "bookings",
-    doc: { publishedSchema: { title: "b", icon: "event", primaryKey: "id", fields: {} }, deployedAt: 1, deployedBy: OWNER, config },
-  });
-
-  // The manifest alone is sound, which is exactly why this needed its own check.
-  assert.deepEqual(publishProblems(declared, CIDS, OWNER), []);
-
-  refuses(promotedRoleProblems(declared, [stagedDoc({})] as never), "carries no assigneeField");
-  assert.deepEqual(promotedRoleProblems(declared, [stagedDoc({ assigneeField: "stylistEmail" })] as never), []);
-});
-
-test("a collection with nothing staged is left to the gate that names them all", () => {
-  // "not staged, so there is no reviewed version to promote" lists every
-  // missing collection at once; repeating it per member would bury it.
-  const declared = app({
-    members: { [OWNER]: { "*": "owner" }, "anna@salon.jp": { bookings: "assignee" } },
-    collections: { bookings: { assigneeField: "stylistEmail" } },
-  });
-  assert.deepEqual(promotedRoleProblems(declared, []), []);
-});
-
 // --- the slot booking: a document id that is a CLAIM about another record ----
 
 /** The declaration the salon template writes, in full. Every case below starts
@@ -797,27 +765,23 @@ test("a member view passes without being in public.read — it is not the public
   );
 });
 
-test("refuses a participant view naming a collection the PROMOTED rules will not let them read", () => {
+test("refuses a participant view naming a collection a participant cannot read", () => {
   // Worse than the public case: an unscoped list on an own-row collection is
   // DENIED rather than narrowed, so the page fails rather than rendering less.
   //
-  // And judged against what DEPLOY staged, not against app.json: publish
-  // overwrites `participantRead` with the staged schemas' own, so adding a cid
-  // to the manifest and publishing without redeploying produces exactly the
-  // page this refuses — offered to the participant, then refused the read.
-  const declared = app({
-    participantRead: ["slots"],
-    views: [{ id: "mine", audience: "participant", path: "views/mine.html", collections: ["slots"] }],
-  });
-  const staged = (participantRead: boolean) => [
-    { cid: "slots", doc: { publishedSchema: { title: "s", icon: "event", primaryKey: "id", fields: {} }, deployedAt: 1, deployedBy: OWNER, participantRead } },
-  ];
+  // This used to be judged against what DEPLOY staged — publish overwrote
+  // `participantRead` with the staged schemas' own, so the manifest could not
+  // answer it. There is no staging any more, so the declaration IS what lands
+  // and the ordinary gate can say so.
+  const reads = (participantRead: string[]) =>
+    app({
+      participantRead,
+      views: [{ id: "mine", audience: "participant", path: "views/mine.html", collections: ["slots"] }],
+    });
+  const CID = [{ cid: "slots", primaryKey: "id" }];
 
-  // The manifest alone is sound, which is why this needed the promoted gate.
-  assert.deepEqual(publishProblems(declared, [{ cid: "slots", primaryKey: "id" }], OWNER), []);
-
-  refuses(promotedRoleProblems(declared, staged(false) as never), "which a participant cannot read once this publishes");
-  assert.deepEqual(promotedRoleProblems(declared, staged(true) as never), []);
+  refuses(publishProblems(reads([]), CID, OWNER), "which a participant cannot read");
+  assert.deepEqual(publishProblems(reads(["slots"]), CID, OWNER), []);
 });
 
 test("the path check binds every audience, not just the public one", () => {
@@ -855,83 +819,24 @@ test("refuses an idIn pointing at nothing, or at itself", () => {
   );
 });
 
-/** A staged collection as publish sees it: the schema deploy promoted, and
- *  that collection's rule configuration. `slots` carries the three fields the
- *  salon declaration reads off it — without them the ref-field check fires
- *  first and a mirror test would pass on the wrong refusal. */
-const SLOT_FIELDS = { state: { type: "string" }, opensAt: { type: "number" }, closesAt: { type: "number" } };
-
-const stagedSalonDoc = (cid: string, config: Record<string, unknown>) => ({
+/** The salon's two collections as the repository holds them, with `slots` fields chosen per case:
+ *  what these tests are about is what the SCHEMA says, which is the one thing the declaration gate
+ *  cannot see. */
+const schemaWithFields = (cid: string, fields: Record<string, unknown>) => ({
   cid,
-  doc: {
-    publishedSchema: { title: cid, icon: "event", primaryKey: "id", fields: cid === "slots" ? SLOT_FIELDS : {} },
-    deployedAt: 1,
-    deployedBy: OWNER,
-    config,
-  },
-});
-
-test("refuses a mirror whose other half was never deployed", () => {
-  // The same trap as the assignee's field, reached the same way: publish takes
-  // the submission side from app.json and the collection side from the DEPLOY.
-  // Declare both halves, publish without redeploying, and what lands is a
-  // booking that must move its projection beside a projection that refuses to
-  // move -- every submission denied, on a declaration that reads as correct.
-  const declared = app(salonDraft() as unknown as Record<string, unknown>);
-
-  // Sound on disk, which is why this needed a check of its own.
-  assert.deepEqual(publishProblems(declared, SALON_CIDS, OWNER), []);
-
-  const stale = [stagedSalonDoc("bookings", {}), stagedSalonDoc("slots", {})];
-  refuses(promotedRoleProblems(declared, stale as never), "does not declare mirrorOf");
-  const fresh = [stagedSalonDoc("bookings", {}), stagedSalonDoc("slots", { mirrorOf: "bookings" })];
-  assert.deepEqual(promotedRoleProblems(declared, fresh as never), []);
-});
-
-test("refuses a mirror REMOVED from the declaration but not from the deploy", () => {
-  // The dangerous direction, and the one a submission-side walk cannot see.
-  // Delete both halves from app.json and publish without redeploying: nothing
-  // requires the projection to move any more, while the promoted collection
-  // still allows it to be written. Bookings are created and the public row
-  // goes on saying `open`. Every check passes; every submission succeeds; only
-  // the page is wrong.
-  const withoutPair = salonDraft();
-  delete withoutPair.public.submit.bookings.mirror;
-  delete withoutPair.collections.slots.mirrorOf;
-  const declared = app(withoutPair as unknown as Record<string, unknown>);
-
-  // The declaration on disk is sound — the pair is simply gone from it.
-  assert.deepEqual(publishProblems(declared, SALON_CIDS, OWNER), []);
-
-  const stale = [stagedSalonDoc("bookings", {}), stagedSalonDoc("slots", { mirrorOf: "bookings" })];
-  refuses(promotedRoleProblems(declared, stale as never), "app.json no longer declares");
-  // Deployed after the removal, the two agree again and publish is free.
-  const fresh = [stagedSalonDoc("bookings", {}), stagedSalonDoc("slots", {})];
-  assert.deepEqual(promotedRoleProblems(declared, fresh as never), []);
-});
-
-/** The salon's two collections as deploy staged them, with `slots` fields
- *  chosen per case: what these tests are about is what the STAGED schema says. */
-const stagedWithFields = (cid: string, fields: Record<string, unknown>, config: Record<string, unknown> = {}) => ({
-  cid,
-  doc: {
-    publishedSchema: { title: cid, icon: "event", primaryKey: "id", fields },
-    deployedAt: 1,
-    deployedBy: OWNER,
-    config,
-  },
+  schema: { title: cid, icon: "event", primaryKey: "id", fields },
 });
 
 /** What the salon declaration actually needs off `slots`: a state to compare
  *  and two bounds the rules read as epoch millis. */
 const SOUND = { state: { type: "string" }, opensAt: { type: "number" }, closesAt: { type: "number" } };
 
-const stagedFor = (slotFields: Record<string, unknown>) => [
-  stagedWithFields("bookings", { slot: { type: "string" }, status: { type: "string" } }),
-  stagedWithFields("slots", slotFields, { mirrorOf: "bookings" }),
+const schemasFor = (slotFields: Record<string, unknown>) => [
+  schemaWithFields("bookings", { slot: { type: "string" }, status: { type: "string" } }),
+  schemaWithFields("slots", slotFields),
 ];
 
-test("refuses a field the referenced record's staged schema does not declare", () => {
+test("refuses a field the referenced record's schema does not declare", () => {
   // A typo in a field NAME publishes cleanly and denies every submission with
   // no message: the rules read the field off the record, find nothing, and
   // refuse. It cannot be caught by the declaration gate, which is given a cid
@@ -940,13 +845,13 @@ test("refuses a field the referenced record's staged schema does not declare", (
 
   const declared = app(salonDraft() as unknown as Record<string, unknown>);
   // With all three present and of the right kind, publish is free.
-  assert.deepEqual(promotedRoleProblems(declared, stagedFor(SOUND) as never), []);
+  assert.deepEqual(schemaRefProblems(declared, schemasFor(SOUND) as never), []);
 
   // One at a time, so a passing case cannot be hiding behind another failure.
   const without = (field: string) => Object.fromEntries(Object.entries(SOUND).filter(([name]) => name !== field));
-  refuses(promotedRoleProblems(declared, stagedFor(without("state")) as never), "idIn.where.field names 'state'");
-  refuses(promotedRoleProblems(declared, stagedFor(without("opensAt")) as never), "window.fromField.field names 'opensAt'");
-  refuses(promotedRoleProblems(declared, stagedFor(without("closesAt")) as never), "window.untilField.field names 'closesAt'");
+  refuses(schemaRefProblems(declared, schemasFor(without("state")) as never), "idIn.where.field names 'state'");
+  refuses(schemaRefProblems(declared, schemasFor(without("opensAt")) as never), "window.fromField.field names 'opensAt'");
+  refuses(schemaRefProblems(declared, schemasFor(without("closesAt")) as never), "window.untilField.field names 'closesAt'");
 });
 
 test("refuses a comparison the rules could never satisfy", () => {
@@ -956,19 +861,19 @@ test("refuses a comparison the rules could never satisfy", () => {
   const enumState = (values: string[]) => ({ state: { type: "enum", values }, opensAt: { type: "number" }, closesAt: { type: "number" } });
 
   // An enum whose domain contains the value is exactly right.
-  assert.deepEqual(promotedRoleProblems(declared, stagedFor(enumState(["open", "taken"])) as never), []);
-  refuses(promotedRoleProblems(declared, stagedFor(enumState(["free", "taken"])) as never), "not one of the values");
+  assert.deepEqual(schemaRefProblems(declared, schemasFor(enumState(["open", "taken"])) as never), []);
+  refuses(schemaRefProblems(declared, schemasFor(enumState(["free", "taken"])) as never), "not one of the values");
 
   // A bound the rules read as epoch millis, stored as an ISO string: a type
   // error that fails closed, so the window never opens and nothing says why.
   refuses(
-    promotedRoleProblems(declared, stagedFor({ state: { type: "string" }, opensAt: { type: "datetime" }, closesAt: { type: "number" } }) as never),
+    schemaRefProblems(declared, schemasFor({ state: { type: "string" }, opensAt: { type: "datetime" }, closesAt: { type: "number" } }) as never),
     "is a datetime field",
   );
 
   // Comparing a boolean field with a string.
   refuses(
-    promotedRoleProblems(declared, stagedFor({ state: { type: "boolean" }, opensAt: { type: "number" }, closesAt: { type: "number" } }) as never),
+    schemaRefProblems(declared, schemasFor({ state: { type: "boolean" }, opensAt: { type: "number" }, closesAt: { type: "number" } }) as never),
     "is a boolean field",
   );
 });
