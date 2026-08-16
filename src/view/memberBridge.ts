@@ -1,6 +1,6 @@
 import { isReady, isRecord, readNotice, type ViewDataset, type ViewNotice } from "./message.js";
 import { VIEW_MESSAGE } from "./protocol.js";
-import type { Channel } from "./bridge.js";
+import type { Channel, Signal } from "./bridge.js";
 import type { Viewer } from "./capability.js";
 import type { IntentAnswer } from "./intent.js";
 
@@ -66,6 +66,15 @@ export interface MemberBridgePorts {
    *  The page is NOT trusted to obey it. The same answer is applied again to
    *  every intent, and the rules answer after that. */
   viewer: () => Viewer;
+  /** The document in the frame has answered on the channel, for a host that needs to SEE it.
+   *
+   *  Optional and owned by the host, exactly as `BridgeCells.readied` is for the public bridge —
+   *  and it is not bookkeeping. Both of this package's previewing hosts report the handshake:
+   *  MulmoTerminal's pane logs it, and its headless run puts "It NEVER answered the handshake" at
+   *  the top of a page's report, above a paragraph saying nothing below describes the page's
+   *  behaviour. Without somewhere to write this, every healthy member page is reported that way —
+   *  a false red about the one thing an author cannot check any other way. */
+  readied?: Signal<boolean> | undefined;
   /** Somewhere to put what the frame says about itself — an uncaught error, a rejected promise,
    *  a modal the sandbox ignored.
    *
@@ -104,6 +113,7 @@ export const memberBridge = (ports: MemberBridgePorts, nonce: () => string) => {
     // handed. A document that merely INHERITED the frame cannot send it.
     if (data.nonce === nonce()) {
       open = channel;
+      if (ports.readied !== undefined) ports.readied.value = true;
       sendState();
       return;
     }
@@ -144,6 +154,7 @@ export const memberBridge = (ports: MemberBridgePorts, nonce: () => string) => {
     offered?.close();
     open = null;
     offered = null;
+    if (ports.readied !== undefined) ports.readied.value = false;
   };
 
   return { receive, sendState, forget };
