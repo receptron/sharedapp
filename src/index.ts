@@ -100,3 +100,7 @@ export {
 
 // What publish refuses, and which live records a schema change would break.
 export { publishProblems, promotedRoleProblems, bindsSubmitterIdentity, type PublishableCollection } from "./publishChecks.js";
+
+// The `write` half of a projection, read back. Both hosts read one and neither trusts it — see
+// the module header for why the two readers must not differ.
+export { projectedWriteOf, projectedWritesOf } from "./viewWriteRead.js";
