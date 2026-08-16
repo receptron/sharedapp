@@ -35,6 +35,24 @@ export {
   type ViewSubmitConfig,
 } from "./message.js";
 export { viewBridge, type BridgeCells, type BridgePorts, type Channel, type Signal } from "./bridge.js";
+// The MEMBER's parent — the roster and participant pages, and the author's
+// preview of them. Separate from `viewBridge` because a member's ask is an
+// intent against a record that exists, not a stranger's proposal; see
+// `memberBridge.ts`.
+export { memberBridge, refuseEverything, type MemberBridgePorts, type PerformIntent } from "./memberBridge.js";
+export { capabilityOf, capabilitiesFor, mayTransition, viewerFor, type ViewCapability, type Viewer, type WriteTier } from "./capability.js";
+export {
+  readIntentMessage,
+  type AskedIntent,
+  type IntentAnswer,
+  type IntentKind,
+  type IntentRead,
+  type IntentRefusal,
+  type JudgedIntent,
+  type RecordLookup,
+  type Who,
+} from "./intent.js";
+export { mailFor, type QueuedMail } from "./intentMail.js";
 export { portChannel, asIs, type Cloneable } from "./channel.js";
 export {
   MIRROR_OPEN,
