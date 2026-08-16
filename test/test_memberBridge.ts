@@ -188,3 +188,29 @@ test("a host that keeps no notices is not made to", () => {
   far.send({ nonce: NONCE });
   assert.equal(far.posted.length, 1);
 });
+
+test("the handshake is visible to a host that asks to see it", () => {
+  // Not bookkeeping. MulmoTerminal's headless run puts "It NEVER answered the handshake" at the top
+  // of a page's report, over a paragraph saying nothing below describes the page's behaviour — so a
+  // parent with nowhere to write this reports every healthy member page as the one page an author
+  // cannot diagnose any other way.
+  const far = fakeChannel();
+  const readied = { value: false };
+  const bridge = memberBridge({ channel: () => far.channel, state: () => ({}), viewer: () => viewer, readied }, () => NONCE);
+  bridge.receive(ready);
+  assert.equal(readied.value, false, "a channel offered is not a handshake answered");
+  far.send({ nonce: NONCE });
+  assert.equal(readied.value, true);
+  // A new page is a new conversation, and the next `ready` is a real first one.
+  bridge.forget();
+  assert.equal(readied.value, false);
+});
+
+test("a document that cannot name the injected one does not count as the handshake", () => {
+  const far = fakeChannel();
+  const readied = { value: false };
+  const bridge = memberBridge({ channel: () => far.channel, state: () => ({}), viewer: () => viewer, readied }, () => NONCE);
+  bridge.receive(ready);
+  far.send({ nonce: "guessed" });
+  assert.equal(readied.value, false);
+});
