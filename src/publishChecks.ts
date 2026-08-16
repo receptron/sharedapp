@@ -30,7 +30,6 @@ import type { CollectionFieldSpec, CollectionSchema } from "@mulmoclaude/core/co
 import { isSafeCustomViewPath } from "@mulmoclaude/core/collection/server";
 import { normalizeViews, participantScope, type NormalizedView } from "./appViews.js";
 import type { AuthoredApp, AuthoredCollectionConfig, AuthoredSubmit } from "./publishManifest.js";
-import { stagedRuleConfig, type StagedSchemaDoc } from "./publishProject.js";
 
 /** What publish knows about a shared collection in this repository, as far as
  *  these checks are concerned: its cid and the schema key its records are
@@ -742,10 +741,17 @@ function viewCollectionProblems(app: AuthoredApp, view: NormalizedView, cid: str
         "read and the view draws an empty page. Nothing errors — this is the failure that looks like a working view with no data.",
     ];
   }
-  // No participant check here. Whether a participant reaches a collection
-  // depends on `participantRead`, and publish does not promote the manifest's
-  // — it promotes the STAGED schemas'. That check belongs with the other
-  // promoted-pair ones, in `promotedRoleProblems`.
+  // The participant check is HERE now. It used to sit apart, with the promoted-pair checks, because
+  // publish promoted `participantRead` from what deploy had staged rather than from the manifest —
+  // so the manifest half of this file could not see what would actually land. There is no staging
+  // any more (mulmoterminal `plans/feat-shared-app-no-staging.md`): what publish writes is this
+  // declaration, so the question is answerable right here.
+  if (view.audience === "participant" && participantScope(app, cid, app.participantRead ?? []) === null) {
+    return [
+      `${view.where}.collections names '${cid}', which a participant cannot read: it is not in participantRead, and public.submit.${cid} declares neither ` +
+        'an emailField nor idFrom "auth.uid", so there is no row the rules would call theirs. The page would be refused the read, not handed fewer records.',
+    ];
+  }
   return [];
 }
 
@@ -756,86 +762,20 @@ function viewProblems(app: AuthoredApp, collections: readonly PublishableCollect
   return normalized.views.flatMap((view) => [...viewPathProblems(view), ...view.collections.flatMap((cid) => viewCollectionProblems(app, view, cid, known))]);
 }
 
-/** What publish will actually promote, checked as the PAIR it becomes.
+/** The checks that need a SCHEMA rather than the declaration.
  *
- *  `publishProblems` reads the manifest, where `members` and `collections` sit
- *  side by side and agree. Publish does not write that pair. It writes the
- *  roster from the manifest and the collection configuration from what DEPLOY
- *  staged, so the app that lands is one half of each — and no check has ever
- *  looked at that combination.
+ *  Kept separate from {@link publishProblems} because that gate is handed a cid and a primary key
+ *  per collection and nothing else, on purpose: it reads the DECLARATION. A field NAME can only be
+ *  judged against the schema that declares it, and the host is the one that reads those off disk.
  *
- *  The sequence that gets through: deploy revision A with no `assigneeField`,
- *  add the field AND the member in revision B, publish without redeploying.
- *  Every manifest-level check passes on a declaration that is internally sound,
- *  while what lands is A's field-less configuration beside B's roster — an
- *  assignee with nothing to be compared against, refused every write, in an app
- *  that keeps working for everybody else. That is the precise trap
- *  `assigneeProblems` exists to prevent, reached by the one route it cannot
- *  see.
- *
- *  Separate from `publishProblems` because it needs what deploy staged, which
- *  is a Firestore read the host makes and this package does not. It is checked
- *  against `stagedRuleConfig` — the same function the projection uses — rather
- *  than against a re-derivation, so the value validated is the value written.
- *
- *  Only the staged half can be stale, so only that half is named and the fix is
- *  "deploy again" rather than "fix the declaration". */
-export function promotedRoleProblems(app: AuthoredApp, staged: { cid: string; doc: StagedSchemaDoc }[]): string[] {
-  const promoted = stagedRuleConfig(staged).collections ?? {};
-  const stagedCids = new Set(staged.map((entry) => entry.cid));
-  return [
-    ...promotedAssigneeProblems(app, promoted, stagedCids),
-    ...promotedMirrorProblems(app, promoted, stagedCids),
-    ...promotedRefFieldProblems(app, staged),
-    ...promotedParticipantViewProblems(app, staged),
-  ];
-}
-
-/** A participant's page, checked against the `participantRead` publish will
- *  actually PROMOTE.
- *
- *  Not against the manifest's. `projectPublish` overwrites `participantRead`
- *  with what the staged schemas carry, so a cid added to the manifest since the
- *  last deploy is not in the rules — and a page written for it would be
- *  published, offered, and then refused the read. The manifest half of this
- *  file cannot see that; the promoted half can, which is why the check lives
- *  here rather than beside the other view checks. */
-function promotedParticipantViewProblems(app: AuthoredApp, staged: { cid: string; doc: StagedSchemaDoc }[]): string[] {
-  const normalized = normalizeViews(app);
-  if (!normalized.ok) return [];
-  const participantRead = stagedRuleConfig(staged).participantRead ?? [];
-  return normalized.views
-    .filter((view) => view.audience === "participant")
-    .flatMap((view) =>
-      view.collections
-        .filter((cid) => participantScope(app, cid, participantRead) === null)
-        .map(
-          (cid) =>
-            `${view.where}.collections names '${cid}', which a participant cannot read once this publishes: it is not in the participantRead that DEPLOY ` +
-            `staged, and public.submit.${cid} declares neither an emailField nor idFrom "auth.uid", so there is no row the rules would call theirs. ` +
-            "The page would be refused the read, not handed fewer records. (Adding it to participantRead in app.json is not enough — deploy first.)",
-        ),
-    );
-}
-
-/** The FIELDS a rule reads off another record — `idIn.where.field` and the two
- *  window bounds — checked against the schema publish is about to promote.
- *
- *  These are checked here rather than in `publishProblems` because that gate
- *  is given a cid and a primary key per collection and nothing else, on
- *  purpose: it reads the DECLARATION. A field name can only be judged against
- *  a schema, and the schema that matters is the STAGED one — the version
- *  publish promotes — not whatever the working tree says now.
- *
- *  What a typo costs: `where: { field: "staet" }` publishes cleanly, the
- *  rules' comparison can never match, and every submission is denied with no
- *  message. The author's own app looks broken with nothing to read.
- *
- *  Only fields the schema DECLARES are accepted. A record may carry more than
- *  its schema does, but a shared collection's records are written through it,
- *  and "the field exists on some rows" is not something a gate can promise. */
-function promotedRefFieldProblems(app: AuthoredApp, staged: { cid: string; doc: StagedSchemaDoc }[]): string[] {
-  const schemaOf = new Map(staged.map((entry) => [entry.cid, entry.doc.publishedSchema]));
+ *  This is what remains of a larger family. The rest of it — an assignee whose collection carried
+ *  no `assigneeField`, a mirror pair with one half missing, a stranded `mirrorOf` — existed because
+ *  publish wrote the roster from the manifest and the collection configuration from what a previous
+ *  DEPLOY had staged, so the app that landed was one half of each. With staging gone the two halves
+ *  are the same manifest read once, and those states cannot be reached; `assigneeProblems` and
+ *  `mirrorProblems` above check the declaration against itself, which is now the whole question. */
+export function schemaRefProblems(app: AuthoredApp, schemas: { cid: string; schema: CollectionSchema }[]): string[] {
+  const schemaOf = new Map(schemas.map((entry) => [entry.cid, entry.schema]));
   return Object.entries(app.public?.submit ?? {}).flatMap(([cid, submit]) => submitRefProblems(schemaOf, cid, submit));
 }
 
@@ -950,83 +890,4 @@ function millisProblem(
       `EPOCH MILLIS: the rules compare it with request.time.toMillis() and never coerce, so anything else is a type error that refuses every ` +
       `submission — the window simply never opens. Store the instant as a number.`,
   ];
-}
-
-function promotedAssigneeProblems(app: AuthoredApp, promoted: Record<string, AuthoredCollectionConfig>, stagedCids: ReadonlySet<string>): string[] {
-  return Object.entries(app.members).flatMap(([email, roles]) =>
-    Object.entries(roles).flatMap(([cid, role]) => {
-      // A cid with nothing staged at all is the host's "not staged, so there is
-      // no reviewed version to promote" refusal, which names every missing
-      // collection at once. Repeating it per member would bury it.
-      if (role !== "assignee" || cid === "*" || !stagedCids.has(cid)) return [];
-      if (promoted[cid]?.assigneeField !== undefined) return [];
-      return [
-        `members["${email}"] holds "assignee" on '${cid}', and the STAGED version of '${cid}' — the one publish promotes — carries no assigneeField, even if ` +
-          `app.json declares one now. Publish writes the roster from app.json and the collection configuration from the deploy, so that member would land with ` +
-          `nothing to be compared against: refused every write, while the app keeps working for everybody else. ` +
-          "Run deploy again, so the version being published is the one the declaration describes.",
-      ];
-    }),
-  );
-}
-
-/** The mirror's other half, checked against what publish will actually
- *  promote — the same trap as the assignee's field, reached by the same route.
- *
- *  `mirror` is published from the MANIFEST (it lives in `public.submit`) while
- *  `mirrorOf` is promoted from what DEPLOY staged. Add both halves to
- *  `app.json` and publish without redeploying, and what lands is a submission
- *  demanding a paired projection write beside a projection whose rule config
- *  does not allow it: every booking is refused, and the declaration on disk
- *  looks perfectly sound.
- *
- *  Refused in the reverse direction too. Removing `mirrorOf` from a live app
- *  and publishing without a deploy leaves the projection accepting nothing —
- *  and removing it FROM the staged side while the submission still demands it
- *  is the drift this pair exists to prevent. */
-function promotedMirrorProblems(app: AuthoredApp, promoted: Record<string, AuthoredCollectionConfig>, stagedCids: ReadonlySet<string>): string[] {
-  return [...addedMirrorProblems(app, promoted, stagedCids), ...strandedMirrorProblems(app, promoted)];
-}
-
-/** The manifest asks for a projection the promoted configuration will not
- *  allow: every submission denied, and nothing on the page to say why. */
-function addedMirrorProblems(app: AuthoredApp, promoted: Record<string, AuthoredCollectionConfig>, stagedCids: ReadonlySet<string>): string[] {
-  return Object.entries(app.public?.submit ?? {}).flatMap(([cid, submit]) => {
-    const { mirror } = submit;
-    // Nothing staged at all is the host's own refusal, which names every
-    // missing collection at once.
-    if (mirror === undefined || !stagedCids.has(mirror)) return [];
-    if (promoted[mirror]?.mirrorOf === cid) return [];
-    return [
-      `public.submit.${cid}.mirror names '${mirror}', and the STAGED version of '${mirror}' — the one publish promotes — does not declare mirrorOf: "${cid}", ` +
-        "even if app.json declares it now. Publish writes the submission side from app.json and the collection side from the deploy, so what lands is a " +
-        "booking that must move its projection beside a projection that refuses to move: every submission is denied, with nothing on the page to say why. " +
-        "Run deploy again, so the version being published is the one the declaration describes.",
-    ];
-  });
-}
-
-/** The other direction, and the DANGEROUS one.
- *
- *  Take a live pair, delete BOTH halves from `app.json`, and publish without
- *  redeploying. The submission side comes from the manifest, so nothing
- *  requires the projection to move any more; the collection side comes from
- *  staging, which still says `mirrorOf`, so the projection stays writable.
- *  Bookings are then created while the public row goes on saying `open` — the
- *  precise failure the pair exists to prevent, arrived at by removing it.
- *
- *  Refused rather than tolerated because the app keeps WORKING: submissions
- *  succeed. Only the public page is wrong, and only to the people reading it. */
-function strandedMirrorProblems(app: AuthoredApp, promoted: Record<string, AuthoredCollectionConfig>): string[] {
-  return Object.entries(promoted).flatMap(([cid, config]) => {
-    const authority = config.mirrorOf;
-    if (authority === undefined) return [];
-    if (app.public?.submit?.[authority]?.mirror === cid) return [];
-    return [
-      `the STAGED version of '${cid}' — the one publish promotes — declares mirrorOf: "${authority}", and app.json no longer declares ` +
-        `public.submit.${authority}.mirror: "${cid}". What lands is a projection that is still writable beside submissions that no longer have to move it, ` +
-        `so records can be created while '${cid}' goes on advertising them as available. Nothing fails: the app works and the public page lies. ` +
-        "Run deploy again, so the version being published is the one the declaration describes.",
-    ];
-  });
 }

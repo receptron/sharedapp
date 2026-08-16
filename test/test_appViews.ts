@@ -101,18 +101,12 @@ test("a participant reads a participantRead collection whole, and their own row 
   assert.equal(participantScope(declared, "ledger", promoted), null);
 });
 
-test("the participant scope follows what will be PROMOTED, not what the manifest says", () => {
-  // `projectPublish` overwrites `participantRead` with the staged schemas' own,
-  // so a cid added to app.json since the last deploy is not in the rules.
-  // Reading the manifest here would publish `scope: "all"` for a collection the
-  // rules then deny — the page fails rather than showing less.
-  const declared = app({ participantRead: ["notices"] });
-  assert.equal(participantScope(declared, "notices", []), null);
-  const tiers = projectAppViews(
-    app({ participantRead: ["notices"], views: [{ id: "mine", audience: "participant", path: "views/mine.html", collections: ["notices"] }] }),
-    STAMP,
-    { participantRead: [] },
-  );
+test("a participant page drops a collection the participant may not read", () => {
+  // Reading it anyway would publish `scope: "all"` for a collection the rules then deny — the page
+  // fails rather than showing less. This used to be judged against a "promoted" configuration
+  // (what a previous deploy had staged, which publish promoted over the manifest); with staging
+  // gone the manifest is what lands, and it is the only answer there is.
+  const tiers = projectAppViews(app({ views: [{ id: "mine", audience: "participant", path: "views/mine.html", collections: ["notices"] }] }), STAMP);
   assert.deepEqual(tiers.find((tier) => tier.audience === "participant")?.config.views, [{ id: "mine", collections: [] }]);
 });
 
@@ -359,16 +353,13 @@ test("a status field with no table, and a table with no field, are both nothing"
   assert.deepEqual(writeOf(noField, "roster"), []);
 });
 
-test("the write tables follow what publish PROMOTES, not what the manifest says", () => {
-  // The mirror of the `participantRead` case above, and the same failure: at
-  // publish `projectPublish` replaces `collections` with what the staged
-  // schemas carry, so a manifest edited since the last deploy would advertise
-  // transitions the live rules deny. Both halves are passed together — one
-  // without the other publishes datasets from revision A beside buttons from B.
-  const promoted = { collections: { bookings: { statusField: "status", transitions: { pending: ["approved"] } } } };
-  const staff = projectAppViews(salon({ collections: { bookings: { statusField: "state", transitions: { open: ["closed"] } } } }), STAMP, promoted)
+test("the write tables follow the declaration", () => {
+  // They used to follow a second, "promoted" configuration — what a previous deploy had staged —
+  // because publish replaced `collections` with it, so a manifest edited since would advertise
+  // transitions the live rules denied. Publish writes both halves from this manifest now.
+  const staff = projectAppViews(salon({ collections: { bookings: { statusField: "state", transitions: { open: ["closed"] } } } }), STAMP)
     .filter((entry) => entry.tier === "member")
     .flatMap((entry) => entry.config.write);
-  assert.equal(staff[0]?.statusField, "status");
-  assert.deepEqual(staff[0]?.transitions, { pending: ["approved"] });
+  assert.equal(staff[0]?.statusField, "state");
+  assert.deepEqual(staff[0]?.transitions, { open: ["closed"] });
 });

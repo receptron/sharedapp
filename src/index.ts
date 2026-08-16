@@ -16,7 +16,7 @@
 //
 // WHO USES IT:
 //   MulmoTerminal  compiles a repository's `app.json` and writes the documents
-//                  (deploy / publish / unpublish are ITS operations, not ours)
+//                  (publish / unpublish are ITS operations, not ours)
 //   MulmoServer    feeds this output to the Firestore rules emulator, which is
 //                  the only test in either repository proving that what publish
 //                  writes is what `firestore.rules` allows
@@ -69,18 +69,15 @@ export {
   type ViewAudience,
 } from "./appViews.js";
 
-// Authored -> written: the deploy half, the publish half, promotion, and where
-// each document lives.
+// Authored -> written: one projection, and where each document lives. There is no deploy half any
+// more — an app EXISTS (the host's `init` writes this projection minus the config and the `public`
+// block) or it is PUBLISHED (which adds them). mulmoterminal `plans/feat-shared-app-no-staging.md`.
 export {
   projectApp,
   projectAppViews,
-  projectDeploy,
   projectPublish,
-  stagedRuleConfig,
-  promoteSchema,
   appViewTierPath,
   viewConfigDocId,
-  appStagingPath,
   appConfigPath,
   appSchemasPath,
   APPS_COLLECTION,
@@ -89,14 +86,12 @@ export {
   appSlugDoc,
   type AppSlugDoc,
   type AppViewTier,
-  type DeployedApp,
   type PublishedFace,
   type PublishStamp,
   type PublishedApp,
   type PublishedConfigDoc,
   type PublishedSchemaDoc,
-  type StagedSchemaDoc,
 } from "./publishProject.js";
 
 // What publish refuses, and which live records a schema change would break.
-export { publishProblems, promotedRoleProblems, bindsSubmitterIdentity, type PublishableCollection } from "./publishChecks.js";
+export { publishProblems, schemaRefProblems, bindsSubmitterIdentity, type PublishableCollection } from "./publishChecks.js";
