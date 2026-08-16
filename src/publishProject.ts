@@ -489,4 +489,4 @@ export function projectAppViews(authored: AuthoredApp, stamp: PublishStamp): App
 
 /** The document a tier's projection is published at. Beside the views
  *  themselves, under one `match` — see `firestore.rules`. */
-export const viewConfigDocId = (stage: "live" | "staged"): string => viewDocId(stage, VIEW_CONFIG_ID);
+export const viewConfigDocId = (): string => viewDocId(VIEW_CONFIG_ID);

@@ -17,9 +17,9 @@
 //   release and normalizes into this one.
 //
 //   THE ID IS THE ADDRESS. `views[].id` becomes the document id `live:{id}` /
-//   `staged:{id}`, which is why it carries a grammar rather than merely being
-//   unique: a `/` in it would address a different path, and staging and
-//   withdrawal would then tidy somewhere else entirely.
+//   `live:{id}`, which is why it carries a grammar rather than merely being
+//   unique: a `/` in it would address a different path, and a withdrawal would
+//   then tidy somewhere else entirely.
 //
 //   THE DECLARATION IS PROJECTED PER TIER, not published once and read by
 //   everyone. `apps/{aid}` is reader-only (a participant reading it would see
@@ -55,7 +55,7 @@ export const RESERVED_VIEW_IDS: readonly string[] = ["config"];
 /** What an id may be.
  *
  *  Narrow on purpose: this value is written by the author, and it becomes a
- *  Firestore document id under a `live:` / `staged:` prefix. Excluding `:`
+ *  Firestore document id under a `live:` prefix. Excluding `:`
  *  keeps the prefix and the id from running together; excluding `/`, `.` and
  *  `__…__` keeps it a legal document id that addresses the path it says. */
 export const VIEW_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -211,8 +211,7 @@ export function participantScope(app: AuthoredApp, cid: string, participantRead:
 }
 
 /** The declaration as one non-public audience may see it — the document
- *  published at `apps/{aid}/{tier}/live:config`, and deployed at
- *  `staged:config`.
+ *  published at `apps/{aid}/{tier}/live:config`.
  *
  *  The roster is NOT here, and neither is anything about another member: this
  *  is read by everyone the tier admits, which for `roster` includes every
@@ -231,9 +230,15 @@ export interface AppViewConfigDoc extends Record<string, unknown> {
   publishedAt: number;
 }
 
-/** The document ids one tier uses. `live:` and `staged:` are the only two
- *  prefixes, so a single `match` covers the projection and every view. */
-export const viewDocId = (stage: "live" | "staged", viewId: string): string => `${stage}:${viewId}`;
+/** The document id one view is written at. The `live:` prefix and the id are
+ *  separated by `:`, which the declared id grammar excludes, so the two never
+ *  run together — and a single `match` covers the projection and every view.
+ *
+ *  The prefix outlived what it distinguished: there was a `staged:` set beside
+ *  it, written by deploy and read at `/staging/{aid}`. It STAYS, because every
+ *  published app on disk carries these ids and dropping the prefix would make
+ *  their pages unreadable for the sake of five characters. */
+export const viewDocId = (viewId: string): string => `live:${viewId}`;
 export const VIEW_CONFIG_ID = "config";
 
 // ---------------------------------------------------------------------------

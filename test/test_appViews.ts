@@ -167,9 +167,10 @@ test("both tiers come back even when empty, so a withdrawal has something to act
   );
 });
 
-test("the document id carries the stage, and the id the author wrote", () => {
-  assert.equal(viewDocId("live", "desk"), "live:desk");
-  assert.equal(viewDocId("staged", "desk"), "staged:desk");
+test("the document id keeps the live prefix, and the id the author wrote", () => {
+  // The prefix outlived the `staged:` set it distinguished. It stays because every published app
+  // on disk is addressed by these ids.
+  assert.equal(viewDocId("desk"), "live:desk");
 });
 
 // --- what each audience may CHANGE -----------------------------------------
