@@ -1,4 +1,4 @@
-import { isReady, isRecord, type ViewDataset } from "./message.js";
+import { isReady, isRecord, readNotice, type ViewDataset, type ViewNotice } from "./message.js";
 import { VIEW_MESSAGE } from "./protocol.js";
 import type { Channel } from "./bridge.js";
 import type { Viewer } from "./capability.js";
@@ -66,6 +66,19 @@ export interface MemberBridgePorts {
    *  The page is NOT trusted to obey it. The same answer is applied again to
    *  every intent, and the rules answer after that. */
   viewer: () => Viewer;
+  /** Somewhere to put what the frame says about itself — an uncaught error, a rejected promise,
+   *  a modal the sandbox ignored.
+   *
+   *  A HOOK, and optional, exactly as `BridgePorts.notice` is: the notice is the page's own words
+   *  and only worth carrying where the host has somewhere a person will read it. mulmoserver drops
+   *  them (a member on a phone cannot act on a stack trace); MulmoTerminal's pane keeps them,
+   *  because its reader is the author who is trying to fix the page.
+   *
+   *  It is not a nicety. The notices that matter most arrive BEFORE the handshake — a page whose
+   *  script throws while the document is being parsed never reaches `ready()` — and that page,
+   *  stuck on its loading state with the reason sealed inside the frame, is the one nobody can
+   *  otherwise diagnose. */
+  notice?: ((notice: ViewNotice) => void) | undefined;
   /** What to do about an intent. Omitted, the page is read-only.
    *
    *  A GETTER, like the two above and for the same reason: a host holding this
@@ -106,6 +119,14 @@ export const memberBridge = (ports: MemberBridgePorts, nonce: () => string) => {
   };
 
   const receive = (data: unknown): void => {
+    // BEFORE the handshake is even considered, and read first: a page that never readied is
+    // exactly the one whose notice is worth having, and judging it as a `ready` first would drop
+    // it.
+    const reported = readNotice(data, nonce());
+    if (reported !== null) {
+      ports.notice?.(reported);
+      return;
+    }
     // The window carries exactly one thing this parent acts on. Everything the
     // view asks for arrives on the channel.
     if (!isReady(data, nonce()) || open !== null || offered !== null) {

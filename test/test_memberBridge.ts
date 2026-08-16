@@ -161,3 +161,30 @@ test("a second ready offers no second channel, and forget closes the first", () 
   bridge.receive(ready);
   assert.equal(made, 2);
 });
+
+test("the page's own report is carried BEFORE the handshake, which is when it matters most", () => {
+  // A page whose script throws while the document is being parsed never reaches `ready()`. It sits
+  // on its loading state with the reason sealed inside the frame, and it is the one an author
+  // cannot otherwise diagnose — so this must not wait for a connection that will never come.
+  const far = fakeChannel();
+  const heard: string[] = [];
+  const bridge = memberBridge(
+    { channel: () => far.channel, state: () => ({}), viewer: () => viewer, notice: (report) => heard.push(report.code) },
+    () => NONCE,
+  );
+  bridge.receive({ type: VIEW_MESSAGE.notice, nonce: NONCE, code: "error", detail: "boom" });
+  assert.deepEqual(heard, ["error"]);
+  // And it did NOT count as the handshake: no channel was offered.
+  assert.equal(far.posted.length, 0);
+});
+
+test("a host that keeps no notices is not made to", () => {
+  // Dropping them is the honest default: a notice is the page's own words, and a host that keeps
+  // them where nobody looks has built a place for personal data to accumulate.
+  const far = fakeChannel();
+  const bridge = memberBridge({ channel: () => far.channel, state: () => ({}), viewer: () => viewer }, () => NONCE);
+  bridge.receive({ type: VIEW_MESSAGE.notice, nonce: NONCE, code: "error", detail: "boom" });
+  bridge.receive(ready);
+  far.send({ nonce: NONCE });
+  assert.equal(far.posted.length, 1);
+});
