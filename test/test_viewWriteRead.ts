@@ -7,7 +7,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { projectedWriteOf, projectedWritesOf } from "../src/viewWriteRead.js";
+import { projectedWriteOf, projectedWritesOf } from "../src/view/writeRead.js";
 
 test("a status field with no table grants nothing, and a table with no field has nowhere to write", () => {
   // BOTH HALVES OR NEITHER. A field alone would offer every value; a table alone has no field.
