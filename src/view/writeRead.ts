@@ -1,5 +1,5 @@
-import type { AuthoredMail } from "./publishManifest.js";
-import type { ProjectedViewWrite } from "./appViews.js";
+import type { AuthoredMail } from "../publishManifest.js";
+import type { ProjectedViewWrite } from "../appViews.js";
 
 // The `write` half of a tier's projection, READ BACK.
 //
@@ -13,6 +13,12 @@ import type { ProjectedViewWrite } from "./appViews.js";
 // Nothing here grants anything. `firestore.rules` already allows every write these entries
 // describe. What a strict read buys is a page that draws only the buttons that exist, and a
 // refusal that can name itself instead of arriving as a permission error that names nothing.
+//
+// IT LIVES UNDER `view/` AND MUST STAY THERE. MulmoTerminal's headless preview serves this
+// directory over loopback and nothing else — an allow-list built from `dist/view` — so a module
+// here that imports a sibling of the directory is a 404 at load time, and the whole runtime fails
+// to parse. What the browser then shows is a page that never readies, reported as the author's.
+// The imports above are TYPES, which are erased; a runtime one would have to move too.
 //
 // mulmoterminal plans/feat-shared-app-member-write.md
 

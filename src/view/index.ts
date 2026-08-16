@@ -72,12 +72,14 @@ export {
 } from "./submit.js";
 
 // The `write` half of a projection, READ BACK — the parent's own job, which is why it is on this
-// subpath and NOT on the root.
+// subpath and NOT on the root, and why the module sits INSIDE this directory.
 //
 // The root entry reaches the compiler, and the compiler imports `@mulmoclaude/core/collection/server`
 // at runtime. A host that pulled this from there would drag core's server half — DuckDB and all —
 // into a browser bundle, which is not a size regression but a build failure: rolldown cannot load a
 // `.node` binary. mulmoserver's frontend does exactly this, and CI caught it.
 //
-// The module itself imports only TYPES, so it costs a consumer nothing.
-export { projectedWriteOf, projectedWritesOf } from "../viewWriteRead.js";
+// Inside the directory because MulmoTerminal's headless preview serves `dist/view` and nothing
+// else, so a re-export reaching a sibling of it 404s and takes the whole runtime down with it.
+// Its own tests could not see that; the browser was the only thing that could.
+export { projectedWriteOf, projectedWritesOf } from "./writeRead.js";
