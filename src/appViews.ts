@@ -115,7 +115,7 @@ function viewIdProblems(view: NormalizedView): string[] {
   }
   if (!VIEW_ID_PATTERN.test(view.id)) {
     // The id becomes a document id, so this is not style. A `/` in it
-    // addresses a different path — staging writes one place and withdrawal
+    // addresses a different path — publish writes one place and a withdrawal
     // tidies another, and neither says anything.
     return [`${view.where}.id is '${view.id}': a view id ${VIEW_ID_SHAPE}. It becomes the document id this view is published at.`];
   }
@@ -167,7 +167,7 @@ export function normalizeViews(app: AuthoredApp): NormalizedViewsResult {
     }
     problems.push(
       `${view.where}.id is '${view.id}', which ${first} already uses. The id is the document a view is published at, so two of them are one page — ` +
-        "whichever was written second would silently replace the first, in staging and again at publish.",
+        "whichever was written second would silently replace the first.",
     );
   }
   return problems.length > 0 ? { ok: false, problems } : { ok: true, views: declared.views };
@@ -190,20 +190,23 @@ export interface ProjectedViewCollection {
 
 /** How a participant reaches `cid`, or null if they cannot.
  *
- *  Mirrors the rules' read branches for someone holding no role:
- *  `partRead` (the whole collection) and `ownRow` (their own record, found
- *  by the submit declaration's `emailField` or by a uid-derived id).
+ *  Mirrors the rules' read branches for someone holding no role: `publicRead` (the collection is
+ *  open to the world, so a participant reads it as anybody does), `partRead` (the whole collection,
+ *  by `participantRead`) and `ownRow` (their own record, found by the submit declaration's
+ *  `emailField` or by a uid-derived id).
  *
- *  `participantRead` is a PARAMETER rather than read off the manifest, and
- *  that is the whole point of the signature. Publish does not promote the
- *  manifest's value: `projectPublish` overwrites `participantRead` with what
- *  the STAGED schemas carry, so a cid added since the last deploy is in the
- *  manifest and not in the rules. Deriving the scope from the manifest would
- *  publish `scope: "all"` for a collection the promoted rules then deny —
- *  and removing one gives the mirror-image false refusal. The caller passes
- *  the set that will actually be in force. */
+ *  The PUBLIC branch is not an afterthought: a booking app publishes its slots to the world and
+ *  lists them again on the participant's own page, so leaving it out refuses the most ordinary
+ *  declaration there is — and refuses it with "a participant cannot read this", about a collection
+ *  every stranger can.
+ *
+ *  `participantRead` is a PARAMETER rather than read off the manifest, from when publish promoted
+ *  a value the manifest could have moved past. Publish writes the manifest now, so the caller
+ *  passes the manifest's own — but the signature stays: the SET IN FORCE is what decides, and
+ *  making that explicit is what kept the two apart when they could differ. */
 export function participantScope(app: AuthoredApp, cid: string, participantRead: readonly string[]): ProjectedViewCollection | null {
   if (participantRead.includes(cid)) return { cid, scope: "all" };
+  if (app.public?.enabled === true && (app.public.read ?? []).includes(cid)) return { cid, scope: "all" };
   const submit: AuthoredSubmit | undefined = app.public?.submit?.[cid];
   if (submit?.emailField !== undefined) return { cid, scope: "own", emailField: submit.emailField };
   if (submit?.idFrom === "auth.uid") return { cid, scope: "own", ownDocId: "auth.uid" };

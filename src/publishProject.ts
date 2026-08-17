@@ -77,8 +77,7 @@ export interface PublishStamp {
    *  Recorded as `publishedDirty` on the app document, because a commit that
    *  does not describe what was published is worse than no commit: it looks
    *  auditable. Publish-owned like the rest of the `published*` family — a
-   *  deploy must not drop the marker, and a later CLEAN publish must clear it
-   *  rather than inherit it forever. */
+   *  later CLEAN publish must clear it rather than inherit it forever. */
   dirty?: boolean | undefined;
 }
 
@@ -361,14 +360,15 @@ export const appSchemasPath = (aid: string): string => `apps/${aid}/collections`
  *
  *  `published` is what makes the reservation invisible until publish. The slug
  *  is human-readable, so a readable reservation would let anyone guess the URL
- *  and get the aid — and the aid is the `/staging/{aid}` entrance. The rule is
+ *  and learn the aid of an app whose author has not published it. (While
+ *  `/staging/{aid}` existed, it also handed over that entrance.) The rule is
  *  `allow read: if resource.data.published == true`, which needs no `get()` and
  *  so costs nothing against the rules' expression budget. */
 export const APP_SLUGS_COLLECTION = "appSlugs";
 
-/** The reservation document. Written by deploy as `{ aid, published: false }`
- *  and flipped by publish — never re-pointed at another aid, which the rules
- *  enforce on update. */
+/** The reservation document. Written as `{ aid, published: false }` when the
+ *  name is claimed and flipped by publish — never re-pointed at another aid,
+ *  which the rules enforce on update. */
 export interface AppSlugDoc extends Record<string, unknown> {
   aid: string;
   published: boolean;
@@ -382,7 +382,7 @@ export const appConfigPath = (aid: string): string => `apps/${aid}/config`;
  *  `roster` by anyone on the roster, participants included. */
 export const appViewTierPath = (aid: string, tier: "member" | "roster"): string => `apps/${aid}/${tier}`;
 
-/** One audience's tier, as publish (or deploy) must write it.
+/** One audience's tier, as publish must write it.
  *
  *  Both tiers are returned even when empty, deliberately. An app that WITHDREW
  *  its member pages produces an empty tier, and a host that only ever saw the
@@ -392,8 +392,9 @@ export const appViewTierPath = (aid: string, tier: "member" | "roster"): string 
 export interface AppViewTier {
   tier: "member" | "roster";
   audience: Exclude<ViewAudience, "public">;
-  /** The projection document, for `{tier}/live:config` or `{tier}/staged:config`.
-   *  Meaningless when `views` is empty — the host deletes the tier instead. */
+  /** The projection document, for `{tier}/live:config` — the only prefix there
+   *  is now (`viewDocId`). Meaningless when `views` is empty — the host deletes
+   *  the tier instead. */
   config: AppViewConfigDoc;
   /** The views to publish, in declaration order. The host reads each `path`
    *  and writes it to `{tier}/live:{id}`. */
