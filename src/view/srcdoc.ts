@@ -1,5 +1,5 @@
 import { NOTICE_DETAIL_LIMIT } from "./message.js";
-import { VIEW_MESSAGE } from "./protocol.js";
+import { GESTURE_MARK, VIEW_MESSAGE } from "./protocol.js";
 
 // What the sandboxed frame is handed: our bootstrap, then the author's HTML.
 //
@@ -201,6 +201,65 @@ const noticeScript = (): string => `
   window.prompt = () => { notify("modal-ignored", "prompt"); return null; };
 `;
 
+/** The half that knows whether a CLICK caused what the page just asked for.
+ *
+ *  A window that OPENS when a trusted click begins its dispatch and CLOSES when
+ *  that dispatch is over. `GESTURE_MARK` on the outgoing message is simply
+ *  whether the window was open, and the whole of why this lives here rather
+ *  than in a host is in that constant's own note: only the realm the event is
+ *  dispatched in can answer this, and nothing outside it can.
+ *
+ *  A microtask of the click counts, because `async` handlers are how pages are
+ *  written -- `await this.validate(); view.submit(...)` is one click, and a
+ *  runtime that said otherwise would be describing a rule nobody could follow.
+ *  A `setTimeout` does not, and neither does a promise that settled in a later
+ *  turn: those are the page acting on its own, which is the thing being told
+ *  apart.
+ *
+ *  THE CLOSE IS TIED TO ITS OWN EVENT, and that is not a detail. A handler
+ *  calling `el.click()` dispatches a SECOND click inside the first, and that
+ *  one reaches the window on its way back up too -- so a close that fired for
+ *  any click at all would end the real click's window while the page was still
+ *  inside it, and the submission that followed would go unmarked. Identity is
+ *  what the DOM gives here: one dispatch, one Event object, seen twice.
+ *
+ *  Untrusted clicks are IGNORED rather than refused: a page dispatching its own
+ *  click event opens no window, and one dispatched inside a real click is
+ *  already inside the real one's. Both follow from reading `isTrusted` and
+ *  doing nothing else.
+ *
+ *  Counted rather than flagged, for the case identity does not cover: two
+ *  trusted dispatches overlapping. It costs a number and removes the question. */
+const gestureScript = (): string => `
+  let clicking = 0;
+  window.addEventListener("click", (event) => {
+    if (event.isTrusted !== true) return;
+    clicking += 1;
+    let closed = false;
+    const end = () => {
+      if (closed) return;
+      closed = true;
+      clicking -= 1;
+      window.removeEventListener("click", tail);
+    };
+    // The ordinary close: the window object is reached a SECOND time on the way
+    // back up, after every handler on the path has run. Registered HERE and not
+    // at startup, so it sits after any listener the author's page put on the
+    // window -- a listener list is copied when its object is reached, and this
+    // object has not been reached in this phase yet.
+    // ITS OWN dispatch and no other -- see the note above. A nested click reaches
+    // the window too, and closing on that one ends this window early.
+    const tail = (other) => { if (other === event) Promise.resolve().then(end); };
+    window.addEventListener("click", tail);
+    // ...and a net under it, for a dispatch that never comes back: one handler
+    // calling stopPropagation() would otherwise leave the window open for ever,
+    // and every later submission marked. A timer can only close it EARLY, never
+    // open one, so the worst this does is leave a real click unmarked -- which
+    // is the side to fail on, because the mark is what a host writes on.
+    setTimeout(end, 0);
+  }, true);
+`;
+
 export const publicViewBootstrap = (nonce: string): string => `
 <script>
 (() => {
@@ -216,12 +275,17 @@ export const publicViewBootstrap = (nonce: string): string => `
   let channel = null;
 ${channelScript()}
 ${noticeScript()}
+${gestureScript()}
   const send = (message) => { if (channel) channel.postMessage(message); else parent.postMessage(message, "*"); };
   const request = (message) => {
     const requestId = String(Date.now()) + ":" + String(Math.random());
     return new Promise((resolve) => {
       pending.set(requestId, resolve);
-      send({ ...message, requestId });
+      // The mark goes on LAST and is always present, never omitted when false.
+      // Absent then means "the runtime predates this" and false means "this
+      // runtime says no", which a host gating on it has to tell apart -- and
+      // last, so nothing a caller passes in can supply its own answer.
+      send({ ...message, requestId, [${JSON.stringify(GESTURE_MARK)}]: clicking > 0 });
     });
   };
   const bridge = {

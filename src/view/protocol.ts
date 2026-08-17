@@ -37,3 +37,30 @@ export const VIEW_MESSAGE = {
    *  way, carrying only a fixed code and a short string. */
   notice: "mc-public-view:notice",
 } as const;
+
+/** The field a `submit` (or an `intent`) carries when a CLICK caused it.
+ *
+ *  `true` means the bootstrap was inside the dispatch of a TRUSTED click — or
+ *  in a microtask of it — when the page called `submit()`. Anything else is
+ *  absent: a timer, `onState`, a promise that settled in a later turn, a click
+ *  the page synthesised itself.
+ *
+ *  It exists because CAUSATION CANNOT BE MEASURED FROM OUTSIDE. A host that
+ *  presses a button and then counts submissions learns only that one turned up
+ *  while it was pressing, and a page may submit on a timer, on load, or from a
+ *  promise settling. Four attempts to draw that line from elapsed time were
+ *  defeated in review (MulmoTerminal `plans/feat-headless-preview-parity.md`,
+ *  D-2c); the only place the answer is a FACT is the realm the event is
+ *  dispatched in, which is this bootstrap.
+ *
+ *  The mark travels on the RAW message and is deliberately not carried into
+ *  `PendingSubmit`: what a parent needs to draw a confirmation is unchanged,
+ *  and a host that gates on this reads it off the wire.
+ *
+ *  IT IS NOT A PERMISSION. Nothing here grants anything (see CLAUDE.md), and
+ *  the author's own script shares this realm — a page written to submit from
+ *  inside a click handler it dispatched itself is not prevented from doing so.
+ *  What it distinguishes is a page that acts when a control is used from one
+ *  that acts on its own, which is the question an automated visitor has and a
+ *  human one does not. */
+export const GESTURE_MARK = "gesture";
