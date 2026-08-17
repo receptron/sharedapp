@@ -203,35 +203,54 @@ const noticeScript = (): string => `
 
 /** The half that knows whether a CLICK caused what the page just asked for.
  *
- *  A window that OPENS when a trusted click begins its dispatch and CLOSES when
- *  that dispatch is over. `GESTURE_MARK` on the outgoing message is simply
- *  whether the window was open, and the whole of why this lives here rather
- *  than in a host is in that constant's own note: only the realm the event is
- *  dispatched in can answer this, and nothing outside it can.
+ *  A window that OPENS when a trusted click begins its dispatch and CLOSES at
+ *  the end of the TASK that dispatch happened in. `GESTURE_MARK` on the outgoing
+ *  message is simply whether the window was open, and the whole of why this
+ *  lives here rather than in a host is in that constant's own note: only the
+ *  realm the event is dispatched in can answer this, and nothing outside it can.
  *
- *  A microtask of the click counts, because `async` handlers are how pages are
- *  written -- `await this.validate(); view.submit(...)` is one click, and a
- *  runtime that said otherwise would be describing a rule nobody could follow.
- *  A `setTimeout` does not, and neither does a promise that settled in a later
- *  turn: those are the page acting on its own, which is the thing being told
- *  apart.
+ *  THE TASK, and not the dispatch. It was the dispatch first, closed by a
+ *  listener on the window's bubble phase, and that was wrong in both directions:
  *
- *  THE CLOSE IS TIED TO ITS OWN EVENT, and that is not a detail. A handler
- *  calling `el.click()` dispatches a SECOND click inside the first, and that
- *  one reaches the window on its way back up too -- so a close that fired for
- *  any click at all would end the real click's window while the page was still
- *  inside it, and the submission that followed would go unmarked. Identity is
- *  what the DOM gives here: one dispatch, one Event object, seen twice.
+ *  - A listener added to the window DURING the click (by a handler on the
+ *    target, say) sits after ours, so ours closed the window while the page was
+ *    still handling the click and the submission that followed went unmarked.
+ *  - Activation behaviour runs after the dispatch. A checkbox fires `change`
+ *    THERE, so `onchange: () => view.submit(...)` -- an ordinary control -- was
+ *    unmarked for exactly the same reason.
+ *
+ *  Both are a real control the visitor really used, reported as not caused by
+ *  them. Closing at the end of the task takes in the whole dispatch, the
+ *  activation behaviour, and every microtask of either, which is what a page
+ *  written in `async` handlers actually needs. A `setTimeout`, an animation
+ *  frame, a promise that settled in a later turn: all still outside.
+ *
+ *  THE CLOSE IS ARMED IN EVERY QUEUE THE PAGE COULD DEFER INTO, at the START of
+ *  the dispatch, and that is the load-bearing part. A task source is FIFO, so a
+ *  close queued before any handler has run is ahead of anything the page queues
+ *  from inside one -- ahead, not racing. One net was not enough: with only a
+ *  timer, a handler calling `stopPropagation()` and deferring through a
+ *  `MessageChannel` reached its own callback FIRST in every engine that runs
+ *  message tasks before timers, and submitted into a window that was still open.
+ *  So there is one in each: timers, posted messages, port messages.
+ *
+ *  The word the self-post carries is RANDOM and must never be the nonce. The
+ *  author's script shares this realm and can listen for the message, so a nonce
+ *  in it would hand over the one value this file protects. What a page learns
+ *  instead is how to close its own window early, which costs it a mark and
+ *  gains it nothing.
  *
  *  Untrusted clicks are IGNORED rather than refused: a page dispatching its own
  *  click event opens no window, and one dispatched inside a real click is
- *  already inside the real one's. Both follow from reading `isTrusted` and
- *  doing nothing else.
+ *  already inside the real one's -- and now needs no untangling, because nothing
+ *  about the close depends on which dispatch it belonged to.
  *
- *  Counted rather than flagged, for the case identity does not cover: two
- *  trusted dispatches overlapping. It costs a number and removes the question. */
+ *  Counted rather than flagged, for two trusted dispatches that overlap. It
+ *  costs a number and removes the question. */
 const gestureScript = (): string => `
   let clicking = 0;
+  // Not the nonce, and not derived from it -- see the note above.
+  const closeWord = "gesture-close:" + String(Math.random());
   window.addEventListener("click", (event) => {
     if (event.isTrusted !== true) return;
     clicking += 1;
@@ -240,23 +259,20 @@ const gestureScript = (): string => `
       if (closed) return;
       closed = true;
       clicking -= 1;
-      window.removeEventListener("click", tail);
+      window.removeEventListener("message", hear);
     };
-    // The ordinary close: the window object is reached a SECOND time on the way
-    // back up, after every handler on the path has run. Registered HERE and not
-    // at startup, so it sits after any listener the author's page put on the
-    // window -- a listener list is copied when its object is reached, and this
-    // object has not been reached in this phase yet.
-    // ITS OWN dispatch and no other -- see the note above. A nested click reaches
-    // the window too, and closing on that one ends this window early.
-    const tail = (other) => { if (other === event) Promise.resolve().then(end); };
-    window.addEventListener("click", tail);
-    // ...and a net under it, for a dispatch that never comes back: one handler
-    // calling stopPropagation() would otherwise leave the window open for ever,
-    // and every later submission marked. A timer can only close it EARLY, never
-    // open one, so the worst this does is leave a real click unmarked -- which
-    // is the side to fail on, because the mark is what a host writes on.
+    const hear = (message) => { if (message.source === window && message.data === closeWord) end(); };
+    // Three, because a page may defer into any of the three and the browser
+    // chooses which source to serve first. Within one source it cannot get ahead
+    // of us: these are queued before a single handler of this click has run.
     setTimeout(end, 0);
+    window.addEventListener("message", hear);
+    window.postMessage(closeWord, "*");
+    if (typeof MessageChannel === "function") {
+      const hop = new MessageChannel();
+      hop.port1.onmessage = end;
+      hop.port2.postMessage(0);
+    }
   }, true);
 `;
 

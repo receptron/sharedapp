@@ -40,10 +40,15 @@ export const VIEW_MESSAGE = {
 
 /** The field a `submit` (or an `intent`) carries when a CLICK caused it.
  *
- *  `true` means the bootstrap was inside the dispatch of a TRUSTED click — or
- *  in a microtask of it — when the page called `submit()`. Anything else is
- *  absent: a timer, `onState`, a promise that settled in a later turn, a click
- *  the page synthesised itself.
+ *  `true` means the page called `submit()` in the TASK a trusted click was
+ *  dispatched in — the dispatch itself, the activation behaviour that follows
+ *  it (a checkbox's `change`), or any microtask of either. Everything else is
+ *  `false`: a timer, an animation frame, `onState`, a promise that settled in a
+ *  later turn, a click the page synthesised itself.
+ *
+ *  The task rather than the dispatch, because the two ends of a dispatch are
+ *  not both observable — see `gestureScript` in `srcdoc.ts` for what went wrong
+ *  when this was drawn tighter.
  *
  *  It exists because CAUSATION CANNOT BE MEASURED FROM OUTSIDE. A host that
  *  presses a button and then counts submissions learns only that one turned up
