@@ -31,7 +31,13 @@ import type { IntentAnswer } from "./intent.js";
 //
 // A VIEW LEFT WAITING LOOKS LIKE A DEAD BUTTON. So a message this parent will
 // not act on is REFUSED rather than dropped — including on a page that passes
-// no `perform` at all, which is genuinely read-only and says so in one word.
+// no `perform` at all, which is genuinely read-only and says so in one word,
+// and including a `perform` that REJECTS. A host is supposed to turn a failed
+// write into an answer, so a rejection arriving here is a defect rather than
+// something a member did — but a defect that drops the rejection is a promise
+// in the view that never settles again, which is the dead button with no way
+// left to find out why. It is answered with a fixed code instead, and the
+// reason goes to the host.
 
 /** What this parent does about an intent. Null means "not something anybody
  *  asked to be answered"; anything else is answered on the channel it arrived
@@ -47,10 +53,36 @@ export const refuseEverything: PerformIntent = (data) => {
   return Promise.resolve({ requestId: data.requestId, ok: false, error: "read-only" });
 };
 
-/** A rejection that has already been reported: `perform` turns a failed write
- *  into an ANSWER, so anything reaching here is a defect in the host rather
- *  than something to show a member. Named so it is visibly handled. */
-const ignore = (): undefined => undefined;
+/** What a view is told when `perform` broke instead of answering.
+ *
+ *  ONE FIXED WORD, and never the exception. The page is the author's; why the
+ *  host failed is not — a message off a Firestore client or a stack from a
+ *  parent the author never wrote is internal detail arriving in a document that
+ *  can put it on screen or post it anywhere. It is also not actionable: nothing
+ *  a member can press fixes it. So the view learns that this request will not
+ *  be answered any other way, in a name it can match on, and the reason goes to
+ *  the host through `defect`.
+ *
+ *  PERMANENT, like the rest of the wire vocabulary: published pages compare
+ *  this string. */
+export const HOST_ERROR = "host-error";
+
+/** The id an answer would go back on, or null when the message carries none —
+ *  in which case nobody is waiting on a reply and posting one would be
+ *  answering something nobody asked. Same rule as {@link refuseEverything}. */
+const answerId = (data: Record<string, unknown>): string | null => (typeof data.requestId === "string" ? data.requestId : null);
+
+/** `perform` as a promise even when it throws on the way to returning one — a
+ *  host that throws synchronously would otherwise take the channel's message
+ *  handler down with it, which is the same lost request by a shorter route.
+ *  No extra turn: the returned promise is passed straight through. */
+const performed = (perform: PerformIntent, data: unknown): Promise<IntentAnswer | null> => {
+  try {
+    return perform(data);
+  } catch (error) {
+    return Promise.reject(error);
+  }
+};
 
 export interface MemberBridgePorts {
   /** Create the channel and hand its far end to the frame. Called ONCE, in
@@ -95,6 +127,22 @@ export interface MemberBridgePorts {
    *  captured once would judge a later intent with the app that was on screen
    *  before. */
   perform?: (() => PerformIntent | undefined) | undefined;
+  /** Where a defect of the HOST'S OWN goes: `perform` rejected, or threw before
+   *  it returned a promise.
+   *
+   *  Not `notice`, which carries what the FRAME said about itself and is the
+   *  author's to read. This is the other direction — the parent failed, in code
+   *  the author did not write — so it is a separate hook whose reader is
+   *  whoever runs the host: a log line, a Sentry event, a failing test.
+   *
+   *  Optional, and the bridge does nothing with the error when it is omitted:
+   *  this package has no console and no clock, and a host that would rather
+   *  print nothing is not made to. The view is answered either way, which is
+   *  the part that must not depend on a host remembering to pass a hook.
+   *
+   *  `requestId` is the id the answer went back on, or null when the message
+   *  carried none and nothing could be answered. */
+  defect?: ((error: unknown, requestId: string | null) => void) | undefined;
 }
 
 export const memberBridge = (ports: MemberBridgePorts, nonce: () => string) => {
@@ -118,14 +166,26 @@ export const memberBridge = (ports: MemberBridgePorts, nonce: () => string) => {
       return;
     }
     const perform = ports.perform?.() ?? refuseEverything;
-    perform(data).then((answer) => {
-      // The channel the request arrived on, not `open`: the two are the same
-      // channel today, and answering the one that asked is the property worth
-      // keeping if that ever stops being true.
-      if (answer !== null) {
-        channel.post({ type: VIEW_MESSAGE.result, ...answer });
-      }
-    }, ignore);
+    performed(perform, data).then(
+      (answer) => {
+        // The channel the request arrived on, not `open`: the two are the same
+        // channel today, and answering the one that asked is the property worth
+        // keeping if that ever stops being true.
+        if (answer !== null) {
+          channel.post({ type: VIEW_MESSAGE.result, ...answer });
+        }
+      },
+      (error: unknown) => {
+        const requestId = answerId(data);
+        if (requestId !== null) {
+          channel.post({ type: VIEW_MESSAGE.result, requestId, ok: false, error: HOST_ERROR });
+        }
+        // AFTER the answer, so a host whose hook throws in turn cannot be the
+        // reason the view is left waiting — the thing this branch exists to
+        // prevent.
+        ports.defect?.(error, requestId);
+      },
+    );
   };
 
   const receive = (data: unknown): void => {

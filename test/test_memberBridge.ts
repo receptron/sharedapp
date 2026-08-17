@@ -13,7 +13,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { memberBridge } from "../src/view/memberBridge.js";
+import { HOST_ERROR, memberBridge } from "../src/view/memberBridge.js";
 import { VIEW_MESSAGE } from "../src/view/protocol.js";
 import type { Channel } from "../src/view/bridge.js";
 import type { Viewer } from "../src/view/capability.js";
@@ -136,6 +136,121 @@ test("something nobody asked about is not answered", async () => {
   far.send({ hello: "there" });
   await Promise.resolve();
   assert.equal(far.posted.length, before);
+});
+
+test("a perform that REJECTS still answers, in one fixed word", async () => {
+  // The case this exists for: a host defect used to be dropped, and the view's
+  // promise for that request never settled again. A button that will not come
+  // back is worse than a refused one, and nobody can see why from inside.
+  const far = fakeChannel();
+  const defects: { error: unknown; requestId: string | null }[] = [];
+  const bridge = memberBridge(
+    {
+      channel: () => far.channel,
+      state: () => ({}),
+      viewer: () => viewer,
+      perform: () => () => Promise.reject(new Error("firestore: PERMISSION_DENIED at /apps/x/secret")),
+      defect: (error, requestId) => defects.push({ error, requestId }),
+    },
+    () => NONCE,
+  );
+  bridge.receive(ready);
+  far.send({ nonce: NONCE });
+  far.send({ type: VIEW_MESSAGE.intent, requestId: "r3", kind: "transition", cid: "bookings", itemId: "x", to: "approved" });
+  await Promise.resolve();
+  const last = far.posted.at(-1);
+  assert.equal(last?.type, VIEW_MESSAGE.result);
+  assert.equal(last?.requestId, "r3");
+  assert.equal(last?.ok, false);
+  // The page is the author's; why the host broke is not.
+  assert.equal(last?.error, HOST_ERROR);
+  assert.equal(JSON.stringify(last).includes("PERMISSION_DENIED"), false);
+  // And the reason went to the host, which is where somebody can act on it.
+  assert.equal(defects.length, 1);
+  assert.equal(defects[0]?.requestId, "r3");
+  assert.match(String((defects[0]?.error as Error).message), /PERMISSION_DENIED/);
+});
+
+test("a perform that THROWS before returning a promise is the same case", async () => {
+  const far = fakeChannel();
+  const bridge = memberBridge(
+    {
+      channel: () => far.channel,
+      state: () => ({}),
+      viewer: () => viewer,
+      perform: () => () => {
+        throw new Error("read of undefined");
+      },
+    },
+    () => NONCE,
+  );
+  bridge.receive(ready);
+  far.send({ nonce: NONCE });
+  // It must not take the channel's handler down with it, either.
+  far.send({ type: VIEW_MESSAGE.intent, requestId: "r4", kind: "transition", cid: "bookings", itemId: "x", to: "approved" });
+  await Promise.resolve();
+  const last = far.posted.at(-1);
+  assert.equal(last?.requestId, "r4");
+  assert.equal(last?.error, HOST_ERROR);
+});
+
+test("a rejection about something nobody asked is still not answered", async () => {
+  // The paired acceptance for the two above: `ok: false` is not posted at a
+  // message that carries no request id, because there is no promise waiting on
+  // one. A host with a defect hook still hears about it.
+  const far = fakeChannel();
+  const defects: (string | null)[] = [];
+  const bridge = memberBridge(
+    {
+      channel: () => far.channel,
+      state: () => ({}),
+      viewer: () => viewer,
+      perform: () => () => Promise.reject(new Error("boom")),
+      defect: (_error, requestId) => defects.push(requestId),
+    },
+    () => NONCE,
+  );
+  bridge.receive(ready);
+  far.send({ nonce: NONCE });
+  const before = far.posted.length;
+  far.send({ hello: "there" });
+  await Promise.resolve();
+  assert.equal(far.posted.length, before);
+  assert.deepEqual(defects, [null]);
+});
+
+test("a host that passes no defect hook is not made to, and the view is answered anyway", async () => {
+  const far = fakeChannel();
+  const bridge = memberBridge(
+    { channel: () => far.channel, state: () => ({}), viewer: () => viewer, perform: () => () => Promise.reject(new Error("boom")) },
+    () => NONCE,
+  );
+  bridge.receive(ready);
+  far.send({ nonce: NONCE });
+  far.send({ type: VIEW_MESSAGE.intent, requestId: "r5", kind: "transition", cid: "bookings", itemId: "x", to: "approved" });
+  await Promise.resolve();
+  assert.equal(far.posted.at(-1)?.error, HOST_ERROR);
+});
+
+test("a perform that ANSWERS is untouched by any of this", async () => {
+  // The acceptance that keeps the refusals honest: a host's own refusal reaches
+  // the view in the host's own words, and only a defect is flattened.
+  const far = fakeChannel();
+  const bridge = memberBridge(
+    {
+      channel: () => far.channel,
+      state: () => ({}),
+      viewer: () => viewer,
+      perform: () => (data) => Promise.resolve({ requestId: isRecordLike(data) ? String(data.requestId) : "?", ok: false, error: "illegal-transition" }),
+    },
+    () => NONCE,
+  );
+  bridge.receive(ready);
+  far.send({ nonce: NONCE });
+  far.send({ type: VIEW_MESSAGE.intent, requestId: "r6", kind: "transition", cid: "bookings", itemId: "x", to: "approved" });
+  await Promise.resolve();
+  assert.equal(far.posted.at(-1)?.requestId, "r6");
+  assert.equal(far.posted.at(-1)?.error, "illegal-transition");
 });
 
 test("a second ready offers no second channel, and forget closes the first", () => {
