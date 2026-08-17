@@ -60,7 +60,20 @@ const listed = new Set(
     .map((line) => (line.startsWith("package/") ? line.slice("package/".length) : line)),
 );
 
-const missing = [...declared].sort().filter((path) => !listed.has(path));
+const escapeRegExp = (literal) => literal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** A subpath pattern (`"./view/*": "./dist/view/*.js"`) names a SET of files, not one file.
+ *  Checking it literally would fail a tarball that is perfectly correct, and this script
+ *  exists to be added to without being re-read — the day someone declares a pattern, it must
+ *  not be CI refusing a good publish. `*` in an exports pattern may span `/`, so it maps to
+ *  `.*`; at least one packed FILE (tar lists directories with a trailing slash) has to match. */
+const satisfied = (path) => {
+  if (!path.includes("*")) return listed.has(path);
+  const pattern = new RegExp(`^${path.split("*").map(escapeRegExp).join(".*")}$`);
+  return [...listed].some((entry) => !entry.endsWith("/") && pattern.test(entry));
+};
+
+const missing = [...declared].sort().filter((path) => !satisfied(path));
 for (const path of [...declared].sort()) {
   console.log(`${missing.includes(path) ? "MISSING" : "ok     "} ${path}`);
 }
