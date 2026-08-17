@@ -5,7 +5,7 @@ refuses before it writes any of them.
 
 ```
 app.json ──► projectApp        ──► apps/{aid}, apps/{aid}/config/public, schemas
-         ├─► projectPublish    ──► the same documents, split into write order
+         ├─► projectPublish    ──► the same document data, for the caller's write order
          ├─► projectAppViews   ──► apps/{aid}/{member,roster}/config
          └─► publishProblems   ──► the refusals, before anything is written
 ```
