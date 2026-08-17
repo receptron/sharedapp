@@ -1,4 +1,4 @@
-// WHETHER A CLICK CAUSED WHAT THE PAGE ASKED FOR, decided in the only place that can know.
+// WHETHER THE VISITOR CAUSED WHAT THE PAGE ASKED FOR, decided in the only place that can know.
 //
 // The mark exists because causation cannot be measured from outside the realm the event is
 // dispatched in. A host that presses a button and counts submissions learns that one turned up
@@ -6,22 +6,15 @@
 // four turns later. Four attempts to draw that line from elapsed time were defeated in review
 // (MulmoTerminal `plans/feat-headless-preview-parity.md`, D-2c). This is what replaced them.
 //
-// So the assertions are about the WINDOW: when it opens, when it closes, and which side of it each
-// way a page can call `submit()` falls on. What is written on the strength of this mark is a real
-// record in somebody's app, so a false `true` is the expensive direction — and a false `false` is
-// a control the visitor really used, reported as not caused by them. Both are here.
+// A false `true` writes a record in somebody's real app for something no visitor did. A false
+// `false` is a control the visitor really used, reported as not caused by them. Both are here.
 //
-// The bootstrap is RUN rather than read, for the reason `test_viewNotice.ts` gives: a test that
-// greps the generated string agrees with the implementation and not with reality. Two things are
-// modelled by hand because the design rests on them:
-//
-//   DISPATCH — window capture first, window bubble last, the listener list copied when its object
-//   is reached, a microtask checkpoint between handlers, and activation behaviour (a checkbox's
-//   `change`) after the whole of it, in the same task.
-//
-//   TASK SOURCES — a timer queue, a posted-message queue and a port-message queue, each FIFO, and
-//   the browser free to serve whichever it likes first. That last freedom is why the close is armed
-//   in all three: `flush` takes the order, and each source gets a test where IT is served first.
+// THE MODEL IS ONE FACT, and that is the point of the design under test. The dispatch algorithm
+// resets an event's `eventPhase` to `NONE` when the dispatch is over, so this file sets the phase
+// while listeners run and zeroes it afterwards, and everything else follows. Two earlier designs
+// tried to CLOSE a window at the right moment and needed a model of listener ordering and of the
+// event loop's task sources to test — a model which, both times, agreed with the implementation
+// and not with the browser. Nothing below models a queue, because nothing in the code reads one.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -31,8 +24,6 @@ import { GESTURE_MARK, VIEW_MESSAGE } from "../src/view/protocol.js";
 import { publicViewBootstrap } from "../src/view/srcdoc.js";
 
 const NONCE = "nonce-1";
-
-type Source = "timers" | "messages" | "ports";
 
 interface Registered {
   type: string;
@@ -46,19 +37,13 @@ interface Bridge {
 }
 
 /** The bootstrap, running, with a window that keeps every listener rather than the last one per
- *  name, and with the three task sources a page can defer into.
- *
- *  The existing harness in `test_viewNotice.ts` keeps one listener per name and has no queues at
- *  all, which is enough for notices and is exactly what this file cannot use. */
+ *  name. The harness in `test_viewNotice.ts` keeps one per name, which is enough for notices and
+ *  not for this: the mechanism registers two capture listeners and the tests add more. */
 const runBootstrap = () => {
   const posted: Record<string, unknown>[] = [];
   const listeners: Registered[] = [];
-  const queues: Record<Source, (() => void)[]> = { timers: [], messages: [], ports: [] };
   const captures = (options: unknown): boolean =>
     options === true || (typeof options === "object" && options !== null && (options as { capture?: unknown }).capture === true);
-  const fire = (type: string, event: Record<string, unknown>) => {
-    for (const one of listeners.filter((each) => each.type === type && !each.capture).slice()) one.handler(event);
-  };
   const win: Record<string, unknown> = {
     addEventListener: (type: string, handler: (event: Record<string, unknown>) => void, options?: unknown) => {
       listeners.push({ type, handler, capture: captures(options) });
@@ -67,26 +52,11 @@ const runBootstrap = () => {
       const at = listeners.findIndex((one) => one.type === type && one.handler === handler && one.capture === captures(options));
       if (at >= 0) listeners.splice(at, 1);
     },
-    postMessage: (data: unknown) => queues.messages.push(() => fire("message", { source: win, data })),
   };
-  class Channel {
-    port1: { onmessage: ((event: { data: unknown }) => void) | null };
-    port2: { postMessage: (data: unknown) => void };
-    constructor() {
-      const port1: { onmessage: ((event: { data: unknown }) => void) | null } = { onmessage: null };
-      this.port1 = port1;
-      this.port2 = { postMessage: (data: unknown) => queues.ports.push(() => port1.onmessage?.({ data })) };
-    }
-  }
   const context = {
     window: win,
     parent: { postMessage: (message: Record<string, unknown>) => posted.push(message) },
     document: { currentScript: null },
-    setTimeout: (handler: () => void) => {
-      queues.timers.push(handler);
-      return 0;
-    },
-    MessageChannel: Channel,
   };
   vm.createContext(context);
   vm.runInContext(
@@ -98,12 +68,7 @@ const runBootstrap = () => {
   const bridge = win.__MC_APP_VIEW as Bridge;
   const asked = () => posted.filter((message) => message.type === VIEW_MESSAGE.submit || message.type === VIEW_MESSAGE.intent);
   const marks = () => asked().map((message) => message[GESTURE_MARK]);
-  /** Whatever the page deferred into, queued from INSIDE its own handler — which is the only place
-   *  a page can queue from, and therefore always behind the close armed before the dispatch began. */
-  const defer = (source: Source, work: () => void): void => {
-    queues[source].push(work);
-  };
-  return { win, listeners, bridge, asked, marks, queues, defer };
+  return { win, listeners, bridge, asked, marks };
 };
 
 type Frame = ReturnType<typeof runBootstrap>;
@@ -114,57 +79,53 @@ const settle = async (): Promise<void> => {
   for (let n = 0; n < 5; n += 1) await Promise.resolve();
 };
 
-/** Later turns of the event loop, serving the sources in the order given.
- *
- *  The order is a PARAMETER because the browser's is not fixed: the event loop picks a task source,
- *  and only FIFO WITHIN one is guaranteed. Each source below gets a test where it is served first,
- *  which is what makes each of the three closes necessary rather than decorative. */
-const flush = async (frame: Frame, order: Source[] = ["messages", "ports", "timers"]): Promise<void> => {
-  for (const source of order) {
-    while (frame.queues[source].length > 0) {
-      frame.queues[source].shift()?.();
-      await settle();
-    }
-  }
-};
+const CAPTURING = 1;
+const AT_TARGET = 2;
+const BUBBLING = 3;
+const NONE = 0;
 
-/** ONE dispatch of a click, as the DOM performs it.
+/** ONE dispatch, as the DOM performs it.
  *
- *  `during` stands in for the handlers on the path; `after` for activation behaviour, which runs
- *  when the dispatch is over and the task is not — a checkbox's `change` is there.
- *  `reachesWindowAgain: false` is a handler that called `stopPropagation()`. */
-const clickThrough = async (
-  frame: Frame,
-  options: { trusted?: boolean; during?: () => void | Promise<void>; after?: () => void; reachesWindowAgain?: boolean } = {},
-) => {
-  const event = { isTrusted: options.trusted !== false, type: "click" };
-  // The list is copied when its object is REACHED, and there is a microtask checkpoint between one
-  // listener and the next — the stack empties back to the browser between them. Both matter: a
-  // close deferred by a microtask from an earlier listener therefore lands BEFORE a later one runs.
+ *  Three things are modelled and each is a DOM fact the design rests on: the listener list is
+ *  copied when its object is REACHED (so one added mid-dispatch is still called), there is a
+ *  microtask checkpoint between one listener and the next, and the phase is reset to `NONE` in the
+ *  last steps of the algorithm — including when a handler stopped propagation, because stopping
+ *  propagation ends the dispatch rather than abandoning it. */
+const dispatch = async (frame: Frame, type: string, options: { trusted?: boolean; during?: () => void | Promise<void>; reachesWindowAgain?: boolean } = {}) => {
+  const event: Record<string, unknown> = { isTrusted: options.trusted !== false, type, eventPhase: CAPTURING };
   const invoke = async (capture: boolean) => {
-    for (const one of frame.listeners.filter((each) => each.type === "click" && each.capture === capture).slice()) {
+    for (const one of frame.listeners.filter((each) => each.type === type && each.capture === capture).slice()) {
       one.handler(event);
       await settle();
     }
   };
   await invoke(true);
+  event.eventPhase = AT_TARGET;
   if (options.during !== undefined) await options.during();
   await settle();
-  if (options.reachesWindowAgain !== false) await invoke(false);
+  if (options.reachesWindowAgain !== false) {
+    event.eventPhase = BUBBLING;
+    await invoke(false);
+  }
   await settle();
-  if (options.after !== undefined) options.after();
+  event.eventPhase = NONE;
   await settle();
 };
 
-const onWindow = (frame: Frame, handler: () => void) => (frame.win.addEventListener as (type: string, handler: () => void) => void)("click", handler);
+const clickThrough = (frame: Frame, options: Parameters<typeof dispatch>[2] = {}) => dispatch(frame, "click", options);
+
+const onWindow = (frame: Frame, type: string, handler: () => void) =>
+  (frame.win.addEventListener as (type: string, handler: () => void) => void)(type, handler);
+
+const submit = (frame: Frame) => void frame.bridge.submit("orders", { name: "x" });
 
 test("a submit made inside a trusted click is marked", async () => {
   const frame = runBootstrap();
-  await clickThrough(frame, { during: () => void frame.bridge.submit("orders", { name: "x" }) });
+  await clickThrough(frame, { during: () => submit(frame) });
   assert.deepEqual(frame.marks(), [true]);
 });
 
-test("a submit from an async handler — one await in — is still marked", async () => {
+test("a submit from an async handler — several awaits in — is still marked", async () => {
   // The shape pages are actually written in. A runtime that said `await this.validate()` broke the
   // chain would be describing a rule nobody could follow, and every real form would go unmarked.
   const frame = runBootstrap();
@@ -172,91 +133,97 @@ test("a submit from an async handler — one await in — is still marked", asyn
     during: async () => {
       await Promise.resolve();
       await Promise.resolve();
-      void frame.bridge.submit("orders", { name: "x" });
+      submit(frame);
     },
   });
   assert.deepEqual(frame.marks(), [true]);
 });
 
 test("a submit from a window listener the click itself added is marked", async () => {
-  // Closing on the window's bubble phase could not do this: our own close sat BEFORE any listener
-  // added while the click was in flight, so it ran first and the page's submit came out false.
+  // Closing on the window's bubble phase could not do this: the close sat BEFORE any listener added
+  // while the click was in flight, and a microtask checkpoint between listeners let it run first.
   const frame = runBootstrap();
-  await clickThrough(frame, { during: () => onWindow(frame, () => void frame.bridge.submit("orders", { name: "x" })) });
+  await clickThrough(frame, { during: () => onWindow(frame, "click", () => submit(frame)) });
   assert.deepEqual(frame.marks(), [true]);
 });
 
-test("a submit from activation behaviour — a checkbox's change — is marked", async () => {
-  // Activation behaviour runs AFTER the dispatch and in the same task. `onchange` saving a toggle
-  // is an ordinary control, and a close tied to the dispatch reported it as nobody's doing.
+test("a submit from a checkbox's change is marked, though the click's dispatch is over", async () => {
+  // Activation behaviour fires `change` AFTER the click has finished dispatching, so on `click`
+  // alone this — an ordinary save-on-toggle control — was reported as nobody's doing.
   const frame = runBootstrap();
-  await clickThrough(frame, { after: () => void frame.bridge.submit("orders", { name: "x" }) });
+  await clickThrough(frame);
+  await dispatch(frame, "change", { during: () => submit(frame) });
   assert.deepEqual(frame.marks(), [true]);
 });
 
-test("a submit with no click anywhere near it is NOT marked", async () => {
+test("a submit with no event anywhere near it is NOT marked", async () => {
   // A page that submits from `onState`, or on load. This is the case the whole mark exists for:
-  // it looks identical to a click-caused one from outside, and it is not one.
+  // from outside it is indistinguishable from a click-caused one, and it is not one.
   const frame = runBootstrap();
-  void frame.bridge.submit("orders", { name: "x" });
+  submit(frame);
   await settle();
   assert.deepEqual(frame.marks(), [false]);
 });
 
-test("a click the PAGE dispatched opens no window", async () => {
+test("a click the PAGE dispatched opens nothing", async () => {
   // `el.click()` and `dispatchEvent(new MouseEvent("click"))` are a page acting on its own with a
   // click's name on it. `isTrusted` is the browser's word and cannot be set from script.
   const frame = runBootstrap();
-  await clickThrough(frame, { trusted: false, during: () => void frame.bridge.submit("orders", { name: "x" }) });
+  await clickThrough(frame, { trusted: false, during: () => submit(frame) });
   assert.deepEqual(frame.marks(), [false]);
 });
 
-for (const source of ["timers", "messages", "ports"] as const) {
-  test(`a submit deferred into the ${source} queue is NOT marked, even when that queue is served first`, async () => {
-    // One test per task source, and each is served FIRST here, because the event loop is free to
-    // choose and only FIFO within a source is promised. With a close in just one of the three, a
-    // page deferring into either of the others submitted into a window that was still open — which
-    // is a write, in somebody's real app, for something no visitor did.
-    const frame = runBootstrap();
-    await clickThrough(frame, { during: () => frame.defer(source, () => void frame.bridge.submit("orders", { name: "x" })) });
-    await flush(frame, [source, "timers", "messages", "ports"]);
-    assert.deepEqual(frame.marks(), [false]);
-  });
+test("a change the PAGE dispatched opens nothing either", async () => {
+  // `change` is here because the browser fires it for a committed user modification. Dispatched by
+  // script it is the page's own doing, and admitting a second event type must not admit a bypass.
+  const frame = runBootstrap();
+  await dispatch(frame, "change", { trusted: false, during: () => submit(frame) });
+  assert.deepEqual(frame.marks(), [false]);
+});
 
-  test(`...and still NOT marked when the click's propagation was stopped first (${source})`, async () => {
-    // stopPropagation() takes away every listener-based close there could be, so the queued ones
-    // are the only ones left. This is the pairing that defeated the single timer: a handler that
-    // stops the click and hops through a MessageChannel arrives before a timer in every engine.
+test("typing does not open it: `input` is not one of the events held", async () => {
+  // A page that submits on `input` would be marked on every keystroke — and the automated visitor
+  // this mark is for fills the form in before it presses anything.
+  const frame = runBootstrap();
+  await dispatch(frame, "input", { during: () => submit(frame) });
+  assert.deepEqual(frame.marks(), [false]);
+});
+
+for (const later of ["a timer", "an animation frame", "a message", "a task queued before the click ever happened"]) {
+  test(`a submit from ${later} is NOT marked`, async () => {
+    // ONE test body for four mechanisms, and that is the argument for reading `eventPhase` rather
+    // than closing a window. Two earlier designs had to reason about which of these runs first —
+    // animation frames beat every task; a task queued before the click may be selected before one
+    // queued during it — and each got it wrong somewhere. Here they are all simply after the
+    // dispatch, by the same single fact, with nothing to order.
     const frame = runBootstrap();
-    await clickThrough(frame, {
-      reachesWindowAgain: false,
-      during: () => frame.defer(source, () => void frame.bridge.submit("orders", { name: "x" })),
-    });
-    await flush(frame, [source, "timers", "messages", "ports"]);
+    await clickThrough(frame);
+    submit(frame);
+    await settle();
     assert.deepEqual(frame.marks(), [false]);
   });
 }
 
-test("a click whose propagation was stopped does not leave the window open for ever", async () => {
-  // The counter has to come back to zero. Left at one, EVERY later submission — timers, onState,
-  // load — would be marked for the rest of the document's life.
+test("stopping propagation ends the dispatch rather than abandoning it", async () => {
+  // The case that needed a fallback under every previous design, and needs none here: a handler
+  // calling stopPropagation() still reaches the end of the algorithm, so the phase is reset like
+  // any other. What it submits DURING the click counts; what it defers does not.
   const frame = runBootstrap();
-  await clickThrough(frame, { reachesWindowAgain: false });
-  await flush(frame);
-  void frame.bridge.submit("orders", { name: "x" });
+  await clickThrough(frame, { reachesWindowAgain: false, during: () => submit(frame) });
+  submit(frame);
   await settle();
-  assert.deepEqual(frame.marks(), [false]);
+  assert.deepEqual(frame.marks(), [true, false]);
 });
 
-test("a click the page dispatches INSIDE a real one does not close the real one's window", async () => {
-  // The inner dispatch is untrusted, so it arms nothing and closes nothing. Worth pinning: when the
-  // close was a listener rather than a queued task, the inner click reached the window FIRST and
-  // ended the real click's window while the page was still inside it.
+test("a click the page dispatches INSIDE a real one does not take the real one's answer away", async () => {
+  // The untrusted one is not held, and the real one is still mid-dispatch and still answers for
+  // itself. Worth pinning: when this was a window being closed, the inner dispatch reached the
+  // window FIRST and ended the real click's window while the page was still inside it.
   const frame = runBootstrap();
   await clickThrough(frame, {
     during: async () => {
       await clickThrough(frame, { trusted: false });
-      void frame.bridge.submit("orders", { name: "x" });
+      submit(frame);
     },
   });
   assert.deepEqual(frame.marks(), [true]);
@@ -266,7 +233,7 @@ test("the mark is a boolean on every request, so ABSENT can only mean an older r
   // A host gating writes on this has to tell "this runtime says no" from "this runtime predates the
   // mark". Omitted when false, the two would be the same message.
   const frame = runBootstrap();
-  void frame.bridge.submit("orders", { name: "x" });
+  submit(frame);
   await settle();
   const message = frame.asked()[0];
   assert.ok(message !== undefined && Object.hasOwn(message, GESTURE_MARK));
@@ -290,17 +257,4 @@ test("nothing a caller passes in can supply its own mark", async () => {
   void frame.bridge.submit(cid, { [GESTURE_MARK]: "true" });
   await settle();
   assert.equal(frame.asked()[0]?.[GESTURE_MARK], false);
-});
-
-test("the word the close travels on is not the nonce, which the page must never learn", async () => {
-  // The self-post is readable by the author's own script — same realm, and `message` is a public
-  // event. The nonce in it would hand over the one value this file spends four paragraphs
-  // protecting. What a page can do with the word it does get is close its own window early.
-  const frame = runBootstrap();
-  const seen: unknown[] = [];
-  (frame.win.addEventListener as (type: string, handler: (event: { data: unknown }) => void) => void)("message", (event) => seen.push(event.data));
-  await clickThrough(frame);
-  await flush(frame);
-  assert.ok(seen.length > 0);
-  assert.ok(seen.every((data) => typeof data === "string" && !data.includes(NONCE)));
 });

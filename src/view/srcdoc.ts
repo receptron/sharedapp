@@ -201,79 +201,67 @@ const noticeScript = (): string => `
   window.prompt = () => { notify("modal-ignored", "prompt"); return null; };
 `;
 
-/** The half that knows whether a CLICK caused what the page just asked for.
+/** The half that knows whether the VISITOR caused what the page just asked for.
  *
- *  A window that OPENS when a trusted click begins its dispatch and CLOSES at
- *  the end of the TASK that dispatch happened in. `GESTURE_MARK` on the outgoing
- *  message is simply whether the window was open, and the whole of why this
- *  lives here rather than in a host is in that constant's own note: only the
- *  realm the event is dispatched in can answer this, and nothing outside it can.
+ *  It ASKS, and schedules nothing. The DOM resets an event's `eventPhase` to
+ *  `NONE` when its dispatch is over -- the last steps of the dispatch algorithm,
+ *  alongside clearing `currentTarget` -- so an event object held from the
+ *  capture phase IS the answer, read at the moment the page submits. Inside the
+ *  dispatch it reports a phase; after it, zero. Nothing has to observe the end.
  *
- *  THE TASK, and not the dispatch. It was the dispatch first, closed by a
- *  listener on the window's bubble phase, and that was wrong in both directions:
+ *  TWO EARLIER DESIGNS FAILED, and both failed by trying to CLOSE a window:
  *
- *  - A listener added to the window DURING the click (by a handler on the
- *    target, say) sits after ours, so ours closed the window while the page was
- *    still handling the click and the submission that followed went unmarked.
- *  - Activation behaviour runs after the dispatch. A checkbox fires `change`
- *    THERE, so `onchange: () => view.submit(...)` -- an ordinary control -- was
- *    unmarked for exactly the same reason.
+ *  1. Closed on the window's bubble phase. A listener added to the window during
+ *     the click sits after ours, and there is a microtask checkpoint between
+ *     listeners, so ours ran first and the page's submission came out false. The
+ *     same premature close hit activation behaviour, which runs after the
+ *     dispatch: `onchange` on a checkbox -- an ordinary control -- was reported
+ *     as nobody's doing.
  *
- *  Both are a real control the visitor really used, reported as not caused by
- *  them. Closing at the end of the task takes in the whole dispatch, the
- *  activation behaviour, and every microtask of either, which is what a page
- *  written in `async` handlers actually needs. A `setTimeout`, an animation
- *  frame, a promise that settled in a later turn: all still outside.
+ *  2. Closed by queueing a task in each of the timer, posted-message and
+ *     port-message sources, on the theory that a source is FIFO so a close
+ *     queued first cannot be overtaken. It is FIFO WITHIN a source, and that is
+ *     all: work queued BEFORE the click -- a state message on the parent's port,
+ *     an expired timer -- may be selected first, and an `onState` submission
+ *     then read a window still open. Animation-frame callbacks beat all three
+ *     outright, because rendering happens before the next task is chosen.
  *
- *  THE CLOSE IS ARMED IN EVERY QUEUE THE PAGE COULD DEFER INTO, at the START of
- *  the dispatch, and that is the load-bearing part. A task source is FIFO, so a
- *  close queued before any handler has run is ahead of anything the page queues
- *  from inside one -- ahead, not racing. One net was not enough: with only a
- *  timer, a handler calling `stopPropagation()` and deferring through a
- *  `MessageChannel` reached its own callback FIRST in every engine that runs
- *  message tasks before timers, and submitted into a window that was still open.
- *  So there is one in each: timers, posted messages, port messages.
+ *  Both were found by review rather than by tests, and the tests passed in both
+ *  cases: a model of the event loop agrees with whoever wrote it. Reading
+ *  `eventPhase` needs no model of the event loop at all, which is the argument
+ *  for it -- a timer, an animation frame, a message, a promise settled in a
+ *  later turn and a task queued before the click are ALL simply outside the
+ *  dispatch, by the same one fact, with nothing to order.
  *
- *  The word the self-post carries is RANDOM and must never be the nonce. The
- *  author's script shares this realm and can listen for the message, so a nonce
- *  in it would hand over the one value this file protects. What a page learns
- *  instead is how to close its own window early, which costs it a mark and
- *  gains it nothing.
+ *  `change` AS WELL AS `click`, because a checkbox is a control a visitor uses
+ *  and its `change` is dispatched after the click's dispatch has ended -- so on
+ *  `click` alone, `onchange: () => view.submit(...)` is unmarked. It is a
+ *  trusted event the browser fires only for a committed user modification; a
+ *  page cannot cause one, and `isTrusted` is checked regardless.
  *
- *  Untrusted clicks are IGNORED rather than refused: a page dispatching its own
- *  click event opens no window, and one dispatched inside a real click is
- *  already inside the real one's -- and now needs no untangling, because nothing
- *  about the close depends on which dispatch it belonged to.
+ *  `input` is deliberately NOT here. It fires per keystroke, so it would mark
+ *  submissions made while a form was merely being filled in -- and the automated
+ *  visitor this is for fills forms before it presses anything.
  *
- *  Counted rather than flagged, for two trusted dispatches that overlap. It
- *  costs a number and removes the question. */
+ *  UNTRUSTED EVENTS ARE IGNORED rather than refused, and nothing has to untangle
+ *  the nesting any more: a page dispatching its own click is not held, and the
+ *  real click it may have been dispatched inside is still mid-dispatch and still
+ *  answers for itself.
+ *
+ *  IT IS NOT A DEFENCE against the author, for the reason the file says higher
+ *  up: their script shares this realm. A page that submits from inside a handler
+ *  for a click the visitor really made is marked, and should be. What this tells
+ *  apart is a page that acts when a control is used from one that acts on its
+ *  own -- the question an automated visitor has and a human one does not. */
 const gestureScript = (): string => `
-  let clicking = 0;
-  // Not the nonce, and not derived from it -- see the note above.
-  const closeWord = "gesture-close:" + String(Math.random());
-  window.addEventListener("click", (event) => {
-    if (event.isTrusted !== true) return;
-    clicking += 1;
-    let closed = false;
-    const end = () => {
-      if (closed) return;
-      closed = true;
-      clicking -= 1;
-      window.removeEventListener("message", hear);
-    };
-    const hear = (message) => { if (message.source === window && message.data === closeWord) end(); };
-    // Three, because a page may defer into any of the three and the browser
-    // chooses which source to serve first. Within one source it cannot get ahead
-    // of us: these are queued before a single handler of this click has run.
-    setTimeout(end, 0);
-    window.addEventListener("message", hear);
-    window.postMessage(closeWord, "*");
-    if (typeof MessageChannel === "function") {
-      const hop = new MessageChannel();
-      hop.port1.onmessage = end;
-      hop.port2.postMessage(0);
-    }
-  }, true);
+  // The event we are inside, if any. HELD rather than reduced to a flag: the
+  // flag would need taking away, and taking it away at the right moment is the
+  // thing that cannot be done. See the note above for the two attempts.
+  let held = null;
+  const causedByVisitor = () => held !== null && held.eventPhase !== 0;
+  const hold = (event) => { if (event.isTrusted === true) held = event; };
+  window.addEventListener("click", hold, true);
+  window.addEventListener("change", hold, true);
 `;
 
 export const publicViewBootstrap = (nonce: string): string => `
@@ -301,7 +289,7 @@ ${gestureScript()}
       // Absent then means "the runtime predates this" and false means "this
       // runtime says no", which a host gating on it has to tell apart -- and
       // last, so nothing a caller passes in can supply its own answer.
-      send({ ...message, requestId, [${JSON.stringify(GESTURE_MARK)}]: clicking > 0 });
+      send({ ...message, requestId, [${JSON.stringify(GESTURE_MARK)}]: causedByVisitor() });
     });
   };
   const bridge = {
