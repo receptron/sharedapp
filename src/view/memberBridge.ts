@@ -135,14 +135,23 @@ export interface MemberBridgePorts {
    *  the author did not write — so it is a separate hook whose reader is
    *  whoever runs the host: a log line, a Sentry event, a failing test.
    *
-   *  Optional, and the bridge does nothing with the error when it is omitted:
-   *  this package has no console and no clock, and a host that would rather
-   *  print nothing is not made to. The view is answered either way, which is
-   *  the part that must not depend on a host remembering to pass a hook.
+   *  REQUIRED, alone among the optional ports here, and that is the whole
+   *  point of the port. `notice` and `readied` are optional because a host with
+   *  nowhere to put them is making a real choice — a notice is the page's own
+   *  words, and keeping them where nobody looks builds a place for personal
+   *  data to sit. This one is the opposite: it is the host's own bug, and a
+   *  host that never thought about it is exactly the host this bridge used to
+   *  drop the exception for. Optional, it would compile unchanged everywhere
+   *  and the defect would go on being invisible — the second half of what this
+   *  port exists to end, once the promise settles. A host that genuinely wants
+   *  to discard it writes `defect: () => {}` and has then SAID so.
+   *
+   *  Nothing is done with the error here: this package has no console and no
+   *  clock, and the view is answered before this is called either way.
    *
    *  `requestId` is the id the answer went back on, or null when the message
    *  carried none and nothing could be answered. */
-  defect?: ((error: unknown, requestId: string | null) => void) | undefined;
+  defect: (error: unknown, requestId: string | null) => void;
 }
 
 export const memberBridge = (ports: MemberBridgePorts, nonce: () => string) => {
@@ -183,7 +192,7 @@ export const memberBridge = (ports: MemberBridgePorts, nonce: () => string) => {
         // AFTER the answer, so a host whose hook throws in turn cannot be the
         // reason the view is left waiting — the thing this branch exists to
         // prevent.
-        ports.defect?.(error, requestId);
+        ports.defect(error, requestId);
       },
     );
   };
