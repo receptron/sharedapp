@@ -16,7 +16,7 @@
 // strip sits.
 //
 // Design: mulmoterminal `plans/feat-shared-app-preview.md`, section 1.
-export { VIEW_MESSAGE } from "./protocol.js";
+export { GESTURE_MARK, VIEW_MESSAGE } from "./protocol.js";
 export { MAX_NOTICES, publicViewBootstrap, publicViewSrcdoc, viewNonce } from "./srcdoc.js";
 export {
   isReady,
