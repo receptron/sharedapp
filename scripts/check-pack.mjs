@@ -25,10 +25,16 @@ const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url),
 
 /** Every relative path an entry point resolves to. `exports` nests conditions ("types",
  *  "default", "import", ...) to arbitrary depth and a subpath may also be a bare string, so
- *  walk the whole tree and keep the leaves that look like package-relative files. */
+ *  walk the whole tree and keep the leaves that look like package-relative files.
+ *
+ *  `exports` leaves are always `./`-prefixed, but `main` and `types` are just as often bare
+ *  (`dist/index.js`), so anything that is not absolute counts. Dropping a path we did not
+ *  recognise would fail OPEN — an unchecked entry point is exactly what this script exists
+ *  to catch — so the rule is deliberately permissive. */
 const collect = (node, out) => {
   if (typeof node === "string") {
-    if (node.startsWith("./")) out.add(node.slice(2));
+    const path = node.replace(/^\.\//, "");
+    if (path !== "" && !path.startsWith("/") && !path.startsWith("../")) out.add(path);
     return out;
   }
   if (node && typeof node === "object") {
