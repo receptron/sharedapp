@@ -13,7 +13,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { memberBridge } from "../src/view/memberBridge.js";
+import { HOST_ERROR, memberBridge } from "../src/view/memberBridge.js";
 import { VIEW_MESSAGE } from "../src/view/protocol.js";
 import type { Channel } from "../src/view/bridge.js";
 import type { Viewer } from "../src/view/capability.js";
@@ -46,9 +46,15 @@ const fakeChannel = () => {
 
 const ready = { type: VIEW_MESSAGE.ready, nonce: NONCE };
 
+/** A host that has SAID it wants nothing done with a defect. `defect` is
+ *  required, so this is a decision written down rather than a port nobody
+ *  passed — the distinction the port exists to make. Every test that is not
+ *  about defects uses it. */
+const noDefect = (): void => {};
+
 test("the data waits for an answer ON the port, and then carries the viewer", () => {
   const far = fakeChannel();
-  const bridge = memberBridge({ channel: () => far.channel, state: () => ({ bookings: [{ id: "a" }] }), viewer: () => viewer }, () => NONCE);
+  const bridge = memberBridge({ channel: () => far.channel, state: () => ({ bookings: [{ id: "a" }] }), viewer: () => viewer, defect: noDefect }, () => NONCE);
 
   bridge.receive(ready);
   // Nothing yet: a `ready` is answered with a CHANNEL and nothing else.
@@ -62,7 +68,7 @@ test("the data waits for an answer ON the port, and then carries the viewer", ()
 
 test("a document that only INHERITED the frame never gets the records", () => {
   const far = fakeChannel();
-  const bridge = memberBridge({ channel: () => far.channel, state: () => ({ bookings: [] }), viewer: () => viewer }, () => NONCE);
+  const bridge = memberBridge({ channel: () => far.channel, state: () => ({ bookings: [] }), viewer: () => viewer, defect: noDefect }, () => NONCE);
   bridge.receive(ready);
   far.send({ nonce: "guessed" });
   assert.equal(far.posted.length, 0);
@@ -76,6 +82,7 @@ test("an ask is answered on the channel it arrived on", async () => {
       channel: () => far.channel,
       state: () => ({}),
       viewer: () => viewer,
+      defect: noDefect,
       perform: () => (data) => {
         answers.push(data);
         return Promise.resolve({ requestId: "r1", ok: true });
@@ -99,7 +106,7 @@ test("the handler is read when the intent arrives, not when the bridge is built"
   const far = fakeChannel();
   const seen: string[] = [];
   let current: PerformIntent = () => Promise.resolve({ requestId: "old", ok: true });
-  const bridge = memberBridge({ channel: () => far.channel, state: () => ({}), viewer: () => viewer, perform: () => current }, () => NONCE);
+  const bridge = memberBridge({ channel: () => far.channel, state: () => ({}), viewer: () => viewer, defect: noDefect, perform: () => current }, () => NONCE);
   bridge.receive(ready);
   far.send({ nonce: NONCE });
   current = (data) => {
@@ -116,7 +123,7 @@ const isRecordLike = (value: unknown): value is Record<string, unknown> => typeo
 
 test("a read-only page REFUSES rather than going quiet", async () => {
   const far = fakeChannel();
-  const bridge = memberBridge({ channel: () => far.channel, state: () => ({}), viewer: () => viewer }, () => NONCE);
+  const bridge = memberBridge({ channel: () => far.channel, state: () => ({}), viewer: () => viewer, defect: noDefect }, () => NONCE);
   bridge.receive(ready);
   far.send({ nonce: NONCE });
   far.send({ type: VIEW_MESSAGE.intent, requestId: "r2", kind: "transition", cid: "bookings", itemId: "x", to: "approved" });
@@ -129,13 +136,133 @@ test("a read-only page REFUSES rather than going quiet", async () => {
 
 test("something nobody asked about is not answered", async () => {
   const far = fakeChannel();
-  const bridge = memberBridge({ channel: () => far.channel, state: () => ({}), viewer: () => viewer }, () => NONCE);
+  const bridge = memberBridge({ channel: () => far.channel, state: () => ({}), viewer: () => viewer, defect: noDefect }, () => NONCE);
   bridge.receive(ready);
   far.send({ nonce: NONCE });
   const before = far.posted.length;
   far.send({ hello: "there" });
   await Promise.resolve();
   assert.equal(far.posted.length, before);
+});
+
+test("a perform that REJECTS still answers, in one fixed word", async () => {
+  // The case this exists for: a host defect used to be dropped, and the view's
+  // promise for that request never settled again. A button that will not come
+  // back is worse than a refused one, and nobody can see why from inside.
+  const far = fakeChannel();
+  const defects: { error: unknown; requestId: string | null }[] = [];
+  const bridge = memberBridge(
+    {
+      channel: () => far.channel,
+      state: () => ({}),
+      viewer: () => viewer,
+      perform: () => () => Promise.reject(new Error("firestore: PERMISSION_DENIED at /apps/x/secret")),
+      defect: (error, requestId) => defects.push({ error, requestId }),
+    },
+    () => NONCE,
+  );
+  bridge.receive(ready);
+  far.send({ nonce: NONCE });
+  far.send({ type: VIEW_MESSAGE.intent, requestId: "r3", kind: "transition", cid: "bookings", itemId: "x", to: "approved" });
+  await Promise.resolve();
+  const last = far.posted.at(-1);
+  assert.equal(last?.type, VIEW_MESSAGE.result);
+  assert.equal(last?.requestId, "r3");
+  assert.equal(last?.ok, false);
+  // The page is the author's; why the host broke is not.
+  assert.equal(last?.error, HOST_ERROR);
+  assert.equal(JSON.stringify(last).includes("PERMISSION_DENIED"), false);
+  // And the reason went to the host, which is where somebody can act on it.
+  assert.equal(defects.length, 1);
+  assert.equal(defects[0]?.requestId, "r3");
+  assert.match(String((defects[0]?.error as Error).message), /PERMISSION_DENIED/);
+});
+
+test("a perform that THROWS before returning a promise is the same case", async () => {
+  const far = fakeChannel();
+  const bridge = memberBridge(
+    {
+      channel: () => far.channel,
+      state: () => ({}),
+      viewer: () => viewer,
+      defect: noDefect,
+      perform: () => () => {
+        throw new Error("read of undefined");
+      },
+    },
+    () => NONCE,
+  );
+  bridge.receive(ready);
+  far.send({ nonce: NONCE });
+  // It must not take the channel's handler down with it, either.
+  far.send({ type: VIEW_MESSAGE.intent, requestId: "r4", kind: "transition", cid: "bookings", itemId: "x", to: "approved" });
+  await Promise.resolve();
+  const last = far.posted.at(-1);
+  assert.equal(last?.requestId, "r4");
+  assert.equal(last?.error, HOST_ERROR);
+});
+
+test("a rejection about something nobody asked is still not answered", async () => {
+  // The paired acceptance for the two above: `ok: false` is not posted at a
+  // message that carries no request id, because there is no promise waiting on
+  // one. A host with a defect hook still hears about it.
+  const far = fakeChannel();
+  const defects: (string | null)[] = [];
+  const bridge = memberBridge(
+    {
+      channel: () => far.channel,
+      state: () => ({}),
+      viewer: () => viewer,
+      perform: () => () => Promise.reject(new Error("boom")),
+      defect: (_error, requestId) => defects.push(requestId),
+    },
+    () => NONCE,
+  );
+  bridge.receive(ready);
+  far.send({ nonce: NONCE });
+  const before = far.posted.length;
+  far.send({ hello: "there" });
+  await Promise.resolve();
+  assert.equal(far.posted.length, before);
+  assert.deepEqual(defects, [null]);
+});
+
+test("a host that DISCARDS the reason still answers the view", async () => {
+  // `defect` is required, so discarding is something a host says rather than
+  // something it forgets — but the view's answer must not depend on what the
+  // host does with the error, which is what `noDefect` stands for here.
+  const far = fakeChannel();
+  const bridge = memberBridge(
+    { channel: () => far.channel, state: () => ({}), viewer: () => viewer, defect: noDefect, perform: () => () => Promise.reject(new Error("boom")) },
+    () => NONCE,
+  );
+  bridge.receive(ready);
+  far.send({ nonce: NONCE });
+  far.send({ type: VIEW_MESSAGE.intent, requestId: "r5", kind: "transition", cid: "bookings", itemId: "x", to: "approved" });
+  await Promise.resolve();
+  assert.equal(far.posted.at(-1)?.error, HOST_ERROR);
+});
+
+test("a perform that ANSWERS is untouched by any of this", async () => {
+  // The acceptance that keeps the refusals honest: a host's own refusal reaches
+  // the view in the host's own words, and only a defect is flattened.
+  const far = fakeChannel();
+  const bridge = memberBridge(
+    {
+      channel: () => far.channel,
+      state: () => ({}),
+      viewer: () => viewer,
+      defect: noDefect,
+      perform: () => (data) => Promise.resolve({ requestId: isRecordLike(data) ? String(data.requestId) : "?", ok: false, error: "illegal-transition" }),
+    },
+    () => NONCE,
+  );
+  bridge.receive(ready);
+  far.send({ nonce: NONCE });
+  far.send({ type: VIEW_MESSAGE.intent, requestId: "r6", kind: "transition", cid: "bookings", itemId: "x", to: "approved" });
+  await Promise.resolve();
+  assert.equal(far.posted.at(-1)?.requestId, "r6");
+  assert.equal(far.posted.at(-1)?.error, "illegal-transition");
 });
 
 test("a second ready offers no second channel, and forget closes the first", () => {
@@ -149,6 +276,7 @@ test("a second ready offers no second channel, and forget closes the first", () 
       },
       state: () => ({}),
       viewer: () => viewer,
+      defect: noDefect,
     },
     () => NONCE,
   );
@@ -169,7 +297,7 @@ test("the page's own report is carried BEFORE the handshake, which is when it ma
   const far = fakeChannel();
   const heard: string[] = [];
   const bridge = memberBridge(
-    { channel: () => far.channel, state: () => ({}), viewer: () => viewer, notice: (report) => heard.push(report.code) },
+    { channel: () => far.channel, state: () => ({}), viewer: () => viewer, defect: noDefect, notice: (report) => heard.push(report.code) },
     () => NONCE,
   );
   bridge.receive({ type: VIEW_MESSAGE.notice, nonce: NONCE, code: "error", detail: "boom" });
@@ -182,7 +310,7 @@ test("a host that keeps no notices is not made to", () => {
   // Dropping them is the honest default: a notice is the page's own words, and a host that keeps
   // them where nobody looks has built a place for personal data to accumulate.
   const far = fakeChannel();
-  const bridge = memberBridge({ channel: () => far.channel, state: () => ({}), viewer: () => viewer }, () => NONCE);
+  const bridge = memberBridge({ channel: () => far.channel, state: () => ({}), viewer: () => viewer, defect: noDefect }, () => NONCE);
   bridge.receive({ type: VIEW_MESSAGE.notice, nonce: NONCE, code: "error", detail: "boom" });
   bridge.receive(ready);
   far.send({ nonce: NONCE });
@@ -196,7 +324,7 @@ test("the handshake is visible to a host that asks to see it", () => {
   // cannot diagnose any other way.
   const far = fakeChannel();
   const readied = { value: false };
-  const bridge = memberBridge({ channel: () => far.channel, state: () => ({}), viewer: () => viewer, readied }, () => NONCE);
+  const bridge = memberBridge({ channel: () => far.channel, state: () => ({}), viewer: () => viewer, defect: noDefect, readied }, () => NONCE);
   bridge.receive(ready);
   assert.equal(readied.value, false, "a channel offered is not a handshake answered");
   far.send({ nonce: NONCE });
@@ -209,7 +337,7 @@ test("the handshake is visible to a host that asks to see it", () => {
 test("a document that cannot name the injected one does not count as the handshake", () => {
   const far = fakeChannel();
   const readied = { value: false };
-  const bridge = memberBridge({ channel: () => far.channel, state: () => ({}), viewer: () => viewer, readied }, () => NONCE);
+  const bridge = memberBridge({ channel: () => far.channel, state: () => ({}), viewer: () => viewer, defect: noDefect, readied }, () => NONCE);
   bridge.receive(ready);
   far.send({ nonce: "guessed" });
   assert.equal(readied.value, false);
