@@ -40,15 +40,17 @@ export const VIEW_MESSAGE = {
 
 /** The field a `submit` (or an `intent`) carries when a CLICK caused it.
  *
- *  `true` means the page called `submit()` while a TRUSTED `click` or `change`
- *  was still being dispatched — during it, or in a microtask of it. Everything
- *  else is `false`: a timer, an animation frame, `onState`, a promise that
- *  settled in a later turn, an event the page dispatched itself.
+ *  `true` means the page called `submit()` while a TRUSTED `click` was still
+ *  being dispatched — during it, or in a microtask of it. Everything else is
+ *  `false`: a timer, an animation frame, `onState`, a promise that settled in a
+ *  later turn, a click the page dispatched itself.
  *
- *  `change` as well as `click` because activation behaviour runs after the
- *  click's dispatch has ended, and a checkbox's `change` is where a
- *  save-on-toggle control does its work. `input` is not held: it fires per
- *  keystroke, which would mark a form merely being filled in.
+ *  A CHECKBOX'S `change` IS `false`, and knowing that is the difference between
+ *  reading a preview and misreading one: activation behaviour runs after the
+ *  click's dispatch, so a save-on-toggle control is not marked and a host gating
+ *  writes on this writes nothing for it. `change` cannot be admitted —
+ *  `element.click()` from script produces a TRUSTED one — and the failure is at
+ *  least on the side that writes nothing. See `gestureScript` in `srcdoc.ts`.
  *
  *  It exists because CAUSATION CANNOT BE MEASURED FROM OUTSIDE. A host that
  *  presses a button and then counts submissions learns only that one turned up

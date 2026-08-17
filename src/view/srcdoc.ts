@@ -233,15 +233,24 @@ const noticeScript = (): string => `
  *  later turn and a task queued before the click are ALL simply outside the
  *  dispatch, by the same one fact, with nothing to order.
  *
- *  `change` AS WELL AS `click`, because a checkbox is a control a visitor uses
- *  and its `change` is dispatched after the click's dispatch has ended -- so on
- *  `click` alone, `onchange: () => view.submit(...)` is unmarked. It is a
- *  trusted event the browser fires only for a committed user modification; a
- *  page cannot cause one, and `isTrusted` is checked regardless.
+ *  `click` AND NOTHING ELSE, and `change` in particular is not held -- which
+ *  costs something real and is still right. The cost: activation behaviour runs
+ *  after the click's dispatch has ended, so `onchange: () => view.submit(...)`
+ *  on a checkbox -- a save-on-toggle control -- comes out `false`, and a host
+ *  gating writes on this mark writes nothing for it. That is the fail-closed
+ *  side, and it is reported rather than silent.
  *
- *  `input` is deliberately NOT here. It fires per keystroke, so it would mark
- *  submissions made while a form was merely being filled in -- and the automated
- *  visitor this is for fills forms before it presses anything.
+ *  Why it cannot simply be admitted: `element.click()` from script runs the
+ *  ACTIVATION BEHAVIOUR, and the `input` and `change` the UA fires there are
+ *  fired by the UA -- so they are TRUSTED, though nobody touched anything. A
+ *  page could then submit with a visitor's mark from a timer, three turns after
+ *  the page loaded, by calling `.click()` on a checkbox of its own. `isTrusted`
+ *  is the whole of what this can check, and on `change` it does not mean what
+ *  it means on `click`.
+ *
+ *  `input` is out for a second reason as well: it fires per keystroke, so it
+ *  would mark submissions made while a form was merely being filled in -- and
+ *  the automated visitor this is for fills forms before it presses anything.
  *
  *  UNTRUSTED EVENTS ARE IGNORED rather than refused, and nothing has to untangle
  *  the nesting any more: a page dispatching its own click is not held, and the
@@ -260,8 +269,9 @@ const gestureScript = (): string => `
   let held = null;
   const causedByVisitor = () => held !== null && held.eventPhase !== 0;
   const hold = (event) => { if (event.isTrusted === true) held = event; };
+  // Click only. A trusted \`change\` can be produced by script -- see the note
+  // above -- and there is nothing else here that could tell the two apart.
   window.addEventListener("click", hold, true);
-  window.addEventListener("change", hold, true);
 `;
 
 export const publicViewBootstrap = (nonce: string): string => `

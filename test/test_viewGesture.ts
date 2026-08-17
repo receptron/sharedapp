@@ -147,13 +147,26 @@ test("a submit from a window listener the click itself added is marked", async (
   assert.deepEqual(frame.marks(), [true]);
 });
 
-test("a submit from a checkbox's change is marked, though the click's dispatch is over", async () => {
-  // Activation behaviour fires `change` AFTER the click has finished dispatching, so on `click`
-  // alone this — an ordinary save-on-toggle control — was reported as nobody's doing.
+test("a TRUSTED change does not mark, because script can produce one", async () => {
+  // `element.click()` from script runs the activation behaviour, and the `input` and `change` the
+  // UA fires there are fired BY THE UA — so they are trusted, though nobody touched anything. A
+  // page could otherwise submit with a visitor's mark from a timer, by calling `.click()` on a
+  // checkbox of its own. `isTrusted` is the whole of what this can check, and on `change` it does
+  // not mean what it means on `click`.
+  const frame = runBootstrap();
+  await dispatch(frame, "change", { during: () => submit(frame) });
+  assert.deepEqual(frame.marks(), [false]);
+});
+
+test("...and the price of that is an unmarked save-on-toggle, which is the fail-closed side", async () => {
+  // Activation behaviour runs after the click's dispatch has ended, so `onchange` on a real
+  // checkbox a real visitor really ticked comes out false and a host gating writes writes nothing.
+  // Pinned rather than left to be rediscovered: it is a cost, it is known, and it errs toward
+  // writing nothing rather than toward writing what nobody asked for.
   const frame = runBootstrap();
   await clickThrough(frame);
   await dispatch(frame, "change", { during: () => submit(frame) });
-  assert.deepEqual(frame.marks(), [true]);
+  assert.deepEqual(frame.marks(), [false]);
 });
 
 test("a submit with no event anywhere near it is NOT marked", async () => {
@@ -173,15 +186,7 @@ test("a click the PAGE dispatched opens nothing", async () => {
   assert.deepEqual(frame.marks(), [false]);
 });
 
-test("a change the PAGE dispatched opens nothing either", async () => {
-  // `change` is here because the browser fires it for a committed user modification. Dispatched by
-  // script it is the page's own doing, and admitting a second event type must not admit a bypass.
-  const frame = runBootstrap();
-  await dispatch(frame, "change", { trusted: false, during: () => submit(frame) });
-  assert.deepEqual(frame.marks(), [false]);
-});
-
-test("typing does not open it: `input` is not one of the events held", async () => {
+test("typing does not open it either: `input` is not held", async () => {
   // A page that submits on `input` would be marked on every keystroke — and the automated visitor
   // this mark is for fills the form in before it presses anything.
   const frame = runBootstrap();
