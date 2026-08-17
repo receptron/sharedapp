@@ -26,6 +26,9 @@ jobs:
   # `files` list or a `prepublishOnly` that stopped emitting would ship an
   # empty package — MulmoTerminal's `server/` imports this at runtime, so it
   # would break on `npx mulmoterminal` rather than here.
+  #
+  # The check reads the entry points out of `package.json` rather than naming
+  # them, so a subpath added to `exports` is covered the moment it is declared.
   consumable:
     runs-on: ubuntu-latest
     steps:
@@ -35,5 +38,4 @@ jobs:
           node-version: "22.x"
       - run: yarn install --frozen-lockfile
       - run: yarn pack --filename package.tgz
-      - run: tar -tzf package.tgz | grep -q 'package/dist/index.js'
-      - run: tar -tzf package.tgz | grep -q 'package/dist/index.d.ts'
+      - run: node scripts/check-pack.mjs package.tgz
