@@ -115,7 +115,7 @@ function viewIdProblems(view: NormalizedView): string[] {
   }
   if (!VIEW_ID_PATTERN.test(view.id)) {
     // The id becomes a document id, so this is not style. A `/` in it
-    // addresses a different path — staging writes one place and withdrawal
+    // addresses a different path — publish writes one place and a withdrawal
     // tidies another, and neither says anything.
     return [`${view.where}.id is '${view.id}': a view id ${VIEW_ID_SHAPE}. It becomes the document id this view is published at.`];
   }
@@ -167,7 +167,7 @@ export function normalizeViews(app: AuthoredApp): NormalizedViewsResult {
     }
     problems.push(
       `${view.where}.id is '${view.id}', which ${first} already uses. The id is the document a view is published at, so two of them are one page — ` +
-        "whichever was written second would silently replace the first, in staging and again at publish.",
+        "whichever was written second would silently replace the first.",
     );
   }
   return problems.length > 0 ? { ok: false, problems } : { ok: true, views: declared.views };

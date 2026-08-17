@@ -399,8 +399,8 @@ function idInTargetProblems(cid: string, submit: AuthoredSubmit, known: Readonly
   return [];
 }
 
-/** The staged reveal reads its flag off the PARENT record, so the path to that
- *  parent is not optional decoration — without it the gate never opens. */
+/** A gated reveal reads its flag off the PARENT record, so the path to that parent is not
+ *  optional decoration — without it the gate never opens. */
 function gateCoherenceProblems(cid: string, collection: AuthoredCollectionConfig): string[] {
   if (collection.revealGated !== true) return [];
   if (collection.gatedFrom !== undefined && collection.revealBy !== undefined) return [];
@@ -806,9 +806,8 @@ function boundRefProblems(
   return [...refFieldProblem(schemaOf, cid, `window.${key}.field`, ref.collection, ref.field), ...millisProblem(schemaOf, cid, `window.${key}.field`, ref)];
 }
 
-/** The field spec a reference points at, or undefined when there is nothing
- *  staged to judge it against (the host refuses that separately, naming every
- *  missing collection at once). */
+/** The field spec a reference points at, or undefined when there is no schema to judge it against
+ *  (the host refuses that separately, naming every missing collection at once). */
 function referencedField(
   schemaOf: ReadonlyMap<string, CollectionSchema>,
   target: string | undefined,
@@ -839,7 +838,7 @@ function refFieldProblem(
     .sort()
     .join(", ");
   return [
-    `public.submit.${cid}.${key} names '${field}', which the STAGED schema of '${target}' — the one publish promotes — does not declare. ` +
+    `public.submit.${cid}.${key} names '${field}', which the schema of '${target}' does not declare. ` +
       `The rules read that field off the record and compare it, so as written every submission is refused with nothing to explain it. ` +
       `Fields on '${target}': ${known.length > 0 ? known : "(none)"}.`,
   ];
