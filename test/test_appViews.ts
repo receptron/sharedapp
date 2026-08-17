@@ -364,3 +364,13 @@ test("the write tables follow the declaration", () => {
   assert.equal(staff[0]?.statusField, "state");
   assert.deepEqual(staff[0]?.transitions, { open: ["closed"] });
 });
+
+test("a participant reads a collection the app opens to the world", () => {
+  // The most ordinary booking declaration there is: the slots are public, and the participant's
+  // own page lists them beside their bookings. Refusing that would say "a participant cannot read
+  // this" about a collection every stranger can.
+  const declared = app({ public: { enabled: true, read: ["slots"], submit: {} } });
+  assert.deepEqual(participantScope(declared, "slots", []), { cid: "slots", scope: "all" });
+  // Not open, and nothing else reaches it: still null.
+  assert.equal(participantScope(app({ public: { enabled: true, read: [], submit: {} } }), "slots", []), null);
+});
