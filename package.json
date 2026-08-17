@@ -25,9 +25,9 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "format": "prettier --write \"{src,test}/**/*.ts\" \"*.{json,md}\"",
-    "format:check": "prettier --check \"{src,test}/**/*.ts\" \"*.{json,md}\"",
-    "lint": "eslint src test",
+    "format": "prettier --write \"{src,test}/**/*.ts\" \"scripts/**/*.mjs\" \"*.{json,md}\"",
+    "format:check": "prettier --check \"{src,test}/**/*.ts\" \"scripts/**/*.mjs\" \"*.{json,md}\"",
+    "lint": "eslint src test scripts",
     "prepare": "tsc -p tsconfig.json",
     "prepublishOnly": "tsc -p tsconfig.json",
     "test": "tsx --test ./test/test_*.ts",
