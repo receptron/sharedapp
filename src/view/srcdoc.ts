@@ -252,6 +252,13 @@ const noticeScript = (): string => `
  *  would mark submissions made while a form was merely being filled in -- and
  *  the automated visitor this is for fills forms before it presses anything.
  *
+ *  READ AT BOTH ENDS. Holding only trusted events is not enough on its own: a
+ *  page may keep the Event object of a real click and hand it back to
+ *  `dispatchEvent()` later, which the DOM marks untrusted while giving it a live
+ *  `eventPhase` -- so the held object would report itself mid-dispatch with
+ *  nobody touching anything. `isTrusted` is therefore read again at the moment
+ *  the answer is given, where it describes the dispatch in progress.
+ *
  *  UNTRUSTED EVENTS ARE IGNORED rather than refused, and nothing has to untangle
  *  the nesting any more: a page dispatching its own click is not held, and the
  *  real click it may have been dispatched inside is still mid-dispatch and still
@@ -267,7 +274,12 @@ const gestureScript = (): string => `
   // flag would need taking away, and taking it away at the right moment is the
   // thing that cannot be done. See the note above for the two attempts.
   let held = null;
-  const causedByVisitor = () => held !== null && held.eventPhase !== 0;
+  // isTrusted is read at BOTH ends, and the second read is not a belt on a
+  // brace. A page may keep the very Event object of a real click and later hand
+  // it back to dispatchEvent(): the DOM sets isTrusted to false for that
+  // redispatch and gives it a live eventPhase, so the object we are holding
+  // reports itself mid-dispatch while nobody has touched anything.
+  const causedByVisitor = () => held !== null && held.isTrusted === true && held.eventPhase !== 0;
   const hold = (event) => { if (event.isTrusted === true) held = event; };
   // Click only. A trusted \`change\` can be produced by script -- see the note
   // above -- and there is nothing else here that could tell the two apart.

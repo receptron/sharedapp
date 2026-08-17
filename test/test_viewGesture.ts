@@ -110,6 +110,22 @@ const dispatch = async (frame: Frame, type: string, options: { trusted?: boolean
   await settle();
   event.eventPhase = NONE;
   await settle();
+  return event;
+};
+
+/** The SAME event object, handed back to `dispatchEvent()` by the page.
+ *
+ *  The DOM sets `isTrusted` to false for a redispatch and gives the event a live phase again, so
+ *  an object retained from a real click reports itself mid-dispatch with nobody touching anything.
+ *  (It cannot be redispatched WHILE it is being dispatched — that throws — so this is only ever
+ *  afterwards, which is exactly when the phase would otherwise have settled the question.) */
+const redispatch = async (frame: Frame, event: Record<string, unknown>, during: () => void) => {
+  event.isTrusted = false;
+  event.eventPhase = AT_TARGET;
+  during();
+  await settle();
+  event.eventPhase = NONE;
+  await settle();
 };
 
 const clickThrough = (frame: Frame, options: Parameters<typeof dispatch>[2] = {}) => dispatch(frame, "click", options);
@@ -232,6 +248,16 @@ test("a click the page dispatches INSIDE a real one does not take the real one's
     },
   });
   assert.deepEqual(frame.marks(), [true]);
+});
+
+test("a real click's own Event object, handed back to dispatchEvent, does not mark", async () => {
+  // Holding only trusted events is not enough: the object is retained, and a redispatch of it is
+  // untrusted but has a live phase. Without reading `isTrusted` again at the moment of answering,
+  // a page could keep one real click and mint visitor-caused submissions from it for ever.
+  const frame = runBootstrap();
+  const real = await clickThrough(frame);
+  await redispatch(frame, real, () => submit(frame));
+  assert.deepEqual(frame.marks(), [false]);
 });
 
 test("the mark is a boolean on every request, so ABSENT can only mean an older runtime", async () => {
