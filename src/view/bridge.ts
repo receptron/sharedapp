@@ -88,6 +88,34 @@ export interface BridgePorts {
   channel: () => Channel;
   submit: (pending: PendingSubmit) => Promise<{ ok: boolean; error?: string }>;
   state: () => Record<string, ViewDataset>;
+  /** THE VISITOR'S OWN ROWS, per collection — what they have already submitted
+   *  through this page, projected by the host to the fields a page in this
+   *  position could have SENT.
+   *
+   *  Why it exists: a public view is handed `public.read` and nothing else, and
+   *  a collection people submit to is exactly the one that must not be there
+   *  (one visitor reading every other visitor's answer). So a view could not
+   *  tell whether the person in front of it had already answered — it kept that
+   *  in a variable, and a reload lost it. The page then offered an action the
+   *  rules were certain to refuse, and the visitor met a permission error for
+   *  behaving normally. The generated form has always read this back
+   *  (`ownRow` grants a submitter their own row); this is the same answer for a
+   *  page that replaced it.
+   *
+   *  Why the host projects rather than the bridge: what the rules return is the
+   *  WHOLE document, including fields the app writes and the page never sees —
+   *  a status, a staff note, an assignee. Handing those to sandboxed HTML would
+   *  widen what a published page knows about the app, in the name of telling it
+   *  something it already knew. The rule is "back what a page in this position
+   *  could have sent", and the host holds it because the host is the one with
+   *  the declaration in hand.
+   *
+   *  OPTIONAL, and absence is not "nothing was submitted": a host that cannot
+   *  read it, or an older one that does not, sends nothing at all. A page must
+   *  read the difference as UNKNOWN — offer the action, and let the refusal
+   *  explain itself — or it will tell somebody they have already answered when
+   *  they have not. */
+  mine?: (() => Record<string, ViewDataset>) | undefined;
   /** Somewhere to put what the frame says about itself — an uncaught error, a
    *  rejected promise, a modal the sandbox ignored.
    *
@@ -117,6 +145,22 @@ const refusalFor = (read: SubmitRead, open: boolean): { requestId: string; reaso
   return null;
 };
 
+/** The state message, as the two send sites build it identically.
+ *
+ *  `viewer` is omitted rather than sent empty when the host offers no `mine`.
+ *  The bootstrap hands the second argument to `onState` either way, so an empty
+ *  object would reach a page as "you have submitted nothing" — which is a
+ *  different statement from "this host does not know", and the wrong one to
+ *  make up. */
+const stateMessage = (ports: BridgePorts) => {
+  const mine = ports.mine?.();
+  const collections = ports.state();
+  if (mine === undefined) {
+    return { type: VIEW_MESSAGE.state, collections };
+  }
+  return { type: VIEW_MESSAGE.state, collections, viewer: { mine } };
+};
+
 /** Answering the frame: the two messages the parent sends, and the rule that
  *  state is only ever sent to a view that asked for it once. */
 const replies = (ports: BridgePorts, nonce: () => string, readied: Signal<boolean>) => {
@@ -137,7 +181,7 @@ const replies = (ports: BridgePorts, nonce: () => string, readied: Signal<boolea
     if (!readied.value) {
       return;
     }
-    open?.post({ type: VIEW_MESSAGE.state, collections: ports.state() });
+    open?.post(stateMessage(ports));
   };
 
   /** A `ready` whose nonce checked out. The reply is the CHANNEL and nothing
@@ -170,7 +214,7 @@ const replies = (ports: BridgePorts, nonce: () => string, readied: Signal<boolea
       }
       open = channel;
       readied.value = true;
-      channel.post({ type: VIEW_MESSAGE.state, collections: ports.state() });
+      channel.post(stateMessage(ports));
     });
   };
 
