@@ -122,7 +122,7 @@ export interface PublishedConfigDoc extends Record<string, unknown> {
    *  be handed on a world-readable document; what the page needs is the
    *  dataset list, and `publishedAt` beside it is what pins this declaration
    *  to the HTML published in the same run. */
-  view?: { collections: string[] };
+  view?: { collections: string[]; live?: string[] };
   publishedAt: number;
 }
 
@@ -274,12 +274,30 @@ export function projectApp(
     // Read through the normalization, not off `public.view`: an app that
     // declares its public page in `views[]` must publish the same document, or
     // the page has the HTML and no idea what to send it.
-    ...(publicView === undefined ? {} : { view: { collections: publicView.collections } }),
+    // `live` rides with `collections` and only when the author declared it: an
+    // app that never wrote the key must publish the document it published
+    // before this key existed. What lands here is world-readable, and it is
+    // the cid NAMES ONLY — the same names `collections` beside it already
+    // carries, so the projection tells the world nothing new (principle 5).
+    ...(publicView === undefined ? {} : { view: publicViewProjection(publicView) }),
     publishedAt: stamp.publishedAt,
   };
   if (authored.name !== undefined) config.name = authored.name;
 
   return { app, schemas: schemas.map(({ cid, schema }) => ({ cid, doc: schemaDoc(schema, stamp) })), config };
+}
+
+/** The public page's declaration, as the world-readable document carries it.
+ *
+ *  `live` rides beside `collections` and ONLY when the author wrote it: an app
+ *  that never declared one must publish the document it published before this
+ *  key existed, byte for byte. What lands is cid NAMES — the same names
+ *  `collections` beside it already carries, so nothing new is disclosed by
+ *  publishing it (principle 5). The gate has already refused the fan-out cases
+ *  (`viewLiveProblems`), so what is here is a subset of `public.read` that
+ *  nobody but the app itself writes. */
+function publicViewProjection(view: NormalizedView): { collections: string[]; live?: string[] } {
+  return view.live === undefined ? { collections: view.collections } : { collections: view.collections, live: view.live };
 }
 
 /** Everything `publish` writes, as one projection.
@@ -445,12 +463,17 @@ export function tierWrites(authored: AuthoredApp, audience: Exclude<ViewAudience
  *  the gate has already refused the declaration, so reaching here with one is
  *  a programming error, and a page that queries it is denied. */
 export function tierViews(authored: AuthoredApp, audience: Exclude<ViewAudience, "public">, views: NormalizedView[], participantRead: readonly string[]) {
-  return views.map((view) => ({
-    id: view.id,
-    collections: view.collections
+  return views.map((view) => {
+    const collections = view.collections
       .map((cid) => scopeFor(authored, audience, cid, participantRead))
-      .filter((scope): scope is ProjectedViewCollection => scope !== null),
-  }));
+      .filter((scope): scope is ProjectedViewCollection => scope !== null);
+    // Narrowed to what this tier is actually handed, for the reason the scopes
+    // are: a collection this audience cannot read is dropped above, and naming
+    // it here would tell the page to subscribe to a query it never got. Absent
+    // rather than empty when nothing survives — see `NormalizedView.live`.
+    const live = (view.live ?? []).filter((cid) => collections.some((scope) => scope.cid === cid));
+    return { id: view.id, collections, ...(view.live === undefined || live.length === 0 ? {} : { live }) };
+  });
 }
 
 /** One tier's projection: what this audience may read, and what it may change. */

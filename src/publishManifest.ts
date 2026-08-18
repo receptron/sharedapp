@@ -299,7 +299,7 @@ const PublicZ = z
      *  data it wanted was never sent, and it draws an empty grid with no error
      *  anywhere. */
     view: z
-      .object({ path: z.string().trim().min(1), collections: z.array(NameZ).min(1) })
+      .object({ path: z.string().trim().min(1), collections: z.array(NameZ).min(1), live: z.array(NameZ).min(1).optional() })
       .strict()
       .optional(),
     submit: z.record(NameZ, SubmitZ).optional(),
@@ -328,6 +328,21 @@ const ViewZ = z
     audience: z.enum(VIEW_AUDIENCES),
     path: z.string().trim().min(1),
     collections: z.array(NameZ).min(1),
+    /** The subset of `collections` this page watches LIVE (`onSnapshot`)
+     *  instead of reading once.
+     *
+     *  Declared rather than left to the page, because the cost of the choice
+     *  is not the page's to pay: a subscription is a read per document per
+     *  change, so a public page watching a collection the public also submits
+     *  into is N readers × N writers — 1000 visitors watching 1000 votes is
+     *  1,000,000 reads, and each new vote is another 1000. That fan-out is
+     *  refused at the gate for `audience: "public"` (see `publishChecks.ts`);
+     *  the roster tiers are bounded by the roster itself and are not.
+     *
+     *  A SUBSET of `collections`, never a replacement for it: the datasets a
+     *  view is handed are still declared once, and `live` only says which of
+     *  them keep moving. */
+    live: z.array(NameZ).min(1).optional(),
   })
   .strict();
 

@@ -69,6 +69,13 @@ export interface NormalizedView {
   audience: ViewAudience;
   path: string;
   collections: string[];
+  /** The subset of `collections` this page WATCHES rather than reads once.
+   *
+   *  Absent, not empty, when the author declared nothing: a page that watches
+   *  nothing and a page whose author never considered the question are the
+   *  same page, and the projection of an app with no `live` must be byte-for-
+   *  byte what it was before this key existed. */
+  live?: string[];
   where: string;
 }
 
@@ -96,6 +103,7 @@ function declaredViews(app: AuthoredApp): NormalizedViewsResult {
     audience: view.audience,
     path: view.path,
     collections: view.collections,
+    ...(view.live === undefined ? {} : { live: view.live }),
     where: `views[${index}]`,
   }));
   if (legacy === undefined) return { ok: true, views };
@@ -105,7 +113,15 @@ function declaredViews(app: AuthoredApp): NormalizedViewsResult {
   if (views.some((view) => view.id === PUBLIC_VIEW_ID)) {
     return { ok: false, problems: [`views declares id '${PUBLIC_VIEW_ID}', which is reserved for the older \`public.view\` spelling. ${BOTH_FORMS}`] };
   }
-  return { ok: true, views: [...views, { id: PUBLIC_VIEW_ID, audience: "public", path: legacy.path, collections: legacy.collections, where: "public.view" }] };
+  const legacyView: NormalizedView = {
+    id: PUBLIC_VIEW_ID,
+    audience: "public",
+    path: legacy.path,
+    collections: legacy.collections,
+    ...(legacy.live === undefined ? {} : { live: legacy.live }),
+    where: "public.view",
+  };
+  return { ok: true, views: [...views, legacyView] };
 }
 
 /** Whether one id may be used, and what to say when it may not. */
@@ -221,7 +237,7 @@ export function participantScope(app: AuthoredApp, cid: string, participantRead:
  *  participant. */
 export interface AppViewConfigDoc extends Record<string, unknown> {
   name?: string;
-  views: { id: string; collections: ProjectedViewCollection[] }[];
+  views: { id: string; collections: ProjectedViewCollection[]; live?: string[] }[];
   /** The submit declarations for the collections these views draw, so the page
    *  can show what may be sent rather than discovering it from a denial. */
   submit: Record<string, Record<string, unknown>>;
