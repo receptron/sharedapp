@@ -37,6 +37,7 @@
 // pins that the rules accept it.
 
 import type { CollectionSchema } from "@mulmoclaude/core/collection";
+import { APP_PROTOCOL } from "./appProtocol.js";
 import {
   normalizeViews,
   participantScope,
@@ -105,6 +106,9 @@ export interface PublishedSchemaDoc extends Record<string, unknown> {
  *  is what a public form needs in order to render itself and to tell a visitor
  *  "this closed yesterday" instead of failing a write with no explanation. */
 export interface PublishedConfigDoc extends Record<string, unknown> {
+  /** The version of the publish contract these documents keep — see `appProtocol.ts`. A reader
+   *  refuses a MAJOR above its own rather than drawing it, which is the whole reason it is here. */
+  protocol: string;
   name?: string;
   enabled: boolean;
   read: string[];
@@ -268,6 +272,10 @@ export function projectApp(
   const publicView = normalized.views.find((view) => view.audience === "public");
 
   const config: PublishedConfigDoc = {
+    // WHICH CONTRACT THESE DOCUMENTS KEEP, so a reader older than it refuses rather than drawing
+    // them wrongly. The compiler's own version, never the author's declaration: the author states a
+    // floor, and what is true of the documents is what produced them.
+    protocol: APP_PROTOCOL,
     enabled: authored.public?.enabled === true,
     read: authored.public?.read ?? [],
     submit,
@@ -480,6 +488,9 @@ export function tierViews(authored: AuthoredApp, audience: Exclude<ViewAudience,
 function tierConfig(authored: AuthoredApp, audience: Exclude<ViewAudience, "public">, views: NormalizedView[], stamp: PublishStamp): AppViewConfigDoc {
   const cids = [...new Set(views.flatMap((view) => view.collections))];
   const config: AppViewConfigDoc = {
+    // Every tier carries it, for the reason `projectApp` gives beside the public one: one publish
+    // writes them all, and a reader that can draw one and not another is a half-drawn app.
+    protocol: APP_PROTOCOL,
     write: tierWrites(authored, audience, cids),
     views: tierViews(authored, audience, views, authored.participantRead ?? []),
     submit: tierSubmit(authored, cids),

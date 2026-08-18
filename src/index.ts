@@ -93,5 +93,10 @@ export {
   type PublishedSchemaDoc,
 } from "./publishProject.js";
 
+// The version of the contract a publish writes, and what an authored floor may ask for. Read by
+// mulmoserver from the documents themselves — the compiler and the renderer are released separately,
+// so this is how a reader knows whether it may draw what it is looking at.
+export { APP_PROTOCOL, protocolOf, protocolWithin, type ProtocolVersion } from "./appProtocol.js";
+
 // What publish refuses, and which live records a schema change would break.
 export { publishProblems, schemaRefProblems, bindsSubmitterIdentity, type PublishableCollection } from "./publishChecks.js";

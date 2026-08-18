@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 
 import { AuthoredAppZ } from "../src/publishManifest.js";
 import { publishProblems, schemaRefProblems } from "../src/publishChecks.js";
+import { APP_PROTOCOL } from "../src/appProtocol.js";
 
 const OWNER = "owner@salon.jp";
 /** The repository's shared collections, as publish sees them: a cid and the
@@ -876,4 +877,24 @@ test("refuses a comparison the rules could never satisfy", () => {
     schemaRefProblems(declared, schemasFor({ state: { type: "boolean" }, opensAt: { type: "number" }, closesAt: { type: "number" } }) as never),
     "is a boolean field",
   );
+});
+
+test("an app declaring a contract newer than this publisher writes is refused", () => {
+  // The floor. Compiled anyway, the app would be published as documents stamped with a version they
+  // do not honour — and the page that reads them believes the stamp, which is worse than a refusal
+  // the author can act on. The refusal names both versions.
+  const problem = listed('declares `protocol: "2.0.0"`', problemsFor({ protocol: "2.0.0" }));
+  assert.match(problem, new RegExp(APP_PROTOCOL.replace(/\./gu, "\\."), "u"));
+});
+
+test("an app declaring the contract this publisher writes, or an older one, is fine", () => {
+  assert.deepEqual(problemsFor({ protocol: APP_PROTOCOL }), []);
+});
+
+test("a `protocol` that is not a version is refused rather than guessed at", () => {
+  // Guessing low is the direction that fails silently: an unreadable version says nothing about what
+  // the app relies on, so continuing would publish under a contract nobody checked.
+  for (const stated of ["2", "1.0", "v1.0.0", "latest"]) {
+    listed("is not a version", problemsFor({ protocol: stated }));
+  }
 });

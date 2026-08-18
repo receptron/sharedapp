@@ -14,7 +14,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { AuthoredAppZ, type AuthoredApp } from "../src/publishManifest.js";
-import { projectApp, type PublishStamp } from "../src/publishProject.js";
+import { projectApp, projectAppViews, type PublishStamp } from "../src/publishProject.js";
+import { APP_PROTOCOL } from "../src/appProtocol.js";
 import type { CollectionSchema } from "@mulmoclaude/core/collection";
 
 const STAMP: PublishStamp = { uid: "uid_owner", email: "owner@salon.jp", publishedAt: 1_760_000_000_000, commit: "abc123def456" };
@@ -259,4 +260,24 @@ test("the public config document carries no roster", () => {
   const { bookings } = config.submit;
   assert.ok(bookings);
   assert.deepEqual(bookings.window, { fromMs: Date.parse("2026-09-01T00:00:00Z"), untilMs: Date.parse("2026-09-30T23:59:59Z") });
+});
+
+test("every projection states the contract it was written against", () => {
+  // The reader (mulmoserver) is released separately from this compiler and runs in browsers that may
+  // be a month behind. This number is the only thing in the documents that lets such a build know it
+  // must NOT draw them — so it rides in the public config and in every tier, from one publish.
+  const app = authored();
+  const { config } = projectApp(app, [], STAMP, null);
+  assert.equal(config.protocol, APP_PROTOCOL);
+  for (const tier of projectAppViews(app, STAMP)) {
+    assert.equal(tier.config.protocol, APP_PROTOCOL, `${tier.tier} states no contract`);
+  }
+});
+
+test("what is published is the contract this compiler emits, not the author's declaration", () => {
+  // The authored `protocol` is a FLOOR (see `protocolProblems`), and the documents keep whatever
+  // produced them. Publishing the author's number instead would let an app claim a contract its
+  // documents do not honour, under a version a reader believes.
+  const declared = AuthoredAppZ.parse({ ...authored(), protocol: "1.0.0" });
+  assert.equal(projectApp(declared, [], STAMP, null).config.protocol, APP_PROTOCOL);
 });

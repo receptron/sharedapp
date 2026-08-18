@@ -36,6 +36,26 @@ is ONE package with no dependents to bump, no plugin peer ranges, no changelog c
 e2e suite. Releasing `@mulmoclaude/core` was eight packages and a full CI matrix, and every
 `app.json` key paid it.
 
+## The version of the contract
+
+Every projection carries `protocol` — the version of the publish contract the documents keep
+(`src/appProtocol.ts`, `APP_PROTOCOL`, currently **1.0.0**). The renderer (mulmoserver) is released
+separately and runs in browsers that may be a month behind, so this is the only thing in a document
+that lets such a build know it must NOT draw it: a reader refuses a higher MAJOR, and reads a higher
+minor as an addition it simply does not use.
+
+- **MAJOR** — a breaking change. Bumping it makes every older reader refuse every app published
+  afterwards, so the reader ships first.
+- **MINOR** — an addition an older reader ignores safely (`views[].live` was one).
+- **PATCH** — neither.
+
+A document with no `protocol` is 1.0.0. That is not a fallback: apps published before the key existed
+are exactly that, and those are the documents already in Firestore.
+
+`app.json` may declare `protocol` as a FLOOR. It never decides what is published — the projection
+carries what this compiler emits — but publish refuses a declaration NEWER than that, because
+compiling it would stamp a contract the documents do not keep, under a number the reader believes.
+
 ## What is NOT here
 
 The collection **runtime** — discovery, the store, the Firestore backend, the host seam —

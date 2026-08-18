@@ -408,6 +408,15 @@ export const AuthoredAppZ = z
     /** The app's pages, per audience. See {@link ViewZ}; `public.view` is the
      *  older spelling of the `public` one and normalizes into this list. */
     views: z.array(ViewZ).optional(),
+    /** The version of the PUBLISH CONTRACT this app is written against — see
+     *  `appProtocol.ts`. Optional, and it does not decide what is published:
+     *  the projection always carries the version this compiler EMITS, because
+     *  that is the one the documents keep. What declaring it does is state a
+     *  FLOOR, which publish refuses to go below (`protocolProblems`): an app
+     *  written for a newer contract, compiled by an older publisher, would be
+     *  published as documents that quietly do not keep the promises the author
+     *  relied on. */
+    protocol: z.string().trim().min(1).optional(),
   })
   .strict();
 
