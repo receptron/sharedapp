@@ -134,11 +134,54 @@ test("the status field and gateOn.match also count as checked", () => {
 
 // --- invariant 3: auth stage ------------------------------------------------
 
-test("only verifiedEmail may be published, and the rules keep the other two", () => {
-  for (const auth of ["none", "anonymous"]) {
-    refuses(problemsFor({ public: { submit: { bookings: { auth, createFields: ["a"] } } } }), `public.submit.bookings.auth is "${auth}"`);
-  }
+test("anonymous publishes, none does not", () => {
+  // The pair that decides whether an audience answers at all. `anonymous` costs
+  // the visitor nothing and still yields a uid; `none` yields none, so the same
+  // person submits as often as they can press the button.
+  assert.deepEqual(problemsFor({ public: { submit: { bookings: { auth: "anonymous", createFields: ["a"] } } } }), []);
   assert.deepEqual(problemsFor({ public: { submit: { bookings: { auth: "verifiedEmail", createFields: ["a"] } } } }), []);
+  refuses(problemsFor({ public: { submit: { bookings: { auth: "none", createFields: ["a"] } } } }), 'public.submit.bookings.auth is "none"');
+});
+
+test("an anonymous submission may not carry an address, a roster seat, or a mail queue", () => {
+  // Each of these publishes cleanly today and behaves wrongly afterwards: the
+  // field the app reads as identity holds a typed string, a participant that can
+  // never be on the roster, or a mail queue anybody may aim.
+  refuses(
+    problemsFor({
+      collections: { bookings: { submitOnly: true } },
+      public: { submit: { bookings: { auth: "anonymous", createFields: ["a", "email"], emailField: "email" } } },
+    }),
+    "an anonymous session has no address",
+  );
+  refuses(
+    problemsFor({
+      collections: { bookings: { submitOnly: true } },
+      public: { submit: { bookings: { auth: "anonymous", createFields: ["a"], audience: "participant" } } },
+    }),
+    'declares audience "participant"',
+  );
+  refuses(
+    problemsFor({
+      collections: {
+        bookings: {
+          statusField: "status",
+          transitions: { pending: ["approved"] },
+          mail: { toField: "who", on: { ok: { from: ["pending"], to: "approved" } } },
+        },
+      },
+      public: { submit: { bookings: { auth: "anonymous", createFields: ["a", "who"] } } },
+    }),
+    'queues mail and public.submit.bookings is "anonymous"',
+  );
+  // …and the same three under verifiedEmail are ordinary declarations.
+  assert.deepEqual(
+    problemsFor({
+      collections: { bookings: { submitOnly: true } },
+      public: { submit: { bookings: { auth: "verifiedEmail", createFields: ["a", "email"], emailField: "email" } } },
+    }),
+    [],
+  );
 });
 
 // --- invariant 4: names -----------------------------------------------------
