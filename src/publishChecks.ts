@@ -755,11 +755,83 @@ function viewCollectionProblems(app: AuthoredApp, view: NormalizedView, cid: str
   return [];
 }
 
+/** Which of a view's datasets it may WATCH, and the fan-out that is refused.
+ *
+ *  `live` is a subset of `collections`, so the first check is arithmetic: a
+ *  page cannot subscribe to a dataset it was never handed, and the symptom
+ *  would be a subscription that never fires rather than an error.
+ *
+ *  The second is the point of the key. A subscription is a read PER DOCUMENT
+ *  PER CHANGE, so a public page watching a collection the public also writes
+ *  into is N readers × N writers: 1000 visitors watching 1000 votes is
+ *  1,000,000 reads, and every further vote is another 1000. Nobody meets that
+ *  bill on the page where it is incurred — the author does, later, and the
+ *  first they hear of it is a quota.
+ *
+ *  The threat is an author declaring it in GOOD FAITH ("show the tally as it
+ *  moves"), which is why the refusal names the alternative rather than only
+ *  the danger: the member page `/m/{slug}` on the display screen, whose reader
+ *  count the roster bounds.
+ *
+ *  THE MIRROR IS THE SAME FAN-OUT with one hop. A `mirrorOf` collection is the
+ *  public projection of a collection the public submits into, written in the
+ *  SAME batch as each submission — so a subscription to it moves once per
+ *  public write exactly as the records do. Leaving it open would let N→N in
+ *  through the one collection this design put in front of the records.
+ *
+ *  ONLY `audience: "public"`. The roster tiers are bounded by the roster: the
+ *  readers are enumerated in `members`, so the fan-out is N→1 by definition,
+ *  and the moving picture is precisely what those pages are for.
+ *
+ *  AND THIS IS NOT A RULE. `firestore.rules` cannot tell a `get` from a
+ *  `listen`, so anything in `public.read` can be subscribed to all day by a
+ *  third party with their own SDK. What is guarded here is that the
+ *  PLATFORM'S OWN PAGE does not open the fan-out — the other half is
+ *  mulmoserver's runtime intersection, and neither half may be read as the
+ *  guarantee on its own (mulmoterminal `docs/shared-app-principles.md`,
+ *  principle 2). */
+function viewLiveProblems(app: AuthoredApp, view: NormalizedView): string[] {
+  const problems: string[] = [];
+  for (const cid of view.live ?? []) {
+    if (!view.collections.includes(cid)) {
+      problems.push(
+        `${view.where}.live names '${cid}', which is not in ${view.where}.collections. A view watches a subset of the datasets it is handed — ` +
+          "the page is given no query for this one, so the subscription would be for nothing.",
+      );
+      continue;
+    }
+    if (view.audience !== "public") continue;
+    if (app.public?.submit?.[cid] !== undefined) {
+      problems.push(
+        `${view.where}.live names '${cid}', which public.submit.${cid} lets the public write into. A public page watching a collection the public ` +
+          "writes is N readers x N writers: 1000 visitors watching 1000 votes is 1,000,000 reads, and every further vote is another 1000. " +
+          `Read '${cid}' once when the page opens (leave it out of live). To show the tally as it moves, put the member page /m/{slug} on the ` +
+          "display screen — its readers are the roster, which is a number the app knows.",
+      );
+      continue;
+    }
+    const mirrorOf = app.collections?.[cid]?.mirrorOf;
+    if (mirrorOf !== undefined) {
+      problems.push(
+        `${view.where}.live names '${cid}', which is collections.${cid}.mirrorOf '${mirrorOf}' — the public projection of a collection the public ` +
+          `submits into, written in the SAME batch as each submission. Watching it is the same N x N through the mirror: 1000 visitors watching ` +
+          "1000 bookings is 1,000,000 reads. Read it once when the page opens, and show the moving picture on the member page /m/{slug}, " +
+          "whose readers the roster bounds.",
+      );
+    }
+  }
+  return problems;
+}
+
 function viewProblems(app: AuthoredApp, collections: readonly PublishableCollection[]): string[] {
   const normalized = normalizeViews(app);
   if (!normalized.ok) return normalized.problems;
   const known = new Set(collections.map((collection) => collection.cid));
-  return normalized.views.flatMap((view) => [...viewPathProblems(view), ...view.collections.flatMap((cid) => viewCollectionProblems(app, view, cid, known))]);
+  return normalized.views.flatMap((view) => [
+    ...viewPathProblems(view),
+    ...view.collections.flatMap((cid) => viewCollectionProblems(app, view, cid, known)),
+    ...viewLiveProblems(app, view),
+  ]);
 }
 
 /** The checks that need a SCHEMA rather than the declaration.
