@@ -10,7 +10,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { missingRequired, recordId, recordOf, writableFields, type DrawnForm, type SubmitSpec } from "../src/view/submit.js";
+import {
+  MISSING_ID_FIELD,
+  missingIdField,
+  missingRequired,
+  recordId,
+  recordOf,
+  SubmitRefused,
+  writableFields,
+  type DrawnForm,
+  type SubmitSpec,
+} from "../src/view/submit.js";
 
 /** A sentinel that is not a value this module could have invented. The real one is Firestore's
  *  `serverTimestamp()`, which is opaque here on purpose — see `ServerTime`. */
@@ -84,4 +94,88 @@ test("the id is built from the RECORD, so a stamped app still claims the right t
   const stamped: SubmitSpec = { ...submit, stampField: "createdAt", idFrom: "auth.uid+field", idField: "memberEmail" };
   const record = recordOf(fields(), drawn, stamped, { memberName: "A" }, account, serverTime);
   assert.equal(recordId(stamped, account.uid, record, "unused"), "uid_visitor_visitor@example.com");
+});
+
+test("a required answer of nothing but whitespace is missing, and a real one with spaces in it is not", () => {
+  // Space, tab, newline: each is an answer nobody typed on purpose, and each used to pass this
+  // check and go on to become a name nobody can read — or a document id made of a space.
+  assert.deepEqual(missingRequired(fields(), { memberName: " " }), ["Name"]);
+  assert.deepEqual(missingRequired(fields(), { memberName: "\t\n  " }), ["Name"]);
+  // And what is trimmed is only the JUDGEMENT. A value whose spaces are part of it is accepted
+  // here and stored as typed.
+  assert.deepEqual(missingRequired(fields(), { memberName: " A " }), []);
+  assert.deepEqual(recordOf(fields(), drawn, submit, { memberName: " A " }, account, serverTime).memberName, " A ");
+});
+
+/** The refusal a call made, insisted on: a call that returned an id where one cannot be built is
+ *  the bug being tested for, so "no throw" has to fail here rather than skip the assertions. */
+const refusalOf = (call: () => string): SubmitRefused => {
+  try {
+    assert.fail(`built the id ${call()} instead of refusing`);
+  } catch (error) {
+    assert.ok(error instanceof SubmitRefused, `expected a SubmitRefused, got ${String(error)}`);
+    return error;
+  }
+};
+
+const slot: SubmitSpec = {
+  auth: "verifiedEmail",
+  createFields: ["slotId", "memberName", "memberEmail"],
+  emailField: "memberEmail",
+  idFrom: "field",
+  idField: "slotId",
+};
+const slotDrawn: DrawnForm = { fields: { slotId: { label: "Slot", required: true }, memberName: { label: "Name" } } };
+
+test("an id built from a field is refused when the field carries nothing", () => {
+  // `""` is not a document id, and the SDK's complaint about it names a path rather than a field.
+  const record = recordOf(writableFields(slotDrawn, slot.createFields, slot.emailField), slotDrawn, slot, { memberName: "A" }, account, serverTime);
+  assert.equal(missingIdField(slot, record), "slotId");
+  const thrown = refusalOf(() => recordId(slot, account.uid, record, "unused"));
+  assert.equal(thrown.code, MISSING_ID_FIELD);
+  assert.match(thrown.message, /slotId/);
+  // A non-string is empty for the same reason `stringAt` says it is: the rules compare a string.
+  assert.equal(missingIdField(slot, { slotId: 7 }), "slotId");
+});
+
+test("an id built from person AND field is refused rather than collapsing to one per person", () => {
+  // `"<uid>_"` IS a valid document id, which is what makes it the worse of the two: every claim by
+  // one person lands on the same document and the second looks like it took something.
+  const perThing: SubmitSpec = { ...slot, idFrom: "auth.uid+field" };
+  assert.equal(refusalOf(() => recordId(perThing, account.uid, {}, "unused")).code, MISSING_ID_FIELD);
+});
+
+test("the ids the deployed apps already write are unchanged", () => {
+  // The acceptance half. tennis claims a slot by its id; gym and live key one record per person
+  // per thing. Both must come out byte-for-byte as they did before the refusal existed.
+  const record = recordOf(writableFields(slotDrawn, slot.createFields, slot.emailField), slotDrawn, slot, { slotId: "sat-0900" }, account, serverTime);
+  assert.equal(missingIdField(slot, record), undefined);
+  assert.equal(recordId(slot, account.uid, record, "unused"), "sat-0900");
+  assert.equal(recordId({ ...slot, idFrom: "auth.uid+field" }, account.uid, record, "unused"), "uid_visitor_sat-0900");
+  // And the three modes that never look at a field keep answering without one.
+  assert.equal(recordId({ ...slot, idFrom: "auth.uid", idField: "slotId" }, account.uid, {}, "unique_1"), "uid_visitor");
+  assert.equal(recordId({ ...slot, idFrom: "auto", idField: "slotId" }, account.uid, {}, "unique_1"), "unique_1");
+  assert.equal(recordId({ createFields: [] }, account.uid, {}, "unique_1"), "unique_1");
+});
+
+test("a stamped field is not a box to fill in, and is stamped anyway", () => {
+  // Declared required in the schema, the stamp was drawn as an input the visitor could not
+  // usefully fill — and then `missingRequired` stopped the submission over the one field the
+  // server was about to overwrite.
+  const stamped: SubmitSpec = { ...submit, createFields: [...submit.createFields, "createdAt"], stampField: "createdAt" };
+  const stampedDrawn: DrawnForm = { ...drawn, fields: { ...drawn.fields, createdAt: { label: "When", required: true } } };
+  const withStamp = writableFields(stampedDrawn, stamped.createFields, stamped.emailField, stamped.stampField);
+  assert.deepEqual(
+    withStamp.map((field) => field.name),
+    ["memberName", "note"],
+  );
+  assert.deepEqual(missingRequired(withStamp, { memberName: "A" }), []);
+  assert.equal(recordOf(withStamp, stampedDrawn, stamped, { memberName: "A" }, account, serverTime).createdAt, SENTINEL);
+});
+
+test("passing the stamp of an app that has none changes no field list", () => {
+  // The compatibility half: the fourth argument is optional, and an app with nothing to stamp must
+  // draw exactly what it drew from three arguments.
+  assert.deepEqual(writableFields(drawn, submit.createFields, submit.emailField, submit.stampField), fields());
+  assert.deepEqual(writableFields(drawn, submit.createFields, submit.emailField, undefined), fields());
 });

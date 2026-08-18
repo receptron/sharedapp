@@ -75,21 +75,39 @@ export interface WritableField {
 /** Does a submission need somebody signed in? */
 export const needsAccount = (submit: SubmitSpec): boolean => submit.auth !== undefined && submit.auth !== "none";
 
-/** The inputs, in the order the declaration lists them — and WITHOUT the two the visitor does not
- *  choose. See the note at the top: the address is compared to their token and the status is pinned
- *  to `initialStatus`, so a box for either can only be filled in wrongly. */
-export const writableFields = (drawn: DrawnForm, createFields: readonly string[], emailField: string | undefined): WritableField[] =>
+/** The inputs, in the order the declaration lists them — and WITHOUT the three the visitor does not
+ *  choose. See the note at the top: the address is compared to their token, the status is pinned to
+ *  `initialStatus`, and the stamp is the SERVER's clock, so a box for any of them can only be
+ *  filled in wrongly.
+ *
+ *  `stampField` is the fourth argument and optional because it arrived after the hosts did: a
+ *  three-argument call still compiles and still draws what it drew, so the two hosts can adopt it
+ *  one at a time. Passing it is what a host wants, though — declared and required in the schema,
+ *  the stamp was drawn as an empty box the visitor could not usefully fill, and then `missingRequired`
+ *  stopped the submission over the one field `recordOf` was about to overwrite anyway. */
+export const writableFields = (
+  drawn: DrawnForm,
+  createFields: readonly string[],
+  emailField: string | undefined,
+  stampField?: string | undefined,
+): WritableField[] =>
   createFields.flatMap((name) => {
-    if (name === emailField || name === drawn.statusField) return [];
+    if (name === emailField || name === drawn.statusField || (stampField !== undefined && name === stampField)) return [];
     const spec = drawn.fields[name];
     if (spec === undefined) return [];
     return [{ name, label: spec.label ?? name, required: spec.required === true }];
   });
 
 /** Which required fields were left empty, by LABEL — so an answer can name them instead of arriving
- *  as a permission error that names nothing. */
+ *  as a permission error that names nothing.
+ *
+ *  Whitespace is empty here. A required answer of one space is not an answer, and treating it as
+ *  one only moves the refusal somewhere that cannot name the field: past this check it becomes a
+ *  name nobody can read, or — where it is the id field — a document id built out of a space. What
+ *  is STORED is not trimmed: `recordOf` writes the value as typed, so an answer whose leading space
+ *  is part of it keeps it. */
 export const missingRequired = (fields: readonly WritableField[], values: Record<string, string>): string[] =>
-  fields.filter((field) => field.required && (values[field.name] ?? "") === "").map((field) => field.label);
+  fields.filter((field) => field.required && (values[field.name] ?? "").trim() === "").map((field) => field.label);
 
 /** The value this host writes where the rules require the SERVER's clock — Firestore's
  *  `serverTimestamp()` in both hosts today.
@@ -139,6 +157,35 @@ const stringAt = (record: Record<string, unknown>, field: string): string => {
   return typeof value === "string" ? value : "";
 };
 
+/** The code a host matches on to turn a refusal into a sentence a visitor can act on.
+ *
+ *  A fixed string rather than the message, because the message is English and the hosts are not:
+ *  MulmoTerminal's preview and mulmoserver's page each phrase this for whoever is looking at it. */
+export const MISSING_ID_FIELD = "missing-id-field";
+
+/** A submission this module will not turn into a write, with the reason in a form a host can
+ *  branch on. Thrown rather than returned so that no caller can reach a Firestore path by ignoring
+ *  a return value — the whole failure mode being fixed is a bad id that travelled silently. */
+export class SubmitRefused extends Error {
+  readonly code: string;
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = "SubmitRefused";
+    this.code = code;
+  }
+}
+
+/** The id field this record cannot supply, or `undefined` if the id can be built.
+ *
+ *  For a host that would rather ask than catch: called before `recordId`, it names the field to put
+ *  the error beside. `recordId` asks the same question, so a host that skips this is refused, not
+ *  allowed. */
+export const missingIdField = (submit: SubmitSpec, record: Record<string, unknown>): string | undefined => {
+  if (submit.idFrom !== "field" && submit.idFrom !== "auth.uid+field") return undefined;
+  if (submit.idField === undefined) return undefined;
+  return stringAt(record, submit.idField) === "" ? submit.idField : undefined;
+};
+
 /** The record id the declaration asks for.
  *
  *  `auth.uid` is "one answer per person"; `auth.uid+field` is "one per person per thing", and for
@@ -146,8 +193,18 @@ const stringAt = (record: Record<string, unknown>, field: string): string => {
  *  than from what was typed, because the document carries fields the form never showed.
  *
  *  `unique` is passed in rather than generated: this module has no clock and no randomness, and a
- *  timestamp would collide for two answers from one person in the same millisecond. */
+ *  timestamp would collide for two answers from one person in the same millisecond.
+ *
+ *  An EMPTY id field is refused here rather than carried forward. Both ways it went wrong were
+ *  silent: `field` produced `""`, which is not a document id at all and fails at the SDK with a
+ *  message about paths that names no field; `auth.uid+field` produced `"<uid>_"`, which IS a valid
+ *  id — one per person with the thing missing, so two claims on two different slots collide on one
+ *  document and the second looks like it took something. Falling back to a random id would be a
+ *  third silent failure and a worse one: the id IS the claim, so the rules would compare it to
+ *  something else and refuse, or accept a booking that took nothing. */
 export const recordId = (submit: SubmitSpec, uid: string, record: Record<string, unknown>, unique: string): string => {
+  const missing = missingIdField(submit, record);
+  if (missing !== undefined) throw new SubmitRefused(MISSING_ID_FIELD, `The submission has no value for "${missing}", which its id is built from.`);
   if (submit.idFrom === "auth.uid") return uid;
   if (submit.idFrom === "field" && submit.idField !== undefined) return stringAt(record, submit.idField);
   if (submit.idFrom === "auth.uid+field" && submit.idField !== undefined) return `${uid}_${stringAt(record, submit.idField)}`;
