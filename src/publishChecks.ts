@@ -865,23 +865,30 @@ function mirrorClaimProblems(app: AuthoredApp, cid: string, submit: AuthoredSubm
         `The rules require the projection to move in the same write, so every submission is refused. Shared collections here: ${names}.`,
     ];
   }
+  // Two INDEPENDENT things can be wrong about a mirror that names a real
+  // collection, and both are collected rather than returned one at a time: a
+  // missing `mirrorOf` hid the missing `idFrom` behind it, so the author fixed
+  // one half, published again, and was refused again. Above this line the
+  // early returns stay — a mirror naming nothing, or naming itself, makes
+  // every further question about it meaningless.
+  const problems: string[] = [];
   if (app.collections?.[mirror]?.mirrorOf !== cid) {
-    return [
+    problems.push(
       `public.submit.${cid}.mirror names '${mirror}', but collections.${mirror} does not declare mirrorOf: "${cid}". ` +
         "The two halves only work as a pair — the submission side demands the projection move with it, and the projection side is what allows that move — " +
         "so as written every submission is refused.",
-    ];
+    );
   }
   if (submit.idFrom !== "field") {
     const mode = submit.idFrom === undefined ? "absent" : JSON.stringify(submit.idFrom);
-    return [
+    problems.push(
       `public.submit.${cid}.mirror names '${mirror}', but idFrom is ${mode}. A mirror is one thing written twice: the record and its projection SHARE a ` +
         `document id, which is how the projection can say "this slot is taken" about that exact slot. With any other mode the projection lands at an id ` +
         `nothing points at, so the row the public page reads is never the row that was claimed. Declare idFrom: "field" with the field naming the thing ` +
         "being claimed.",
-    ];
+    );
   }
-  return [];
+  return problems;
 }
 
 /** The projection side: `collections[cid].mirrorOf`. */
@@ -1092,14 +1099,14 @@ function mailRefProblems(schemaOf: ReadonlyMap<string, CollectionSchema>, cid: s
   const fields = schema.fields ?? {};
   const known = Object.keys(fields).sort().join(", ") || "(none)";
   const problems: string[] = [];
-  if (fields[mail.toField] === undefined) {
+  if (!declaredField(fields, mail.toField)) {
     problems.push(
       `collections.${cid}.mail.toField names '${mail.toField}', which the schema of '${cid}' does not declare. The queue reads the recipient off the record, ` +
         `so there is no address to send to and the mail is silently skipped — the status moves and nobody is told. Fields on '${cid}': ${known}.`,
     );
   }
   for (const field of mail.dataFields ?? []) {
-    if (fields[field] !== undefined) continue;
+    if (declaredField(fields, field)) continue;
     problems.push(
       `collections.${cid}.mail.dataFields names '${field}', which the schema of '${cid}' does not declare. It is copied off the record into the template's ` +
         `data, so the mail goes out with that value missing. Fields on '${cid}': ${known}.`,
@@ -1143,7 +1150,21 @@ function referencedField(
   field: string | undefined,
 ): CollectionFieldSpec | undefined {
   if (target === undefined || field === undefined) return undefined;
-  return schemaOf.get(target)?.fields?.[field];
+  const fields = schemaOf.get(target)?.fields;
+  return fields !== undefined && declaredField(fields, field) ? fields[field] : undefined;
+}
+
+/** Does the schema DECLARE this field — asked with `Object.hasOwn`, never by
+ *  indexing and comparing with undefined.
+ *
+ *  A field name comes out of a hand-written `app.json`, and `constructor`,
+ *  `toString` and `__proto__` are all names an author can type. Reached
+ *  through the prototype chain they answer "yes, that field exists" to every
+ *  check in this file, which turns the whole schema-reference family into a
+ *  gate with three holes in it — and the failure downstream is the silent one
+ *  these checks were added to catch. */
+function declaredField(fields: Record<string, CollectionFieldSpec>, field: string): boolean {
+  return Object.hasOwn(fields, field);
 }
 
 /** An enum's domain, or undefined for every other kind. Narrowed by the key

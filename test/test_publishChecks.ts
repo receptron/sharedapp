@@ -1069,6 +1069,19 @@ test("a mirror without a shared document id projects onto nothing", () => {
   );
 });
 
+test("a mirror with two things wrong says both, rather than one per publish", () => {
+  // The missing `mirrorOf` used to hide the missing `idFrom` behind it: the
+  // author fixed one half, published again, and was refused again. Publish is
+  // a manual step, so that is a second round trip for nothing.
+  const problems = salon((draft) => {
+    delete draft.collections.slots.mirrorOf;
+    bookingOf(draft).idFrom = "auto";
+    delete bookingOf(draft).idIn;
+  });
+  refuses(problems, "does not declare mirrorOf");
+  refuses(problems, 'but idFrom is "auto"');
+});
+
 test("the missing idField and idIn of a field id are reported once, by their own check", () => {
   // `fieldIdProblems` already owns those two, and a mirror in the same
   // declaration must not say them a second time.
@@ -1193,6 +1206,23 @@ test("a mail queue's fields must exist on the record it reads them off", () => {
   refuses(schemaRefProblems(mailed(MAIL), schemas(without("slot")) as never), "collections.bookings.mail.dataFields names 'slot'");
   // No schema for the collection at all is somebody else's error, said once.
   assert.deepEqual(schemaRefProblems(mailed(MAIL), [schemaWithFields("slots", SOUND)] as never), []);
+});
+
+test("a field name every object already answers to is not a declared field", () => {
+  // `constructor`, `toString` and `__proto__` are names an author can type, and
+  // reached through the prototype chain they answer "yes, that field exists" to
+  // every check here — a gate with three holes in it, failing exactly where it
+  // was added to catch a silence.
+  const BOOKING_FIELDS = { slot: { type: "string" }, status: { type: "string" }, customerEmail: { type: "string" } };
+  const schemas = [schemaWithFields("bookings", BOOKING_FIELDS), schemaWithFields("slots", SOUND)];
+
+  refuses(schemaRefProblems(mailed({ ...MAIL, toField: "constructor" }), schemas as never), "mail.toField names 'constructor'");
+  refuses(schemaRefProblems(mailed({ ...MAIL, dataFields: ["toString"] }), schemas as never), "mail.dataFields names 'toString'");
+
+  // And the same question asked of the reference family beside it.
+  const draft = salonDraft();
+  bookingOf(draft).idIn = { collection: "slots", where: { field: "constructor", equals: "open" } };
+  refuses(schemaRefProblems(app(draft as unknown as Record<string, unknown>), schemas as never), "idIn.where.field names 'constructor'");
 });
 
 test("an enum comparison is a string, and publish does not convert one for the rules", () => {
