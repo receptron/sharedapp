@@ -14,6 +14,19 @@ yarn format         # prettier, printWidth 160
 yarn format:check   # what CI runs
 ```
 
+Before a release, against a real apps checkout (NOT in CI — `../apps` is a private working
+checkout, so a job depending on it would be red for reasons nobody here could act on):
+
+```
+npx tsx scripts/check-apps.mjs [path-to-apps-checkout]   # default ../apps
+```
+
+It runs `publishProblems` + `schemaRefProblems` over the ten apps that already publish, and is
+the counterweight to a gate tested one rule at a time: a tightened check is judged against the
+fixture written to provoke it, and the app it newly refuses is in another repository.
+`test/test_publishBaseline.ts` carries three shapes representing those ten so CI has the same
+question without the sibling checkout.
+
 Single test file: `npx tsx --test test/test_publishChecks.ts`
 Single test case: `npx tsx --test --test-name-pattern "submitOnly" test/test_publishChecks.ts`
 
@@ -43,14 +56,16 @@ documents tell a page what exists so it can draw controls that work, and let a r
 itself instead of arriving as a bare permission error. A projection that disagrees with the
 rules is a bug in the projection, never a loosening of the rules.
 
-## Module map (src/, ~2400 lines, all re-exported from index.ts)
+## Module map (src/, ~5100 lines, all re-exported from index.ts)
 
 | file | role |
 | --- | --- |
 | `publishManifest.ts` | the AUTHORED shape — zod schema for everything in `app.json` except `aid` (which is parsed via core's `parseAppManifest`, so one field has one statement). `AuthoredAppZ` is `.strict()` **on purpose**: a misspelled declaration key is not a broken app, it is a silently permissive one. |
 | `publishProject.ts` | the compiler: authored → published. **Every** difference between what a human writes and what the rules read is in this file or is a bug (ISO window → epoch millis, derived `memberEmails`, publisher stamps). Also owns all Firestore path helpers. |
 | `appViews.ts` | which document a view's HTML lands on, per audience: `public` → `apps/{aid}/config/*`, `member` → `.../member/*`, `participant` → `.../roster/*`. A rule cannot hide a field, so audience is a *place*, not a filter. The declaration is projected per tier, never published once and shared. |
-| `publishChecks.ts` | `publishProblems` / `promotedRoleProblems` — the gate. |
+| `publishChecks.ts` | the gate: `publishProblems` (what publish refuses, see the two kinds below), `schemaRefProblems` (which live records a schema change would break), `bindsSubmitterIdentity`. |
+| `appProtocol.ts` | the contract version these documents are stamped with, and whether an authored floor may ask for it. A reader decides from the stamp whether it may draw what it is looking at. |
+| `view/` | the parent's half of the conversation with a sandboxed view — `bridge.ts` (the public page: a message from the frame is a REQUEST, and a write waits for the visitor's own click), `memberBridge.ts` (the roster: an intent, judged and performed), `message.ts` / `intent.ts` (what a message must be before it is one), `srcdoc.ts` (the bootstrap injected into the frame, and its CSP). No DOM anywhere in it: `event.source` belongs to the host component. |
 
 ## Conventions that are load-bearing
 

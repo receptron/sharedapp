@@ -106,13 +106,11 @@ function declaredViews(app: AuthoredApp): NormalizedViewsResult {
     ...(view.live === undefined ? {} : { live: view.live }),
     where: `views[${index}]`,
   }));
+  // Past here `views` is EMPTY: the pair is refused above, so a legacy entry
+  // means nothing was authored under `views` at all. There is nothing to
+  // collide with the reserved id, and the branch that checked for it could not
+  // run — a refusal that never fires is one nobody can trust is right.
   if (legacy === undefined) return { ok: true, views };
-  // Checked even though the branch above already refuses the pair: the
-  // reserved id is a property of the normalization, not of the order these
-  // two refusals happen to be written in.
-  if (views.some((view) => view.id === PUBLIC_VIEW_ID)) {
-    return { ok: false, problems: [`views declares id '${PUBLIC_VIEW_ID}', which is reserved for the older \`public.view\` spelling. ${BOTH_FORMS}`] };
-  }
   const legacyView: NormalizedView = {
     id: PUBLIC_VIEW_ID,
     audience: "public",

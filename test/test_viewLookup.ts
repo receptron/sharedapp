@@ -98,11 +98,21 @@ test("a host with no port, and a read that failed, both say nobody looked", asyn
 test("a collection the app never opened is refused, not looked up", async () => {
   // The id strategy comes from that declaration, so there is nothing to build an id from — and
   // "not found" would be a claim about a collection this page has no business asking after.
-  const { far } = open({ lookup: async () => ({ found: true }) });
+  const asked: unknown[] = [];
+  const { far } = open({
+    lookup: async (request) => {
+      asked.push(request);
+      return { found: true };
+    },
+  });
   far.send(ask({ cid: "secrets" }));
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  const refusal = far.posted.find((message) => message.type === VIEW_MESSAGE.result);
-  assert.deepEqual(refusal, { type: VIEW_MESSAGE.result, requestId: "r1", ok: false, error: "unknown-collection" });
+  assert.deepEqual(await settled(far), { type: VIEW_MESSAGE.lookupResult, requestId: "r1", known: false, found: false });
+  assert.deepEqual(asked, [], "and the host is never sent to look");
+  assert.equal(
+    far.posted.find((message) => message.type === VIEW_MESSAGE.result),
+    undefined,
+    "the refusal does not also arrive as a submission result",
+  );
 });
 
 test("a submission is still read as a submission", () => {
@@ -127,22 +137,43 @@ test("a lookup with nothing to look up is refused without an answer nobody asked
   assert.deepEqual(readLookupMessage(ask({ cid: "" }), CONFIG), { ok: false, reason: "invalid-lookup", requestId: "r1" });
 });
 
-test("an empty key is ANSWERED, not dropped", async () => {
+test("an empty key is ANSWERED, not dropped — and answered as a LOOKUP", async () => {
   // The hang this replaced: `view.mine("votes", "")` was read as "not a lookup", fell through to the
   // submission reader, was refused there with no request id — and nobody answered. A read has no
   // timeout, so the page waited forever with nothing on screen to say why.
+  //
+  // The second half is the shape. `mine()` reads `{ known, found }`; a `result` carrying
+  // `{ ok: false }` settles the promise with no `known` on it, which a page cannot tell from
+  // "nobody looked" — the author's mistake arriving as the parent's silence, one indirection later.
   const { far } = open({ lookup: async () => ({ found: true }) });
   far.send(ask({ key: "" }));
+  assert.deepEqual(await settled(far), { type: VIEW_MESSAGE.lookupResult, requestId: "r1", known: false, found: false });
+  assert.equal(
+    far.posted.find((message) => message.type === VIEW_MESSAGE.result),
+    undefined,
+  );
+});
+
+test("a submission is still refused as a submission, and a message nobody waits on is not answered", async () => {
+  // The acceptance side of the change above: only what READS as a lookup settles as one. A
+  // submission's refusal keeps `result` — the page's `submit()` waits on `{ ok, error }` — and a
+  // message with no request id is answered by nobody at all, because nobody asked.
+  const { far } = open({ lookup: async () => ({ found: true }) });
+  far.send({ type: VIEW_MESSAGE.submit, requestId: "r2", cid: "secrets", values: {} });
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.deepEqual(
     far.posted.find((message) => message.type === VIEW_MESSAGE.result),
-    {
-      type: VIEW_MESSAGE.result,
-      requestId: "r1",
-      ok: false,
-      error: "invalid-lookup",
-    },
+    { type: VIEW_MESSAGE.result, requestId: "r2", ok: false, error: "unknown-collection" },
   );
+  assert.equal(
+    far.posted.find((message) => message.type === VIEW_MESSAGE.lookupResult),
+    undefined,
+  );
+
+  const quiet = open({ lookup: async () => ({ found: true }) });
+  quiet.far.send({ type: VIEW_MESSAGE.lookup, cid: "", key: "" });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(quiet.far.posted, [], "no request id, so nobody is waiting and nothing is posted");
 });
 
 test("a host that throws SYNCHRONOUSLY is still an answer", async () => {

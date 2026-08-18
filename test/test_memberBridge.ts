@@ -13,7 +13,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { HOST_ERROR, memberBridge } from "../src/view/memberBridge.js";
+import { HOST_ERROR, UNSUPPORTED_REQUEST, memberBridge } from "../src/view/memberBridge.js";
 import { VIEW_MESSAGE } from "../src/view/protocol.js";
 import type { Channel } from "../src/view/bridge.js";
 import type { Viewer } from "../src/view/capability.js";
@@ -143,6 +143,55 @@ test("something nobody asked about is not answered", async () => {
   far.send({ hello: "there" });
   await Promise.resolve();
   assert.equal(far.posted.length, before);
+});
+
+/** A parent whose `perform` recognises nothing — the shape a roster host has
+ *  the moment a page calls something outside the intent vocabulary. */
+const answersNothing = (far: ReturnType<typeof fakeChannel>) => {
+  const bridge = memberBridge(
+    { channel: () => far.channel, state: () => ({}), viewer: () => viewer, defect: noDefect, perform: () => () => Promise.resolve(null) },
+    () => NONCE,
+  );
+  bridge.receive(ready);
+  far.send({ nonce: NONCE });
+  far.posted.length = 0; // the state message; not what these tests are about
+  return bridge;
+};
+
+test("a request perform does not recognise is REFUSED, not dropped", async () => {
+  // ONE bootstrap serves both pages, so a member view holds the public view's whole vocabulary —
+  // and a request outside this parent's is read by `perform`, found not to be an intent, and
+  // answered null. Dropped there, the page sits on a promise that never settles: the dead button,
+  // with nothing anywhere to say why.
+  const far = fakeChannel();
+  answersNothing(far);
+  far.send({ type: VIEW_MESSAGE.submit, requestId: "r7", cid: "bookings", values: { a: 1 } });
+  await Promise.resolve();
+  assert.deepEqual(far.posted, [{ type: VIEW_MESSAGE.result, requestId: "r7", ok: false, error: UNSUPPORTED_REQUEST }]);
+});
+
+test("a lookup nobody serves is settled as a LOOKUP", async () => {
+  // `view.mine()` reads `{ known, found }`. A `result` would settle its promise with no `known` on
+  // it at all — which a page cannot tell from "nobody looked", and "no" is the one answer this
+  // parent must never make up: a page told it stops offering the action to somebody entitled to it.
+  const far = fakeChannel();
+  answersNothing(far);
+  far.send({ type: VIEW_MESSAGE.lookup, requestId: "r8", cid: "bookings", key: "q1" });
+  await Promise.resolve();
+  assert.deepEqual(far.posted, [{ type: VIEW_MESSAGE.lookupResult, requestId: "r8", known: false, found: false }]);
+});
+
+test("an unrecognised message with nobody waiting is still not answered", async () => {
+  // The acceptance beside the two above: the refusal is owed to a REQUEST ID, not to every message
+  // that arrives. Without one there is no promise to settle, and posting would be answering
+  // something nobody asked.
+  const far = fakeChannel();
+  answersNothing(far);
+  far.send({ hello: "there" });
+  far.send({ type: VIEW_MESSAGE.lookup, cid: "bookings", key: "q1" });
+  far.send({ type: VIEW_MESSAGE.submit, requestId: "", cid: "bookings", values: {} });
+  await Promise.resolve();
+  assert.deepEqual(far.posted, []);
 });
 
 test("a perform that REJECTS still answers, in one fixed word", async () => {

@@ -70,7 +70,32 @@ export const HOST_ERROR = "host-error";
 /** The id an answer would go back on, or null when the message carries none —
  *  in which case nobody is waiting on a reply and posting one would be
  *  answering something nobody asked. Same rule as {@link refuseEverything}. */
-const answerId = (data: Record<string, unknown>): string | null => (typeof data.requestId === "string" ? data.requestId : null);
+const answerId = (data: Record<string, unknown>): string | null => (typeof data.requestId === "string" && data.requestId !== "" ? data.requestId : null);
+
+/** What a view is told about a request this parent has no answer for.
+ *
+ *  Distinct from {@link HOST_ERROR}, which says the host BROKE: this one says
+ *  the request was understood well enough to know nobody here serves it — a
+ *  bootstrap call a member page may make and a roster does not implement. Also
+ *  PERMANENT, and for the same reason: published pages compare it. */
+export const UNSUPPORTED_REQUEST = "unsupported-request";
+
+/** The refusal that settles a request `perform` declined to answer at all.
+ *
+ *  ONE BOOTSTRAP serves both pages, so a member view has the public view's
+ *  whole vocabulary in hand — `view.mine(cid, key)` among it. Here that reaches
+ *  `perform`, which reads intents, finds none, and answers null; the message
+ *  was then dropped and the page sat on a promise that never settles. A read
+ *  has no timeout, so the button stays dead and nothing anywhere says why.
+ *
+ *  A LOOKUP IS SETTLED AS A LOOKUP. `mine()` reads `{ known, found }`, and
+ *  `known: false` is the honest answer — this parent did not look — where a
+ *  `{ ok: false }` would arrive with no `known` on it at all. Everything else
+ *  is a `result`, which is what the rest of the bootstrap waits on. */
+const unanswered = (data: Record<string, unknown>, requestId: string): Record<string, unknown> =>
+  data.type === VIEW_MESSAGE.lookup
+    ? { type: VIEW_MESSAGE.lookupResult, requestId, known: false, found: false }
+    : { type: VIEW_MESSAGE.result, requestId, ok: false, error: UNSUPPORTED_REQUEST };
 
 /** `perform` as a promise even when it throws on the way to returning one — a
  *  host that throws synchronously would otherwise take the channel's message
@@ -182,6 +207,14 @@ export const memberBridge = (ports: MemberBridgePorts, nonce: () => string) => {
         // keeping if that ever stops being true.
         if (answer !== null) {
           channel.post({ type: VIEW_MESSAGE.result, ...answer });
+          return;
+        }
+        // Null means `perform` did not recognise it — not that nobody is
+        // waiting. A request id says somebody is, and the only way they learn
+        // otherwise is if we say so. See {@link unanswered}.
+        const requestId = answerId(data);
+        if (requestId !== null) {
+          channel.post(unanswered(data, requestId));
         }
       },
       (error: unknown) => {

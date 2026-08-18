@@ -44,7 +44,7 @@ export { viewBridge, type BridgeCells, type BridgePorts, type Channel, type Sign
 // preview of them. Separate from `viewBridge` because a member's ask is an
 // intent against a record that exists, not a stranger's proposal; see
 // `memberBridge.ts`.
-export { HOST_ERROR, memberBridge, refuseEverything, type MemberBridgePorts, type PerformIntent } from "./memberBridge.js";
+export { HOST_ERROR, UNSUPPORTED_REQUEST, memberBridge, refuseEverything, type MemberBridgePorts, type PerformIntent } from "./memberBridge.js";
 export { capabilityOf, capabilitiesFor, mayTransition, viewerFor, type ViewCapability, type Viewer, type WriteTier } from "./capability.js";
 export {
   readIntentMessage,

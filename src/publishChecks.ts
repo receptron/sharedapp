@@ -135,40 +135,51 @@ function aggregateProblems(app: AuthoredApp): string[] {
  *  cannot tell them apart — so it refuses the one that is nearly always the
  *  second.
  *
- *  The two guards below are the other half. An anonymous session carries no
- *  address, so anything reading one off the record is reading a string the
- *  submitter typed, in a place where the shape of the declaration says
- *  otherwise. Both of these would publish and then behave wrongly rather than
- *  fail, which is the class of thing this file exists for. */
+ *  The guards below are the other half. A session with no account behind it
+ *  carries no address, so anything reading one off the record is reading a
+ *  string the submitter typed, in a place where the shape of the declaration
+ *  says otherwise. Both of these would publish and then behave wrongly rather
+ *  than fail, which is the class of thing this file exists for.
+ *
+ *  They are checked for `none` TOO, refused though it already is: `none` has
+ *  no identity either, so an author who fixes the auth mode alone meets the
+ *  next refusal on the next publish. All of them in one pass is the rule this
+ *  whole file is written to (`publishProblems` returns a list). */
 function authProblems(app: AuthoredApp): string[] {
   return Object.entries(app.public?.submit ?? {}).flatMap(([cid, submit]) => {
+    const problems: string[] = [];
     if (submit.auth === "none") {
-      return [
+      problems.push(
         `public.submit.${cid}.auth is "none": nobody is signed in, so there is no uid, so \`idFrom\` can only be "auto" and ` +
           `nothing stops the same person submitting again — and again. Use "anonymous": the visitor's browser opens a session by itself, ` +
           `with no sign-in screen, and it gives the rules a uid to bind the record to.`,
-      ];
+      );
     }
-    if (submit.auth !== "anonymous") return [];
+    // NO EARLY RETURN, and that is the point: "none" carries no identity either,
+    // so every guard below holds for it word for word. Returning here made the
+    // author fix the auth mode, publish again, and only then be told about the
+    // emailField that was never going to work — one refusal per attempt, over a
+    // declaration that was wrong in three places at once. Publish is a manual
+    // step; each round trip is a person waiting.
+    if (submit.auth !== "anonymous" && submit.auth !== "none") return problems;
 
-    const problems: string[] = [];
     if (submit.emailField !== undefined) {
       problems.push(
-        `public.submit.${cid} is "anonymous" and names emailField '${submit.emailField}': an anonymous session has no address. ` +
+        `public.submit.${cid} is "${submit.auth}" and names emailField '${submit.emailField}': that session carries no address. ` +
           `The rules pin that field to the signed-in address only under "verifiedEmail", so here it would hold whatever was submitted — ` +
           `an unverified string sitting in the field the app treats as identity. Drop the emailField, or use "verifiedEmail".`,
       );
     }
     if (submit.audience === "participant") {
       problems.push(
-        `public.submit.${cid} is "anonymous" and declares audience "participant": the roster is a list of addresses, and an anonymous ` +
-          `visitor has none, so every submission would be refused by the rules. A participant-only collection is a "verifiedEmail" one.`,
+        `public.submit.${cid} is "${submit.auth}" and declares audience "participant": the roster is a list of addresses, and a visitor ` +
+          `signed in this way has none, so every submission would be refused by the rules. A participant-only collection is a "verifiedEmail" one.`,
       );
     }
     if (app.collections?.[cid]?.mail !== undefined) {
       problems.push(
-        `collections.${cid} queues mail and public.submit.${cid} is "anonymous": the recipient is read off the record (mail.toField), ` +
-          `and an anonymous submitter chooses it with no account behind it — the app would send mail to any address anybody types. ` +
+        `collections.${cid} queues mail and public.submit.${cid} is "${submit.auth}": the recipient is read off the record (mail.toField), ` +
+          `and a submitter with no account behind them chooses it — the app would send mail to any address anybody types. ` +
           `Mail belongs to a "verifiedEmail" collection.`,
       );
     }
@@ -341,6 +352,10 @@ function submitCoherenceProblems(app: AuthoredApp, cid: string, submit: Authored
   return problems;
 }
 
+/** The transition table's word for "no record yet" — the left-hand side that is
+ *  not a status any record holds. */
+const INITIAL_KEY = "initial";
+
 /** `selfDelete` names statuses, and a status nothing can reach grants nothing.
  *
  *  Worth refusing rather than leaving to the author to notice, because the
@@ -352,7 +367,21 @@ function submitCoherenceProblems(app: AuthoredApp, cid: string, submit: Authored
  *
  *  Reachability is judged against the collection's own table, not against
  *  `selfTransitions`: a booking the desk approved is somewhere the submitter
- *  never moved it to, and withdrawing from THERE is a normal thing to allow. */
+ *  never moved it to, and withdrawing from THERE is a normal thing to allow.
+ *
+ *  REACHABLE IS THREE THINGS, and reading only the destinations refused the
+ *  commonest declaration there is: `initialStatus: "pending"` with
+ *  `transitions: { pending: ["approved"] }` puts every record in "pending" the
+ *  moment it is written, and `selfDelete: ["pending"]` — withdraw the booking
+ *  you just made — was called a status nothing ever reaches. So the status a
+ *  submission STARTS in counts, and so does a status the table moves records
+ *  OUT of: a key on the left-hand side is the author saying records are in it.
+ *  `initial` is not one of those — it is the table's word for "no record yet",
+ *  not a status any record holds.
+ *
+ *  Whether `initialStatus` is itself listed under `transitions.initial` is a
+ *  different question, and this check does not ask it: refusing here would
+ *  refuse apps that publish today over something no rule reads. */
 function selfDeleteProblems(cid: string, submit: AuthoredSubmit, collection: AuthoredCollectionConfig | undefined): string[] {
   const states = submit.selfDelete;
   if (states === undefined) return [];
@@ -361,12 +390,17 @@ function selfDeleteProblems(cid: string, submit: AuthoredSubmit, collection: Aut
   }
   const transitions = collection?.transitions;
   if (transitions === undefined) return [];
-  const reachable = new Set(Object.values(transitions).flat());
+  const reachable = new Set([
+    ...(submit.initialStatus === undefined ? [] : [submit.initialStatus]),
+    ...Object.values(transitions).flat(),
+    ...Object.keys(transitions).filter((from) => from !== INITIAL_KEY),
+  ]);
   const unreachable = states.filter((state) => !reachable.has(state));
   if (unreachable.length === 0) return [];
   return [
     `public.submit.${cid}.selfDelete names ${unreachable.map((state) => `"${state}"`).join(", ")}, ` +
-      `which collections.${cid}.transitions never reaches: no record is ever in that status, so the declaration allows nothing.`,
+      `which no record ever holds: it is neither public.submit.${cid}.initialStatus nor a status collections.${cid}.transitions names, ` +
+      `so the declaration allows nothing.`,
   ];
 }
 
