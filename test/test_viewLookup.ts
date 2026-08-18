@@ -114,11 +114,43 @@ test("a submission is still read as a submission", () => {
 
 test("a lookup with nothing to look up is refused without an answer nobody asked for", () => {
   // No requestId means there is no promise waiting — answering it would be answering a message the
-  // page never sent.
+  // page never sent, and this one falls through to be read as something else.
   assert.deepEqual(readLookupMessage({ type: VIEW_MESSAGE.lookup, cid: "votes", key: "q1" }, CONFIG), {
     ok: false,
     reason: "not-a-lookup",
     requestId: "",
   });
-  assert.deepEqual(readLookupMessage(ask({ key: "" }), CONFIG), { ok: false, reason: "not-a-lookup", requestId: "r1" });
+  // A malformed one WITH a request id is a different refusal, because somebody is waiting on it.
+  assert.deepEqual(readLookupMessage(ask({ key: "" }), CONFIG), { ok: false, reason: "invalid-lookup", requestId: "r1" });
+  assert.deepEqual(readLookupMessage(ask({ cid: "" }), CONFIG), { ok: false, reason: "invalid-lookup", requestId: "r1" });
+});
+
+test("an empty key is ANSWERED, not dropped", async () => {
+  // The hang this replaced: `view.mine("votes", "")` was read as "not a lookup", fell through to the
+  // submission reader, was refused there with no request id — and nobody answered. A read has no
+  // timeout, so the page waited forever with nothing on screen to say why.
+  const { far } = open({ lookup: async () => ({ found: true }) });
+  far.send(ask({ key: "" }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(
+    far.posted.find((message) => message.type === VIEW_MESSAGE.result),
+    {
+      type: VIEW_MESSAGE.result,
+      requestId: "r1",
+      ok: false,
+      error: "invalid-lookup",
+    },
+  );
+});
+
+test("a host that throws SYNCHRONOUSLY is still an answer", async () => {
+  // Not a hypothetical: a port that reads a ref before awaiting anything throws in the same turn,
+  // and an unhandled rejection there would leave the page waiting exactly as the empty key did.
+  const { far } = open({
+    lookup: () => {
+      throw new Error("no session");
+    },
+  });
+  far.send(ask({}));
+  assert.deepEqual(await settled(far), { type: VIEW_MESSAGE.lookupResult, requestId: "r1", known: false, found: false });
 });

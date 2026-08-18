@@ -128,7 +128,15 @@ export interface LookupAsk {
   key: string;
 }
 
-export type LookupRead = { ok: true; ask: LookupAsk } | { ok: false; reason: string; requestId: string };
+/** Why a lookup will not be performed — and the first value is not like the other two.
+ *
+ *  `not-a-lookup` means THIS IS NOT ONE: the caller goes on to read the message as something else,
+ *  and nobody is waiting on an answer to it. The other two mean it IS a lookup and will not be
+ *  served, so the page's promise must be settled with them — a read has no timeout, and a page that
+ *  is never answered waits forever with nothing on screen to say why. */
+export type LookupRefusal = "not-a-lookup" | "invalid-lookup" | "unknown-collection";
+
+export type LookupRead = { ok: true; ask: LookupAsk } | { ok: false; reason: LookupRefusal; requestId: string };
 
 /** Read a `lookup`, and refuse it for the same reasons a submission is refused.
  *
@@ -141,11 +149,17 @@ export type LookupRead = { ok: true; ask: LookupAsk } | { ok: false; reason: str
  *  builds `uid + "_" + key` and reads that document, so the worst a page can do
  *  with a made-up key is ask about a row of its own that does not exist. */
 export const readLookupMessage = (data: unknown, config: ViewSubmitConfig | null): LookupRead => {
+  // Not one of ours, or one with nobody waiting on it (no request id, so no promise to settle).
+  // Both fall through to be read as something else.
   if (!isRecord(data) || data.type !== VIEW_MESSAGE.lookup || typeof data.requestId !== "string" || data.requestId === "") {
     return { ok: false, reason: "not-a-lookup", requestId: "" };
   }
+  // From here it IS a lookup and somebody is waiting. A malformed one must be ANSWERED — refused
+  // with a reason — rather than dropped: `view.mine("votes", "")` used to fall through to the
+  // submission reader, be refused there with no request id, and leave the page on a promise that
+  // never settled. A read has no timeout; nothing anywhere would have said so.
   if (typeof data.cid !== "string" || data.cid === "" || typeof data.key !== "string" || data.key === "") {
-    return { ok: false, reason: "not-a-lookup", requestId: data.requestId };
+    return { ok: false, reason: "invalid-lookup", requestId: data.requestId };
   }
   if (config?.submit?.[data.cid] === undefined) {
     return { ok: false, reason: "unknown-collection", requestId: data.requestId };

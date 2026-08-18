@@ -351,11 +351,17 @@ export const viewBridge = (ports: BridgePorts, config: () => ViewSubmitConfig | 
    *  action to somebody entitled to it — and that is the bug this whole port
    *  exists to fix, arriving from the other direction. */
   const look = async (ask: LookupAsk) => {
-    if (ports.lookup === undefined) {
+    const port = ports.lookup;
+    if (port === undefined) {
       answerLookup(ask.requestId, { known: false, found: false });
       return;
     }
-    const found = await ports.lookup(ask).catch(() => null);
+    // Called inside a promise so a host that throws SYNCHRONOUSLY is caught here too. Without it
+    // the throw escapes `look` as an unhandled rejection and the page is never answered — the same
+    // hang as an unroutable message, arriving from the host's side.
+    const found = await Promise.resolve()
+      .then(() => port(ask))
+      .catch(() => null);
     if (found === null) {
       answerLookup(ask.requestId, { known: false, found: false });
       return;

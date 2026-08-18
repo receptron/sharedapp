@@ -29,6 +29,7 @@ export {
   type LookupAnswer,
   type LookupAsk,
   type LookupRead,
+  type LookupRefusal,
   type PendingSubmit,
   type SubmitRead,
   type SubmitRefusal,
