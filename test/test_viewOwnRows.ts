@@ -102,3 +102,20 @@ test("a document that only INHERITED the frame gets none of it", () => {
   far.send({ nonce: "guessed" });
   assert.equal(far.posted.length, 0);
 });
+
+test("a host that has not read yet says nothing, and it is not an empty answer", () => {
+  // The state that made this worth a shape of its own: the page opens, the read is in flight, and
+  // the honest answer is "I do not know yet". Sent as `{}` it would read as "you have not answered"
+  // — and the page would draw the form, then take it away a tick later when the read landed.
+  const far = fakeChannel();
+  const bridge = viewBridge(
+    { channel: () => far.channel, submit: async () => ({ ok: true }), state: () => ({ questions: [] }), mine: () => undefined },
+    () => null,
+    () => NONCE,
+    cells(),
+  );
+
+  bridge.receive(ready);
+  far.send({ nonce: NONCE });
+  assert.equal("viewer" in (far.posted[0] ?? {}), false);
+});

@@ -110,12 +110,19 @@ export interface BridgePorts {
    *  could have sent", and the host holds it because the host is the one with
    *  the declaration in hand.
    *
-   *  OPTIONAL, and absence is not "nothing was submitted": a host that cannot
-   *  read it, or an older one that does not, sends nothing at all. A page must
-   *  read the difference as UNKNOWN — offer the action, and let the refusal
-   *  explain itself — or it will tell somebody they have already answered when
-   *  they have not. */
-  mine?: (() => Record<string, ViewDataset>) | undefined;
+   *  OPTIONAL BOTH WAYS, and absence is not "nothing was submitted": a host that
+   *  does not offer the port at all, and one that offers it and answers
+   *  `undefined` — it has not read yet, the read was refused — are saying the
+   *  same thing, and it is not the same thing an empty array says. A page must
+   *  read the difference as UNKNOWN: offer the action, and let the refusal
+   *  explain itself. Otherwise it tells somebody they have already answered
+   *  when they have not.
+   *
+   *  The second form is what a live host actually needs: whether it knows
+   *  changes DURING a visit — nothing is known until the first read lands, and
+   *  a device handed to the next person is back to knowing nothing about them
+   *  until theirs does. */
+  mine?: (() => Record<string, ViewDataset> | undefined) | undefined;
   /** Somewhere to put what the frame says about itself — an uncaught error, a
    *  rejected promise, a modal the sandbox ignored.
    *
