@@ -236,6 +236,8 @@ export function participantScope(app: AuthoredApp, cid: string, participantRead:
  *  is read by everyone the tier admits, which for `roster` includes every
  *  participant. */
 export interface AppViewConfigDoc extends Record<string, unknown> {
+  /** The version of the publish contract these documents keep — see `appProtocol.ts`. */
+  protocol: string;
   name?: string;
   views: { id: string; collections: ProjectedViewCollection[]; live?: string[] }[];
   /** The submit declarations for the collections these views draw, so the page

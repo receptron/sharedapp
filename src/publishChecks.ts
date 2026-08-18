@@ -29,6 +29,7 @@
 import type { CollectionFieldSpec, CollectionSchema } from "@mulmoclaude/core/collection";
 import { isSafeCustomViewPath } from "@mulmoclaude/core/collection/server";
 import { normalizeViews, participantScope, type NormalizedView } from "./appViews.js";
+import { APP_PROTOCOL, protocolOf, protocolWithin } from "./appProtocol.js";
 import type { AuthoredApp, AuthoredCollectionConfig, AuthoredSubmit } from "./publishManifest.js";
 
 /** What publish knows about a shared collection in this repository, as far as
@@ -458,8 +459,33 @@ function unknownCidProblems(app: AuthoredApp, collections: readonly PublishableC
  *
  *  All of them, every time. Publish is a manual step with a human waiting on
  *  it; stopping at the first problem turns one review into five. */
+/** An authored `protocol` this compiler cannot honour.
+ *
+ *  The declaration is a FLOOR, not a value to publish: the projection carries what this compiler
+ *  emits, because that is the contract the documents actually keep. So the only thing to check is
+ *  the direction that would produce a lie — an app written against a contract newer than this
+ *  publisher implements. Compiled anyway, it would be published as documents that do not keep the
+ *  promises the author relied on, under a version number a reader believes.
+ *
+ *  A version this build cannot read at all is refused for the same reason: nothing is known about
+ *  what it asks for, and continuing would be a guess in the one direction that fails silently. */
+function protocolProblems(app: AuthoredApp): string[] {
+  if (app.protocol === undefined) return [];
+  const stated = protocolOf(app.protocol);
+  if (stated === null) {
+    return [`\`protocol\` is "${app.protocol}", which is not a version (expected e.g. "${APP_PROTOCOL}").`];
+  }
+  const emitted = protocolOf(APP_PROTOCOL);
+  if (emitted === null || protocolWithin(stated, emitted)) return [];
+  return [
+    `This app declares \`protocol: "${app.protocol}"\`, and this publisher writes ${APP_PROTOCOL}.`,
+    "Nothing was written: publishing it would stamp a contract these documents do not keep, and the page that reads them would believe the stamp. Update @receptron/sharedapp (and the front-end that draws it) first.",
+  ];
+}
+
 export function publishProblems(app: AuthoredApp, collections: readonly PublishableCollection[], publisherEmail: string): string[] {
   return [
+    ...protocolProblems(app),
     ...unknownCidProblems(app, collections),
     ...publisherProblems(app, publisherEmail),
     ...submitOnlyProblems(app),
