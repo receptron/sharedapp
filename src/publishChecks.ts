@@ -117,20 +117,63 @@ function aggregateProblems(app: AuthoredApp): string[] {
   return problems;
 }
 
-/** INVARIANT 3 — `auth: "verifiedEmail"` only.
+/** INVARIANT 3 — `none` may not be published, and `anonymous` may not pretend to
+ *  know who anybody is.
  *
- *  A product decision, not a rules limitation: the rules keep all three stages
- *  and the emulator tests keep exercising them, because deleting a stage from
- *  the rules turns a change of mind into a cross-repo deploy. Publish is where
- *  the current decision is expressed, and it is one line to move. */
+ *  This used to refuse everything but `verifiedEmail`. What moved it is the
+ *  shape that made the restriction visible: a poll in front of a live audience,
+ *  where a Google sign-in between the question and the answer loses most of the
+ *  room. `anonymous` is what that shape wants — the browser opens a session by
+ *  itself, no screen, and the uid it gets is real enough for the rules to build
+ *  `uid + "_" + questionId` out of, which is what makes one-vote-per-question
+ *  ENFORCED rather than asked for nicely.
+ *
+ *  `none` stays refused, and not as a leftover: with nobody signed in there is
+ *  no uid, so `idFrom` can only be `auto`, and "one per person" has nothing to
+ *  hang on. The button just works again. An app that wants that has said
+ *  something different from an app that forgot to think about it, and publish
+ *  cannot tell them apart — so it refuses the one that is nearly always the
+ *  second.
+ *
+ *  The two guards below are the other half. An anonymous session carries no
+ *  address, so anything reading one off the record is reading a string the
+ *  submitter typed, in a place where the shape of the declaration says
+ *  otherwise. Both of these would publish and then behave wrongly rather than
+ *  fail, which is the class of thing this file exists for. */
 function authProblems(app: AuthoredApp): string[] {
-  return Object.entries(app.public?.submit ?? {})
-    .filter(([, submit]) => submit.auth !== "verifiedEmail")
-    .map(
-      ([cid, submit]) =>
-        `public.submit.${cid}.auth is "${submit.auth}": only "verifiedEmail" may be published. ` +
-        `The rules still implement "none" and "anonymous" — this is a product decision, and lifting it is a change here, not a rules deploy.`,
-    );
+  return Object.entries(app.public?.submit ?? {}).flatMap(([cid, submit]) => {
+    if (submit.auth === "none") {
+      return [
+        `public.submit.${cid}.auth is "none": nobody is signed in, so there is no uid, so \`idFrom\` can only be "auto" and ` +
+          `nothing stops the same person submitting again — and again. Use "anonymous": the visitor's browser opens a session by itself, ` +
+          `with no sign-in screen, and it gives the rules a uid to bind the record to.`,
+      ];
+    }
+    if (submit.auth !== "anonymous") return [];
+
+    const problems: string[] = [];
+    if (submit.emailField !== undefined) {
+      problems.push(
+        `public.submit.${cid} is "anonymous" and names emailField '${submit.emailField}': an anonymous session has no address. ` +
+          `The rules pin that field to the signed-in address only under "verifiedEmail", so here it would hold whatever was submitted — ` +
+          `an unverified string sitting in the field the app treats as identity. Drop the emailField, or use "verifiedEmail".`,
+      );
+    }
+    if (submit.audience === "participant") {
+      problems.push(
+        `public.submit.${cid} is "anonymous" and declares audience "participant": the roster is a list of addresses, and an anonymous ` +
+          `visitor has none, so every submission would be refused by the rules. A participant-only collection is a "verifiedEmail" one.`,
+      );
+    }
+    if (app.collections?.[cid]?.mail !== undefined) {
+      problems.push(
+        `collections.${cid} queues mail and public.submit.${cid} is "anonymous": the recipient is read off the record (mail.toField), ` +
+          `and an anonymous submitter chooses it with no account behind it — the app would send mail to any address anybody types. ` +
+          `Mail belongs to a "verifiedEmail" collection.`,
+      );
+    }
+    return problems;
+  });
 }
 
 /** INVARIANT 5 — a mail transition's origins and destination must be disjoint.
