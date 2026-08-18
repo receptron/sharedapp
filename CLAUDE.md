@@ -21,9 +21,14 @@ checkout, so a job depending on it would be red for reasons nobody here could ac
 npx tsx scripts/check-apps.mjs [path-to-apps-checkout]   # default ../apps
 ```
 
-It runs `publishProblems` + `schemaRefProblems` over the ten apps that already publish, and is
-the counterweight to a gate tested one rule at a time: a tightened check is judged against the
-fixture written to provoke it, and the app it newly refuses is in another repository.
+It runs `publishProblems` + `schemaRefProblems` over the ten apps that already publish, reading
+each app's real collections from `<app>/.claude/skills/<cid>/schema.json` (an app IS a
+repository, so its schemas are committed beside its `app.json`) — without them the field-name,
+enum and bound checks would be skipped while still printing a pass. An app it cannot read is a
+FAILURE, not a skip: ten minus the missing ones is a weaker claim that looks identical going
+past. It is the counterweight to a gate tested one rule at a time: a tightened check is judged
+against the fixture written to provoke it, and the app it newly refuses is in another
+repository.
 `test/test_publishBaseline.ts` carries three shapes representing those ten so CI has the same
 question without the sibling checkout.
 

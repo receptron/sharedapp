@@ -76,26 +76,11 @@ const answerId = (data: Record<string, unknown>): string | null => (typeof data.
  *
  *  Distinct from {@link HOST_ERROR}, which says the host BROKE: this one says
  *  the request was understood well enough to know nobody here serves it — a
- *  bootstrap call a member page may make and a roster does not implement. Also
+ *  bootstrap call a member page may make and a roster does not implement.
+ *  Dropping it instead left the page on a promise that never settles, which is
+ *  a button that does nothing with no way left to find out why. Also
  *  PERMANENT, and for the same reason: published pages compare it. */
 export const UNSUPPORTED_REQUEST = "unsupported-request";
-
-/** The refusal that settles a request `perform` declined to answer at all.
- *
- *  ONE BOOTSTRAP serves both pages, so a member view has the public view's
- *  whole vocabulary in hand — `view.mine(cid, key)` among it. Here that reaches
- *  `perform`, which reads intents, finds none, and answers null; the message
- *  was then dropped and the page sat on a promise that never settles. A read
- *  has no timeout, so the button stays dead and nothing anywhere says why.
- *
- *  A LOOKUP IS SETTLED AS A LOOKUP. `mine()` reads `{ known, found }`, and
- *  `known: false` is the honest answer — this parent did not look — where a
- *  `{ ok: false }` would arrive with no `known` on it at all. Everything else
- *  is a `result`, which is what the rest of the bootstrap waits on. */
-const unanswered = (data: Record<string, unknown>, requestId: string): Record<string, unknown> =>
-  data.type === VIEW_MESSAGE.lookup
-    ? { type: VIEW_MESSAGE.lookupResult, requestId, known: false, found: false }
-    : { type: VIEW_MESSAGE.result, requestId, ok: false, error: UNSUPPORTED_REQUEST };
 
 /** `perform` as a promise even when it throws on the way to returning one — a
  *  host that throws synchronously would otherwise take the channel's message
@@ -199,6 +184,34 @@ export const memberBridge = (ports: MemberBridgePorts, nonce: () => string) => {
       sendState();
       return;
     }
+    /** THE ONE REQUEST THIS PARENT ANSWERS BY ITSELF, and the only one it can:
+     *  `view.mine(cid, key)`.
+     *
+     *  One bootstrap serves both pages, so a member view holds the public view's
+     *  whole vocabulary — a lookup among it. There is no port here that performs
+     *  one (`bridge.ts` has `lookup`; this module has `perform`, which reads
+     *  INTENTS), so the honest answer is `known: false`: nobody looked.
+     *
+     *  ANSWERED BEFORE `perform` IS CONSULTED, and that placement is the whole
+     *  fix rather than a shortcut. Every handler this parent can be given answers
+     *  in the INTENT shape — `refuseEverything` says `{ ok: false, error:
+     *  "read-only" }`, and a host's own handler returns an `IntentAnswer` — so
+     *  routing a lookup through any of them settles `mine()` with an object that
+     *  has no `known` on it at all. The page cannot tell that from "nobody
+     *  looked", which is the one answer that must never be guessed: read as "you
+     *  have already answered", it takes the action away from somebody entitled to
+     *  it. Settling it here means the shape does not depend on which handler the
+     *  host happened to pass, or on whether it passed one.
+     *
+     *  A request id is still required. Without one nobody is waiting, and posting
+     *  would be answering something nobody asked. */
+    if (data.type === VIEW_MESSAGE.lookup) {
+      const asked = answerId(data);
+      if (asked !== null) {
+        channel.post({ type: VIEW_MESSAGE.lookupResult, requestId: asked, known: false, found: false });
+      }
+      return;
+    }
     const perform = ports.perform?.() ?? refuseEverything;
     performed(perform, data).then(
       (answer) => {
@@ -211,10 +224,10 @@ export const memberBridge = (ports: MemberBridgePorts, nonce: () => string) => {
         }
         // Null means `perform` did not recognise it — not that nobody is
         // waiting. A request id says somebody is, and the only way they learn
-        // otherwise is if we say so. See {@link unanswered}.
+        // otherwise is if we say so. See {@link UNSUPPORTED_REQUEST}.
         const requestId = answerId(data);
         if (requestId !== null) {
-          channel.post(unanswered(data, requestId));
+          channel.post({ type: VIEW_MESSAGE.result, requestId, ok: false, error: UNSUPPORTED_REQUEST });
         }
       },
       (error: unknown) => {

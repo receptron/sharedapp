@@ -170,15 +170,58 @@ test("a request perform does not recognise is REFUSED, not dropped", async () =>
   assert.deepEqual(far.posted, [{ type: VIEW_MESSAGE.result, requestId: "r7", ok: false, error: UNSUPPORTED_REQUEST }]);
 });
 
-test("a lookup nobody serves is settled as a LOOKUP", async () => {
+test("a lookup is settled as a LOOKUP, whatever handler the host passed", async () => {
   // `view.mine()` reads `{ known, found }`. A `result` would settle its promise with no `known` on
   // it at all — which a page cannot tell from "nobody looked", and "no" is the one answer this
   // parent must never make up: a page told it stops offering the action to somebody entitled to it.
-  const far = fakeChannel();
-  answersNothing(far);
-  far.send({ type: VIEW_MESSAGE.lookup, requestId: "r8", cid: "bookings", key: "q1" });
+  //
+  // ALL THREE HOSTS, because every handler this parent can be given answers in the INTENT shape,
+  // and the shape of a lookup's answer must not depend on which one it got. The read-only page is
+  // the one that hid this: `refuseEverything` answers a lookup `{ ok: false, error: "read-only" }`,
+  // so it never reached the branch that settles it and the page was told a refusal instead.
+  const lookup = { type: VIEW_MESSAGE.lookup, requestId: "r8", cid: "bookings", key: "q1" };
+  const settled = { type: VIEW_MESSAGE.lookupResult, requestId: "r8", known: false, found: false };
+
+  const nothing = fakeChannel();
+  answersNothing(nothing);
+  nothing.send(lookup);
   await Promise.resolve();
-  assert.deepEqual(far.posted, [{ type: VIEW_MESSAGE.lookupResult, requestId: "r8", known: false, found: false }]);
+  assert.deepEqual(nothing.posted, [settled], "a perform that recognises nothing");
+
+  // No `perform` at all — the genuinely read-only page.
+  const readOnly = fakeChannel();
+  const bridge = memberBridge({ channel: () => readOnly.channel, state: () => ({}), viewer: () => viewer, defect: noDefect }, () => NONCE);
+  bridge.receive(ready);
+  readOnly.send({ nonce: NONCE });
+  readOnly.posted.length = 0;
+  readOnly.send(lookup);
+  await Promise.resolve();
+  assert.deepEqual(readOnly.posted, [settled], "no perform at all");
+
+  // And a host whose handler answers everything: a lookup is still not its to answer, because it
+  // cannot answer one in the shape the page reads.
+  const eager = fakeChannel();
+  const asked: unknown[] = [];
+  const answering = memberBridge(
+    {
+      channel: () => eager.channel,
+      state: () => ({}),
+      viewer: () => viewer,
+      defect: noDefect,
+      perform: () => (data) => {
+        asked.push(data);
+        return Promise.resolve({ requestId: "r8", ok: true });
+      },
+    },
+    () => NONCE,
+  );
+  answering.receive(ready);
+  eager.send({ nonce: NONCE });
+  eager.posted.length = 0;
+  eager.send(lookup);
+  await Promise.resolve();
+  assert.deepEqual(eager.posted, [settled], "a perform that would have answered");
+  assert.deepEqual(asked, [], "and it is never asked");
 });
 
 test("an unrecognised message with nobody waiting is still not answered", async () => {
@@ -192,6 +235,17 @@ test("an unrecognised message with nobody waiting is still not answered", async 
   far.send({ type: VIEW_MESSAGE.submit, requestId: "", cid: "bookings", values: {} });
   await Promise.resolve();
   assert.deepEqual(far.posted, []);
+
+  // Including on the read-only page, which answers every ASKED question and still asks nothing of
+  // a message that carries no id.
+  const readOnly = fakeChannel();
+  const bridge = memberBridge({ channel: () => readOnly.channel, state: () => ({}), viewer: () => viewer, defect: noDefect }, () => NONCE);
+  bridge.receive(ready);
+  readOnly.send({ nonce: NONCE });
+  readOnly.posted.length = 0;
+  readOnly.send({ type: VIEW_MESSAGE.lookup, cid: "bookings", key: "q1" });
+  await Promise.resolve();
+  assert.deepEqual(readOnly.posted, []);
 });
 
 test("a perform that REJECTS still answers, in one fixed word", async () => {
