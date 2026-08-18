@@ -399,7 +399,7 @@ test("selfDelete from the status a submission STARTS in is allowed", () => {
   // and the refusal is not a warning, it is a publish that does not happen.
   assert.deepEqual(
     problemsFor({
-      collections: { bookings: { statusField: "status", transitions: { pending: ["approved"] } } },
+      collections: { bookings: { statusField: "status", transitions: { initial: ["pending"], pending: ["approved"] } } },
       public: {
         submit: { bookings: { auth: "verifiedEmail", createFields: ["status"], initialStatus: "pending", selfDelete: ["pending"] } },
       },
@@ -1009,4 +1009,238 @@ test("a `protocol` that is not a version is refused rather than guessed at", () 
   }
   // And the shape that IS a version still passes, so the check is not simply refusing everything.
   assert.deepEqual(problemsFor({ protocol: "1.0.0" }), []);
+});
+
+// --- the gate's own field ---------------------------------------------------
+
+test("a gateOn.match the submission may not carry has no input that works", () => {
+  // `gateMatches()` reads `request.resource.data[g.match]`. Outside createFields
+  // there is no submission that passes: carrying the field fails `hasOnly`,
+  // omitting it fails the gate. The form is shut and reads as if it were open.
+  const gated = (createFields: string[]) => ({
+    collections: { answers: { submitOnly: true } },
+    public: {
+      submit: { answers: { auth: "verifiedEmail", createFields, idFrom: "auth.uid", gateOn: { phase: "open", match: "questionId" } } },
+    },
+  });
+  refuses(problemsFor(gated(["choice"])), 'public.submit.answers.createFields must include "questionId"');
+  assert.deepEqual(problemsFor(gated(["choice", "questionId"])), []);
+});
+
+// --- where a gated reveal reads its flag ------------------------------------
+
+test("a gatedFrom naming no collection of this repository never opens the gate", () => {
+  // The half-declared pair is refused above; this is the typo one step further
+  // in, where both keys are present and the parent does not exist.
+  refuses(
+    problemsFor({ collections: { answers: { revealGated: true, gatedFrom: "responsez", revealBy: "revealed" } } }),
+    "collections.answers.gatedFrom names 'responsez'",
+  );
+  assert.deepEqual(problemsFor({ collections: { answers: { revealGated: true, gatedFrom: "responses", revealBy: "revealed" } } }), []);
+});
+
+// --- a mirror is one thing written twice ------------------------------------
+
+test("a mirror without a shared document id projects onto nothing", () => {
+  // The projection's whole job is to say "this slot is taken" about THAT slot,
+  // which it can only do by sharing the record's id. With `auto` the pair is
+  // written and the row the public page reads is never the row that was claimed.
+  for (const idFrom of ["auto", "auth.uid"]) {
+    refuses(
+      salon((draft) => {
+        bookingOf(draft).idFrom = idFrom;
+        delete bookingOf(draft).idIn;
+      }),
+      `public.submit.bookings.mirror names 'slots', but idFrom is ${JSON.stringify(idFrom)}`,
+    );
+  }
+  // Omitted entirely is the same declaration, said by leaving it out.
+  refuses(
+    salon((draft) => {
+      delete bookingOf(draft).idFrom;
+      delete bookingOf(draft).idIn;
+    }),
+    "but idFrom is absent",
+  );
+  // And the mode that works — the whole salon declaration, unchanged — still does.
+  assert.deepEqual(
+    salon(() => {}),
+    [],
+  );
+});
+
+test("a mirror with two things wrong says both, rather than one per publish", () => {
+  // The missing `mirrorOf` used to hide the missing `idFrom` behind it: the
+  // author fixed one half, published again, and was refused again. Publish is
+  // a manual step, so that is a second round trip for nothing.
+  const problems = salon((draft) => {
+    delete draft.collections.slots.mirrorOf;
+    bookingOf(draft).idFrom = "auto";
+    delete bookingOf(draft).idIn;
+  });
+  refuses(problems, "does not declare mirrorOf");
+  refuses(problems, 'but idFrom is "auto"');
+});
+
+test("the missing idField and idIn of a field id are reported once, by their own check", () => {
+  // `fieldIdProblems` already owns those two, and a mirror in the same
+  // declaration must not say them a second time.
+  const problems = salon((draft) => {
+    delete bookingOf(draft).idField;
+    delete bookingOf(draft).idIn;
+  });
+  refuses(problems, 'public.submit.bookings.idFrom is "field" but no idField is declared');
+  refuses(problems, 'public.submit.bookings.idFrom is "field" but no idIn is declared');
+  assert.equal(
+    problems.filter((problem) => problem.includes("but idFrom is")).length,
+    0,
+    `the mirror check must stay quiet when idFrom IS "field":\n${problems.join("\n")}`,
+  );
+});
+
+// --- the status a record arrives in -----------------------------------------
+
+test("an initialStatus the transition table does not start in is refused by every create", () => {
+  // The rules judge a create against `transitions.initial`. Both halves read as
+  // correct on their own, and what reaches the submitter is a bare denial.
+  const table = (initial: string[]) => ({
+    collections: { bookings: { statusField: "status", transitions: { initial, requested: ["approved"] } } },
+    public: { submit: { bookings: { auth: "verifiedEmail", createFields: ["a", "status"], initialStatus: "requested" } } },
+  });
+  refuses(problemsFor(table(["held"])), 'public.submit.bookings.initialStatus is "requested"');
+  assert.deepEqual(problemsFor(table(["requested"])), []);
+});
+
+test("a collection with no transition table at all is left alone", () => {
+  // `lunches`, `survey` and `mbti` carry a status and move it by hand. There is
+  // no table for the declaration to contradict, so there is nothing to refuse.
+  assert.deepEqual(
+    problemsFor({
+      collections: { responses: { statusField: "status", submitOnly: true } },
+      public: { submit: { responses: { auth: "verifiedEmail", emailField: "email", createFields: ["email", "status"], initialStatus: "submitted" } } },
+    }),
+    [],
+  );
+});
+
+// --- the fields a self-edit may never touch ---------------------------------
+
+/** A booking a submitter may amend, and the three fields amending would break. */
+const SELF = {
+  collections: { bookings: { statusField: "status", transitions: { initial: ["booked"] }, submitOnly: true } },
+  submit: {
+    auth: "verifiedEmail" as const,
+    emailField: "customerEmail",
+    createFields: ["slot", "customerEmail", "purpose", "status"],
+    initialStatus: "booked",
+    idFrom: "field" as const,
+    idField: "slot",
+    idIn: { collection: "services" },
+  },
+};
+
+const selfUpdating = (fields: string[]) =>
+  problemsFor({ collections: SELF.collections, public: { submit: { bookings: { ...SELF.submit, selfUpdate: { booked: fields } } } } });
+
+test("an ordinary business field is exactly what selfUpdate is for", () => {
+  // First, because each refusal below is only worth what this accepts.
+  assert.deepEqual(selfUpdating(["purpose"]), []);
+});
+
+test("selfUpdate may not carry the submitter's own identity", () => {
+  refuses(selfUpdating(["purpose", "customerEmail"]), "lets the submitter write 'customerEmail'");
+});
+
+test("selfUpdate may not carry the field the document id was built from", () => {
+  refuses(selfUpdating(["slot"]), "lets the submitter write 'slot'");
+});
+
+test("selfUpdate may not carry the status the transition table governs", () => {
+  // Listed here, the status moves without being checked against
+  // selfTransitions at all — the submitter holding the staff's pen.
+  refuses(selfUpdating(["status"]), "lets the submitter write 'status'");
+});
+
+test("the server-stamped field keeps its own refusal, and is not reported twice", () => {
+  const problems = problemsFor({
+    collections: SELF.collections,
+    public: {
+      submit: {
+        bookings: { ...SELF.submit, createFields: [...SELF.submit.createFields, "createdAt"], stampField: "createdAt", selfUpdate: { booked: ["createdAt"] } },
+      },
+    },
+  });
+  const said = problems.filter((problem) => problem.includes("'createdAt'"));
+  assert.equal(said.length, 1, `expected exactly one line about createdAt, got:\n${said.join("\n")}`);
+  refuses(said, "which is the field stampField pins to the server clock");
+});
+
+test("every problem in a declaration with several is returned at once", () => {
+  // Publish is a manual step; stopping at the first would make it N round trips.
+  const problems = selfUpdating(["customerEmail", "slot", "status"]);
+  for (const field of ["customerEmail", "slot", "status"]) {
+    refuses(problems, `lets the submitter write '${field}'`);
+  }
+});
+
+// --- what the mail queue reads off the record -------------------------------
+
+const mailed = (mail: Record<string, unknown>) => {
+  const draft = salonDraft();
+  draft.collections.bookings.mail = mail;
+  return app(draft as unknown as Record<string, unknown>);
+};
+
+const MAIL = { toField: "customerEmail", on: { booked: { from: ["requested"], to: "booked" } }, dataFields: ["slot"] };
+
+test("a mail queue's fields must exist on the record it reads them off", () => {
+  // The declaration gate cannot see this: a `toField` the schema does not
+  // declare means the queue finds no address and SKIPS the send, so the status
+  // moves, the app looks like it worked, and nobody is told.
+  const BOOKING_FIELDS = { slot: { type: "string" }, status: { type: "string" }, customerEmail: { type: "string" } };
+  const schemas = (bookingFields: Record<string, unknown>) => [schemaWithFields("bookings", bookingFields), schemaWithFields("slots", SOUND)];
+
+  assert.deepEqual(schemaRefProblems(mailed(MAIL), schemas(BOOKING_FIELDS) as never), []);
+  const without = (field: string) => Object.fromEntries(Object.entries(BOOKING_FIELDS).filter(([name]) => name !== field));
+  refuses(schemaRefProblems(mailed(MAIL), schemas(without("customerEmail")) as never), "collections.bookings.mail.toField names 'customerEmail'");
+  refuses(schemaRefProblems(mailed(MAIL), schemas(without("slot")) as never), "collections.bookings.mail.dataFields names 'slot'");
+  // No schema for the collection at all is somebody else's error, said once.
+  assert.deepEqual(schemaRefProblems(mailed(MAIL), [schemaWithFields("slots", SOUND)] as never), []);
+});
+
+test("a field name every object already answers to is not a declared field", () => {
+  // `constructor`, `toString` and `__proto__` are names an author can type, and
+  // reached through the prototype chain they answer "yes, that field exists" to
+  // every check here — a gate with three holes in it, failing exactly where it
+  // was added to catch a silence.
+  const BOOKING_FIELDS = { slot: { type: "string" }, status: { type: "string" }, customerEmail: { type: "string" } };
+  const schemas = [schemaWithFields("bookings", BOOKING_FIELDS), schemaWithFields("slots", SOUND)];
+
+  refuses(schemaRefProblems(mailed({ ...MAIL, toField: "constructor" }), schemas as never), "mail.toField names 'constructor'");
+  refuses(schemaRefProblems(mailed({ ...MAIL, dataFields: ["toString"] }), schemas as never), "mail.dataFields names 'toString'");
+
+  // And the same question asked of the reference family beside it.
+  const draft = salonDraft();
+  bookingOf(draft).idIn = { collection: "slots", where: { field: "constructor", equals: "open" } };
+  refuses(schemaRefProblems(app(draft as unknown as Record<string, unknown>), schemas as never), "idIn.where.field names 'constructor'");
+});
+
+test("an enum comparison is a string, and publish does not convert one for the rules", () => {
+  // `String(equals)` made `1` look like `'1'` here and nothing like it there:
+  // the rules compare the stored value with the published literal and never
+  // coerce, so the comparison is false forever and every submission is refused.
+  const declared = (equals: string | number | boolean) => {
+    const draft = salonDraft();
+    bookingOf(draft).idIn = { collection: "slots", where: { field: "state", equals } };
+    return app(draft as unknown as Record<string, unknown>);
+  };
+  const enumState = (values: string[]) => [
+    schemaWithFields("bookings", { slot: { type: "string" }, status: { type: "string" } }),
+    schemaWithFields("slots", { state: { type: "enum", values }, opensAt: { type: "number" }, closesAt: { type: "number" } }),
+  ];
+
+  assert.deepEqual(schemaRefProblems(declared("open"), enumState(["open", "taken"]) as never), []);
+  refuses(schemaRefProblems(declared(1), enumState(["1", "2"]) as never), "not one of the values");
+  refuses(schemaRefProblems(declared(true), enumState(["true", "false"]) as never), "not one of the values");
+  refuses(schemaRefProblems(declared("shut"), enumState(["open", "taken"]) as never), "not one of the values");
 });
