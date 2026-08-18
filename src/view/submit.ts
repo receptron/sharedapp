@@ -179,11 +179,18 @@ export class SubmitRefused extends Error {
  *
  *  For a host that would rather ask than catch: called before `recordId`, it names the field to put
  *  the error beside. `recordId` asks the same question, so a host that skips this is refused, not
- *  allowed. */
+ *  allowed.
+ *
+ *  BLANK IS EMPTY HERE, as it is in `missingRequired` — and this is the check that has to say so,
+ *  because that one only speaks for fields marked required. An id field that is optional carries a
+ *  lone space straight through: `idFrom: "field"` claims a document named " ", which no page can
+ *  show and no author can find, and `auth.uid+field` builds `"<uid>_ "` — one document per person
+ *  again, which is the collision this refusal exists to prevent. What is JUDGED is trimmed; what
+ *  the id is BUILT from is not, so an id whose spaces are part of it is unchanged. */
 export const missingIdField = (submit: SubmitSpec, record: Record<string, unknown>): string | undefined => {
   if (submit.idFrom !== "field" && submit.idFrom !== "auth.uid+field") return undefined;
   if (submit.idField === undefined) return undefined;
-  return stringAt(record, submit.idField) === "" ? submit.idField : undefined;
+  return stringAt(record, submit.idField).trim() === "" ? submit.idField : undefined;
 };
 
 /** The record id the declaration asks for.

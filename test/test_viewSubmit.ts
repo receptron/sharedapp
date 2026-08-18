@@ -138,6 +138,20 @@ test("an id built from a field is refused when the field carries nothing", () =>
   assert.equal(missingIdField(slot, { slotId: 7 }), "slotId");
 });
 
+test("an id field holding nothing but whitespace is refused, and one with spaces IN it is not", () => {
+  // `missingRequired` does not cover this: an id field the schema leaves optional is never asked
+  // about there, so a lone space arrives here intact — as a document named " " under `field`, and
+  // as `"<uid>_ "` under `auth.uid+field`, which is one document per person, the collision this
+  // whole refusal exists to prevent.
+  assert.equal(missingIdField(slot, { slotId: " " }), "slotId");
+  assert.equal(missingIdField({ ...slot, idFrom: "auth.uid+field" }, { slotId: "\t\n" }), "slotId");
+  assert.equal(refusalOf(() => recordId(slot, account.uid, { slotId: "  " }, "unused")).code, MISSING_ID_FIELD);
+  // Trimmed for the JUDGEMENT only. An id that has a space inside it is the id, and it is built
+  // byte-for-byte: the rules compare what the record holds, not a tidied version of it.
+  assert.equal(missingIdField(slot, { slotId: "sat 0900" }), undefined);
+  assert.equal(recordId(slot, account.uid, { slotId: "sat 0900" }, "unused"), "sat 0900");
+});
+
 test("an id built from person AND field is refused rather than collapsing to one per person", () => {
   // `"<uid>_"` IS a valid document id, which is what makes it the worse of the two: every claim by
   // one person lands on the same document and the second looks like it took something.
