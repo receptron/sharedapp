@@ -385,12 +385,16 @@ const SlugZ = z
 
 /** The whole authored declaration.
  *
- *  `owner` is accepted but is NOT the published value — publish stamps the
- *  publisher's uid (or carries the existing one forward, which is what the
- *  rules require on update) and refuses a declaration that disagrees. It is
+ *  `owner` is accepted and then IGNORED: the published value is the existing
+ *  document's owner where there is one, and the publisher's uid otherwise
+ *  (`projectApp` — the rules require it unchanged on update, so re-stamping
+ *  would refuse every app whose owner once signed in as another account). The
+ *  authored value is never read, never compared, and never refused. It is
  *  accepted rather than banned because the sample app.json in the design note
- *  shows it, and a hard refusal on a key the samples contain would be a worse
- *  first experience than a message naming the mismatch. */
+ *  shows it, and refusing a key the samples contain would be a worse first
+ *  experience than quietly not needing it. It is also a uid rather than an
+ *  address, so an author has nothing to write here that publish does not
+ *  already know. */
 export const AuthoredAppZ = z
   .object({
     aid: NameZ,

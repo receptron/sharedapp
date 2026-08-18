@@ -282,6 +282,10 @@ const incoming = (deps: {
   config: () => ViewSubmitConfig | null;
   pending: Signal<PendingSubmit | null>;
   answer: (requestId: string, ok: boolean, error?: string) => void;
+  /** Settle a lookup the page is waiting on, in the shape a lookup is answered
+   *  in. Separate from `answer` because a refusal must not arrive as one:
+   *  see `dispatch`. */
+  answerLookup: (requestId: string, found: { known: boolean; found: boolean }) => void;
   look: (ask: LookupAsk) => void;
   greet: (onRequest: (data: unknown) => void) => void;
   notice: (notice: ViewNotice) => void;
@@ -313,7 +317,15 @@ const incoming = (deps: {
       return;
     }
     if (asked.reason !== "not-a-lookup") {
-      deps.answer(asked.requestId, false, asked.reason);
+      // ANSWERED AS A LOOKUP, not as a result. The page is waiting in `mine()`,
+      // which settles on `lookupResult` and reads `{ known, found }`; a
+      // `result` carrying `{ ok: false }` reaches it with no `known` at all,
+      // which is the shape a page cannot tell apart from "nobody looked" — so
+      // an author's mistake in the HTML arrived as the parent's silence. Both
+      // refusals here mean the same thing to the page: nothing was read, so
+      // nothing is known. WHY it was refused belongs to the author, and a
+      // published page has no use for it.
+      deps.answerLookup(asked.requestId, { known: false, found: false });
       return;
     }
     offer(readSubmitMessage(data, deps.config()));
@@ -378,7 +390,7 @@ export const viewBridge = (ports: BridgePorts, config: () => ViewSubmitConfig | 
     pending.value = null;
   };
 
-  const receive = incoming({ nonce, config, pending, answer, look, greet, notice: (report) => ports.notice?.(report) });
+  const receive = incoming({ nonce, config, pending, answer, answerLookup, look, greet, notice: (report) => ports.notice?.(report) });
 
   const accept = async () => {
     const request = pending.value;

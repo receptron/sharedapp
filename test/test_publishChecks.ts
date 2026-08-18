@@ -143,6 +143,32 @@ test("anonymous publishes, none does not", () => {
   refuses(problemsFor({ public: { submit: { bookings: { auth: "none", createFields: ["a"] } } } }), 'public.submit.bookings.auth is "none"');
 });
 
+test('"none" is told everything that is wrong with it, not just that it is "none"', () => {
+  // Publish is a manual step, and it stops at nothing: the whole point of returning a LIST is that
+  // an author fixes the declaration once. Returning early here meant switching to "anonymous",
+  // publishing again, and only then hearing about the emailField that was never going to work —
+  // one refusal per attempt, over a declaration wrong in three places at once.
+  const problems = problemsFor({
+    collections: {
+      bookings: {
+        statusField: "status",
+        transitions: { pending: ["approved"] },
+        mail: { toField: "who", on: { ok: { from: ["pending"], to: "approved" } } },
+      },
+    },
+    members: { [OWNER]: { "*": "owner" }, "guest@salon.jp": { "*": "participant" } },
+    public: {
+      submit: {
+        bookings: { auth: "none", createFields: ["a", "email", "who"], emailField: "email", audience: "participant" },
+      },
+    },
+  });
+  refuses(problems, 'public.submit.bookings.auth is "none"');
+  refuses(problems, "that session carries no address");
+  refuses(problems, 'declares audience "participant"');
+  refuses(problems, 'queues mail and public.submit.bookings is "none"');
+});
+
 test("an anonymous submission may not carry an address, a roster seat, or a mail queue", () => {
   // Each of these publishes cleanly today and behaves wrongly afterwards: the
   // field the app reads as identity holds a typed string, a participant that can
@@ -152,7 +178,7 @@ test("an anonymous submission may not carry an address, a roster seat, or a mail
       collections: { bookings: { submitOnly: true } },
       public: { submit: { bookings: { auth: "anonymous", createFields: ["a", "email"], emailField: "email" } } },
     }),
-    "an anonymous session has no address",
+    "that session carries no address",
   );
   refuses(
     problemsFor({
@@ -362,7 +388,42 @@ test("selfDelete naming a status nothing reaches allows nothing", () => {
       collections: { bookings: { statusField: "status", transitions: { initial: ["pending"], pending: ["cancelled"] } } },
       public: { submit: { bookings: { auth: "verifiedEmail", createFields: ["status"], selfDelete: ["withdrawn"] } } },
     }),
-    "never reaches",
+    "which no record ever holds",
+  );
+});
+
+test("selfDelete from the status a submission STARTS in is allowed", () => {
+  // The commonest declaration there is, and it was refused: `initialStatus` puts every record in
+  // that status the moment it is written, so "withdraw the booking you just made" is the first
+  // thing an author asks for. Reading only the transition DESTINATIONS called it unreachable —
+  // and the refusal is not a warning, it is a publish that does not happen.
+  assert.deepEqual(
+    problemsFor({
+      collections: { bookings: { statusField: "status", transitions: { pending: ["approved"] } } },
+      public: {
+        submit: { bookings: { auth: "verifiedEmail", createFields: ["status"], initialStatus: "pending", selfDelete: ["pending"] } },
+      },
+    }),
+    [],
+  );
+});
+
+test("selfDelete from a status the table only moves records OUT of is allowed", () => {
+  // A left-hand key is the author saying records are in it. `initial` is the one that is not: it is
+  // the table's word for "no record yet", so a selfDelete naming it still allows nothing.
+  assert.deepEqual(
+    problemsFor({
+      collections: { bookings: { statusField: "status", transitions: { held: ["approved"] } } },
+      public: { submit: { bookings: { auth: "verifiedEmail", createFields: ["status"], selfDelete: ["held"] } } },
+    }),
+    [],
+  );
+  refuses(
+    problemsFor({
+      collections: { bookings: { statusField: "status", transitions: { initial: ["pending"], pending: ["approved"] } } },
+      public: { submit: { bookings: { auth: "verifiedEmail", createFields: ["status"], selfDelete: ["initial"] } } },
+    }),
+    "which no record ever holds",
   );
 });
 
@@ -926,8 +987,10 @@ test("an app declaring a contract newer than this publisher writes is refused", 
   // The floor. Compiled anyway, the app would be published as documents stamped with a version they
   // do not honour — and the page that reads them believes the stamp, which is worse than a refusal
   // the author can act on. The refusal names both versions.
-  const problem = listed('declares `protocol: "2.0.0"`', problemsFor({ protocol: "2.0.0" }));
-  assert.match(problem, new RegExp(APP_PROTOCOL.replace(/\./gu, "\\."), "u"));
+  const problems = problemsFor({ protocol: "2.0.0" });
+  refuses(problems, 'This app declares `protocol: "2.0.0"`');
+  // Both versions, so the author can see which side to move.
+  refuses(problems, `this publisher writes ${APP_PROTOCOL}`);
 });
 
 test("an app declaring the contract this publisher writes, or an older one, is fine", () => {
@@ -937,7 +1000,13 @@ test("an app declaring the contract this publisher writes, or an older one, is f
 test("a `protocol` that is not a version is refused rather than guessed at", () => {
   // Guessing low is the direction that fails silently: an unreadable version says nothing about what
   // the app relies on, so continuing would publish under a contract nobody checked.
+  //
+  // ASSERTED, not merely built: this loop called `listed(...)` and threw the message away, so it
+  // passed on every value including the ones that publish cleanly — a refusal test satisfied by no
+  // refusal at all.
   for (const stated of ["2", "1.0", "v1.0.0", "latest"]) {
-    listed("is not a version", problemsFor({ protocol: stated }));
+    refuses(problemsFor({ protocol: stated }), `\`protocol\` is "${stated}", which is not a version`);
   }
+  // And the shape that IS a version still passes, so the check is not simply refusing everything.
+  assert.deepEqual(problemsFor({ protocol: "1.0.0" }), []);
 });
