@@ -32,6 +32,7 @@ interface Registered {
 }
 
 interface Bridge {
+  ready: () => void;
   submit: (cid: string, values: Record<string, string>) => Promise<unknown>;
   transition: (cid: string, itemId: string, to: string) => Promise<unknown>;
 }
@@ -66,6 +67,18 @@ const runBootstrap = () => {
     context,
   );
   const bridge = win.__MC_APP_VIEW as Bridge;
+  // THE HANDSHAKE, because requests are held until the private channel exists — a reply cannot
+  // reach a page that has no port, so nothing is sent on the window but `ready` itself. The mark
+  // travels on the request whichever side of the handshake it was made on, and these tests are
+  // about the mark, so the channel is opened once here and the tests go on as they were.
+  const port = { postMessage: (message: Record<string, unknown>) => posted.push(message) };
+  const open = () => {
+    for (const one of listeners.filter((each) => each.type === "message")) {
+      one.handler({ source: context.parent, data: { type: VIEW_MESSAGE.channel }, ports: [port] });
+    }
+  };
+  bridge.ready();
+  open();
   const asked = () => posted.filter((message) => message.type === VIEW_MESSAGE.submit || message.type === VIEW_MESSAGE.intent);
   const marks = () => asked().map((message) => message[GESTURE_MARK]);
   return { win, listeners, bridge, asked, marks };

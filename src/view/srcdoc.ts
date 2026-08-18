@@ -117,6 +117,10 @@ const channelScript = (): string => `
       channel = event.ports[0];
       channel.onmessage = (message) => receive(message.data);
       channel.postMessage({ nonce });
+      // Anything the page asked for before the port arrived. It goes AFTER the
+      // nonce, because the parent answers nothing on a channel it has not yet
+      // been proved on.
+      flush();
       return;
     }
     receive(data);
@@ -307,10 +311,31 @@ export const publicViewBootstrap = (nonce: string): string => `
   const pending = new Map();
   let onState = () => {};
   let channel = null;
+  // HELD until the private channel exists, rather than sent on the window.
+  //
+  // A request sent early does reach the parent -- it listens on the window for
+  // the handshake -- but the ANSWER cannot come back: the parent replies only on
+  // the port, and until the port is open it has nowhere to put it. The reply was
+  // dropped and the page's promise never settled, which for a read is silent
+  // (there is no timeout, and nothing on screen says why). A page calling
+  // ready() and then mine() in the same turn is enough to lose it.
+  //
+  // Only the handshake itself goes on the window now, which is what it is for.
+  const outbox = [];
+  const send = (message) => {
+    if (channel) {
+      channel.postMessage(message);
+      return;
+    }
+    outbox.push(message);
+  };
+  const flush = () => {
+    const held = outbox.splice(0);
+    for (const message of held) channel.postMessage(message);
+  };
 ${channelScript()}
 ${noticeScript()}
 ${gestureScript()}
-  const send = (message) => { if (channel) channel.postMessage(message); else parent.postMessage(message, "*"); };
   const request = (message) => {
     const requestId = String(Date.now()) + ":" + String(Math.random());
     return new Promise((resolve) => {

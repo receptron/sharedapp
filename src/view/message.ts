@@ -113,7 +113,12 @@ export const readSubmitMessage = (data: unknown, config: ViewSubmitConfig | null
   if (message === null) {
     return { ...NOT_A_SUBMISSION, requestId: "" };
   }
-  const submit = config?.submit?.[message.cid];
+  // `hasOwn`, not `!== undefined`: `constructor`, `toString` and `__proto__` are all "present" on
+  // any object, so a cid of `constructor` would be read as a declared collection and its
+  // `createFields` looked up on a function. Refusing it here keeps the boundary the wording claims
+  // — only what the app declared — and stops the write path being reached with a spec that is not
+  // one.
+  const submit = config !== null && config.submit !== undefined && Object.hasOwn(config.submit, message.cid) ? config.submit[message.cid] : undefined;
   if (submit === undefined) {
     return { ok: false, reason: "unknown-collection", requestId: message.requestId };
   }
@@ -161,7 +166,10 @@ export const readLookupMessage = (data: unknown, config: ViewSubmitConfig | null
   if (typeof data.cid !== "string" || data.cid === "" || typeof data.key !== "string" || data.key === "") {
     return { ok: false, reason: "invalid-lookup", requestId: data.requestId };
   }
-  if (config?.submit?.[data.cid] === undefined) {
+  // `hasOwn` for the reason the submission reader gives: `constructor` is present on every object,
+  // and reading it as a declared collection would send the host off to look up a row in a
+  // collection this app never opened.
+  if (config === null || config.submit === undefined || !Object.hasOwn(config.submit, data.cid)) {
     return { ok: false, reason: "unknown-collection", requestId: data.requestId };
   }
   return { ok: true, ask: { requestId: data.requestId, cid: data.cid, key: data.key } };

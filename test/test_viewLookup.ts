@@ -11,10 +11,12 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import vm from "node:vm";
 
 import { viewBridge, type BridgeCells, type Channel } from "../src/view/bridge.js";
 import { readLookupMessage } from "../src/view/message.js";
 import { VIEW_MESSAGE } from "../src/view/protocol.js";
+import { publicViewBootstrap } from "../src/view/srcdoc.js";
 
 const NONCE = "nonce-1";
 const ready = { type: VIEW_MESSAGE.ready, nonce: NONCE };
@@ -153,4 +155,65 @@ test("a host that throws SYNCHRONOUSLY is still an answer", async () => {
   });
   far.send(ask({}));
   assert.deepEqual(await settled(far), { type: VIEW_MESSAGE.lookupResult, requestId: "r1", known: false, found: false });
+});
+
+test("a name every object has is not a collection this app declared", () => {
+  // `config.submit.constructor` is a function, so a membership test written as `!== undefined`
+  // called it a declared collection — and sent the host off to look up a row in a collection the
+  // app never opened. Both readers use `hasOwn` now.
+  for (const cid of ["constructor", "toString", "__proto__", "hasOwnProperty"]) {
+    assert.deepEqual(readLookupMessage(ask({ cid }), CONFIG), { ok: false, reason: "unknown-collection", requestId: "r1" });
+  }
+  assert.equal(readLookupMessage(ask({}), CONFIG).ok, true, "and a real one still passes");
+});
+
+test("a request made before the channel opens is held, then answered", async () => {
+  // The hang this replaced: a request sent on the WINDOW does reach the parent, and the answer
+  // cannot come back — the parent replies only on the port. `ready()` followed by `mine()` in the
+  // same turn was enough to lose it, silently, because a read has no timeout.
+  //
+  // The frame is driven here rather than the bridge: what changed is which door the request leaves
+  // by, and only the bootstrap knows that.
+  const posted: Record<string, unknown>[] = [];
+  const listeners: ((event: Record<string, unknown>) => void)[] = [];
+  const win: Record<string, unknown> = {
+    addEventListener: (type: string, handler: (event: Record<string, unknown>) => void) => {
+      if (type === "message") listeners.push(handler);
+    },
+    removeEventListener: () => {},
+  };
+  const context = { window: win, parent: { postMessage: (message: Record<string, unknown>) => posted.push(message) }, document: { currentScript: null } };
+  vm.createContext(context);
+  vm.runInContext(
+    publicViewBootstrap(NONCE)
+      .replace(/^\s*<script>/u, "")
+      .replace(/<\/script>\s*$/u, ""),
+    context,
+  );
+
+  const view = win.__MC_APP_VIEW as { ready: () => void; mine: (cid: string, key: string) => Promise<unknown> };
+  view.ready();
+  const answer = view.mine("votes", "q1");
+
+  assert.deepEqual(
+    posted.map((message) => message.type),
+    [VIEW_MESSAGE.ready],
+    "nothing but the handshake goes on the window",
+  );
+
+  const port = { postMessage: (message: Record<string, unknown>) => posted.push(message), onmessage: null as unknown };
+  for (const handler of listeners) handler({ source: context.parent, data: { type: VIEW_MESSAGE.channel }, ports: [port] });
+
+  const sent = posted.filter((message) => message.type === VIEW_MESSAGE.lookup);
+  assert.equal(sent.length, 1, "the held request goes out once the port is open");
+  assert.equal(sent[0]?.key, "q1");
+
+  const onmessage = port.onmessage as (event: { data: unknown }) => void;
+  onmessage({ data: { type: VIEW_MESSAGE.lookupResult, requestId: sent[0]?.requestId, known: true, found: true, record: { choice: "b" } } });
+  // Field by field: the promise settles with an object built INSIDE the vm, and a structural
+  // comparison across realms fails on the prototype rather than on anything this test is about.
+  const settledAnswer = (await answer) as { known: boolean; found: boolean; record: { choice: string } };
+  assert.equal(settledAnswer.known, true);
+  assert.equal(settledAnswer.found, true);
+  assert.equal(settledAnswer.record.choice, "b");
 });
