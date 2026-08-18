@@ -113,12 +113,78 @@ export const readSubmitMessage = (data: unknown, config: ViewSubmitConfig | null
   if (message === null) {
     return { ...NOT_A_SUBMISSION, requestId: "" };
   }
-  const submit = config?.submit?.[message.cid];
+  // `hasOwn`, not `!== undefined`: `constructor`, `toString` and `__proto__` are all "present" on
+  // any object, so a cid of `constructor` would be read as a declared collection and its
+  // `createFields` looked up on a function. Refusing it here keeps the boundary the wording claims
+  // — only what the app declared — and stops the write path being reached with a spec that is not
+  // one.
+  const submit = config !== null && config.submit !== undefined && Object.hasOwn(config.submit, message.cid) ? config.submit[message.cid] : undefined;
   if (submit === undefined) {
     return { ok: false, reason: "unknown-collection", requestId: message.requestId };
   }
   return declaredValues(message.values, submit.createFields, message.requestId, message.cid);
 };
+
+/** A view asking about ONE of its own rows: which collection, and the key that
+ *  completes the id. */
+export interface LookupAsk {
+  requestId: string;
+  cid: string;
+  key: string;
+}
+
+/** Why a lookup will not be performed — and the first value is not like the other two.
+ *
+ *  `not-a-lookup` means THIS IS NOT ONE: the caller goes on to read the message as something else,
+ *  and nobody is waiting on an answer to it. The other two mean it IS a lookup and will not be
+ *  served, so the page's promise must be settled with them — a read has no timeout, and a page that
+ *  is never answered waits forever with nothing on screen to say why. */
+export type LookupRefusal = "not-a-lookup" | "invalid-lookup" | "unknown-collection";
+
+export type LookupRead = { ok: true; ask: LookupAsk } | { ok: false; reason: LookupRefusal; requestId: string };
+
+/** Read a `lookup`, and refuse it for the same reasons a submission is refused.
+ *
+ *  A cid the app never opened for submission is refused rather than looked up:
+ *  the id strategy comes from that declaration, so without it there is nothing
+ *  to build an id FROM — and answering "not found" would be a claim about a
+ *  collection this page has no business asking after.
+ *
+ *  The key is a plain string and is never used as a path on its own: the parent
+ *  builds `uid + "_" + key` and reads that document, so the worst a page can do
+ *  with a made-up key is ask about a row of its own that does not exist. */
+export const readLookupMessage = (data: unknown, config: ViewSubmitConfig | null): LookupRead => {
+  // Not one of ours, or one with nobody waiting on it (no request id, so no promise to settle).
+  // Both fall through to be read as something else.
+  if (!isRecord(data) || data.type !== VIEW_MESSAGE.lookup || typeof data.requestId !== "string" || data.requestId === "") {
+    return { ok: false, reason: "not-a-lookup", requestId: "" };
+  }
+  // From here it IS a lookup and somebody is waiting. A malformed one must be ANSWERED — refused
+  // with a reason — rather than dropped: `view.mine("votes", "")` used to fall through to the
+  // submission reader, be refused there with no request id, and leave the page on a promise that
+  // never settled. A read has no timeout; nothing anywhere would have said so.
+  if (typeof data.cid !== "string" || data.cid === "" || typeof data.key !== "string" || data.key === "") {
+    return { ok: false, reason: "invalid-lookup", requestId: data.requestId };
+  }
+  // `hasOwn` for the reason the submission reader gives: `constructor` is present on every object,
+  // and reading it as a declared collection would send the host off to look up a row in a
+  // collection this app never opened.
+  if (config === null || config.submit === undefined || !Object.hasOwn(config.submit, data.cid)) {
+    return { ok: false, reason: "unknown-collection", requestId: data.requestId };
+  }
+  return { ok: true, ask: { requestId: data.requestId, cid: data.cid, key: data.key } };
+};
+
+/** What the parent found, as the view is told it.
+ *
+ *  `known` is the field that carries the honesty: false means nobody looked —
+ *  the host offers no `lookup` port, or the read failed — and a page must draw
+ *  that as "unknown", never as "you have not answered". */
+export interface LookupAnswer {
+  known: boolean;
+  found: boolean;
+  record?: Record<string, unknown>;
+}
 
 /** What a frame may say about ITSELF, and the only codes a parent will hear.
  *

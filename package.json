@@ -1,6 +1,6 @@
 {
   "name": "@receptron/sharedapp",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "description": "The shared-app compiler: app.json to Firestore documents, and what publish refuses.",
   "license": "MIT",
   "repository": {
