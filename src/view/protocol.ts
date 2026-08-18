@@ -22,9 +22,27 @@ export const VIEW_MESSAGE = {
    *  `__MC_APP_VIEW`. A new prefix here would answer an intent with a
    *  differently-named result, for a distinction only this file can see. */
   intent: "mc-public-view:intent",
+  /** A view asking whether THIS VISITOR already has one particular row — the
+   *  question a page cannot answer for itself.
+   *
+   *  Separate from `state` because the answer depends on something only the
+   *  page knows: the key. A composite id is `uid + "_" + <field>`, and the rules
+   *  grant a submitter the document they can NAME, not a range of them — so the
+   *  parent can look this up the moment it is told which one, and cannot list
+   *  them ahead of time. See `BridgePorts.lookup`.
+   *
+   *  It asks about the visitor's OWN row and nothing else: the id is built from
+   *  their uid by the parent, so a page passing somebody else's key learns
+   *  nothing about anybody else. */
+  lookup: "mc-public-view:lookup",
   /** The answer to a `submit` OR an `intent` — one name, because the view
    *  settles both from the same map keyed by `requestId`. */
   result: "mc-public-view:submitResult",
+  /** The answer to a `lookup`. Its own name because its payload is a different
+   *  question — `{ known, found, record }` rather than `{ ok, error }` — and a
+   *  page that got one where it expected the other would read "not found" as
+   *  "refused". */
+  lookupResult: "mc-public-view:lookupResult",
   /** The frame reporting something about ITSELF that the browser would
    *  otherwise swallow: an uncaught error, a rejected promise nobody handled,
    *  a modal the sandbox ignores.

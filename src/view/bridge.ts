@@ -1,8 +1,10 @@
 import {
   isReady,
   isRecord,
+  readLookupMessage,
   readNotice,
   readSubmitMessage,
+  type LookupAsk,
   type PendingSubmit,
   type SubmitRead,
   type ViewDataset,
@@ -123,6 +125,24 @@ export interface BridgePorts {
    *  a device handed to the next person is back to knowing nothing about them
    *  until theirs does. */
   mine?: (() => Record<string, ViewDataset> | undefined) | undefined;
+  /** The same question, asked about ONE key the page names — and the half that
+   *  works where `mine` cannot.
+   *
+   *  `mine` is sent with the state, so the host has to know the answer before
+   *  the page says anything. For `idFrom: "auth.uid+field"` it never can: the
+   *  ids are `uid + "_" + <field>`, and the rules grant a submitter the document
+   *  they can NAME rather than a range of them (a list would need the `{itemId}`
+   *  wildcard bound, which never happens — mulmoserver's
+   *  `test/rules/rules_ownReadback.ts` pins it). The key is exactly what the
+   *  host is missing, and the page has it: it is showing that question.
+   *
+   *  So the answer is a READ the host performs on demand, with the visitor's own
+   *  credentials, against an id it builds itself. A page cannot ask about
+   *  anybody else — the uid half is not its to choose.
+   *
+   *  OPTIONAL, and a host without it answers `known: false`. Absence is
+   *  "nobody looked", never "you have not answered". */
+  lookup?: ((ask: LookupAsk) => Promise<{ found: boolean; record?: Record<string, unknown> }>) | undefined;
   /** Somewhere to put what the frame says about itself — an uncaught error, a
    *  rejected promise, a modal the sandbox ignored.
    *
@@ -181,6 +201,13 @@ const replies = (ports: BridgePorts, nonce: () => string, readied: Signal<boolea
     open?.post({ type: VIEW_MESSAGE.result, requestId, ok, error });
   };
 
+  /** The answer to a `lookup`. Its own message name, because `{ known, found }`
+   *  answers a different question from `{ ok, error }` and a page settling one
+   *  as the other would read "not found" as "refused". */
+  const answerLookup = (requestId: string, found: { known: boolean; found: boolean; record?: Record<string, unknown> }) => {
+    open?.post({ type: VIEW_MESSAGE.lookupResult, requestId, ...found });
+  };
+
   const sendState = () => {
     // Nothing before the document has answered on the channel — and the channel
     // belongs to the document that answered, so nothing reaches one that
@@ -237,7 +264,7 @@ const replies = (ports: BridgePorts, nonce: () => string, readied: Signal<boolea
     readied.value = false;
   };
 
-  return { answer, sendState, greet, forget };
+  return { answer, answerLookup, sendState, greet, forget };
 };
 
 /** Everything that arrives FROM the frame, both ways in.
@@ -255,6 +282,7 @@ const incoming = (deps: {
   config: () => ViewSubmitConfig | null;
   pending: Signal<PendingSubmit | null>;
   answer: (requestId: string, ok: boolean, error?: string) => void;
+  look: (ask: LookupAsk) => void;
   greet: (onRequest: (data: unknown) => void) => void;
   notice: (notice: ViewNotice) => void;
 }) => {
@@ -272,7 +300,24 @@ const incoming = (deps: {
       deps.answer(refusal.requestId, false, refusal.reason);
     }
   };
-  const dispatch = (data: unknown) => offer(readSubmitMessage(data, deps.config()));
+  /** A read the page asked for, or a refusal it can act on.
+   *
+   *  Judged BEFORE the message is read as a submission: the two are told apart
+   *  by their type, and a lookup put through `readSubmitMessage` would come back
+   *  as "not a submission" and be answered by nobody — a promise the page waits
+   *  on forever, which is the failure mode a read has no timeout to escape. */
+  const dispatch = (data: unknown) => {
+    const asked = readLookupMessage(data, deps.config());
+    if (asked.ok) {
+      deps.look(asked.ask);
+      return;
+    }
+    if (asked.reason !== "not-a-lookup") {
+      deps.answer(asked.requestId, false, asked.reason);
+      return;
+    }
+    offer(readSubmitMessage(data, deps.config()));
+  };
   /** A message that has already been proven to come from our frame. */
   return (data: unknown) => {
     // BEFORE the handshake is even considered, because the notices that matter
@@ -296,7 +341,29 @@ const incoming = (deps: {
 
 export const viewBridge = (ports: BridgePorts, config: () => ViewSubmitConfig | null, nonce: () => string, cells: BridgeCells) => {
   const { pending, sending } = cells;
-  const { answer, sendState, greet, forget } = replies(ports, nonce, cells.readied);
+  const { answer, answerLookup, sendState, greet, forget } = replies(ports, nonce, cells.readied);
+
+  /** Answer "have I already got this row?" — with a READ, and never with a guess.
+   *
+   *  Three outcomes and only one of them is "no": the host offers no port
+   *  (nobody looked), the read threw (nobody knows), or the read came back. The
+   *  first two are `known: false`, because a page told "no" stops offering the
+   *  action to somebody entitled to it — and that is the bug this whole port
+   *  exists to fix, arriving from the other direction. */
+  const look = async (ask: LookupAsk) => {
+    if (ports.lookup === undefined) {
+      answerLookup(ask.requestId, { known: false, found: false });
+      return;
+    }
+    const found = await ports.lookup(ask).catch(() => null);
+    if (found === null) {
+      answerLookup(ask.requestId, { known: false, found: false });
+      return;
+    }
+    // Spread rather than naming `record`: `exactOptionalPropertyTypes` is on, and an explicit
+    // `record: undefined` is a different thing from a key that was never there.
+    answerLookup(ask.requestId, { known: true, ...found });
+  };
 
   /** One place where a confirmation stops being open, so the two refs cannot
    *  drift apart. */
@@ -305,7 +372,7 @@ export const viewBridge = (ports: BridgePorts, config: () => ViewSubmitConfig | 
     pending.value = null;
   };
 
-  const receive = incoming({ nonce, config, pending, answer, greet, notice: (report) => ports.notice?.(report) });
+  const receive = incoming({ nonce, config, pending, answer, look, greet, notice: (report) => ports.notice?.(report) });
 
   const accept = async () => {
     const request = pending.value;

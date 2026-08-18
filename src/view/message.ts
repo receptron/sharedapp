@@ -120,6 +120,50 @@ export const readSubmitMessage = (data: unknown, config: ViewSubmitConfig | null
   return declaredValues(message.values, submit.createFields, message.requestId, message.cid);
 };
 
+/** A view asking about ONE of its own rows: which collection, and the key that
+ *  completes the id. */
+export interface LookupAsk {
+  requestId: string;
+  cid: string;
+  key: string;
+}
+
+export type LookupRead = { ok: true; ask: LookupAsk } | { ok: false; reason: string; requestId: string };
+
+/** Read a `lookup`, and refuse it for the same reasons a submission is refused.
+ *
+ *  A cid the app never opened for submission is refused rather than looked up:
+ *  the id strategy comes from that declaration, so without it there is nothing
+ *  to build an id FROM — and answering "not found" would be a claim about a
+ *  collection this page has no business asking after.
+ *
+ *  The key is a plain string and is never used as a path on its own: the parent
+ *  builds `uid + "_" + key` and reads that document, so the worst a page can do
+ *  with a made-up key is ask about a row of its own that does not exist. */
+export const readLookupMessage = (data: unknown, config: ViewSubmitConfig | null): LookupRead => {
+  if (!isRecord(data) || data.type !== VIEW_MESSAGE.lookup || typeof data.requestId !== "string" || data.requestId === "") {
+    return { ok: false, reason: "not-a-lookup", requestId: "" };
+  }
+  if (typeof data.cid !== "string" || data.cid === "" || typeof data.key !== "string" || data.key === "") {
+    return { ok: false, reason: "not-a-lookup", requestId: data.requestId };
+  }
+  if (config?.submit?.[data.cid] === undefined) {
+    return { ok: false, reason: "unknown-collection", requestId: data.requestId };
+  }
+  return { ok: true, ask: { requestId: data.requestId, cid: data.cid, key: data.key } };
+};
+
+/** What the parent found, as the view is told it.
+ *
+ *  `known` is the field that carries the honesty: false means nobody looked —
+ *  the host offers no `lookup` port, or the read failed — and a page must draw
+ *  that as "unknown", never as "you have not answered". */
+export interface LookupAnswer {
+  known: boolean;
+  found: boolean;
+  record?: Record<string, unknown>;
+}
+
 /** What a frame may say about ITSELF, and the only codes a parent will hear.
  *
  *  A FIXED list, matched exactly. The frame holds untrusted HTML, so `code`

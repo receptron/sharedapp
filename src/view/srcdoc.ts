@@ -90,6 +90,14 @@ const channelScript = (): string => `
     if (data.type === ${JSON.stringify(VIEW_MESSAGE.result)}) {
       const settle = pending.get(data.requestId);
       if (settle) { pending.delete(data.requestId); settle({ ok: data.ok === true, error: data.error }); }
+      return;
+    }
+    if (data.type === ${JSON.stringify(VIEW_MESSAGE.lookupResult)}) {
+      const settle = pending.get(data.requestId);
+      // \`known\` is false when the host could not look: no port, or a read that
+      // failed. NOT the same as \`found: false\`, and the page has to keep them
+      // apart -- see the note on the wire name.
+      if (settle) { pending.delete(data.requestId); settle({ known: data.known === true, found: data.found === true, record: data.record }); }
     }
   };
   window.addEventListener("message", (event) => {
@@ -319,6 +327,12 @@ ${gestureScript()}
     ready() { parent.postMessage({ type: ${JSON.stringify(VIEW_MESSAGE.ready)}, nonce }, "*"); },
     submit(cid, values) {
       return request({ type: ${JSON.stringify(VIEW_MESSAGE.submit)}, cid, values });
+    },
+    /** "Have I already got a row here?", for the one key this page is about to
+     *  offer an action on. Answers { known, found, record } -- and \`known:
+     *  false\` means nobody looked, which a page must not draw as "no". */
+    mine(cid, key) {
+      return request({ type: ${JSON.stringify(VIEW_MESSAGE.lookup)}, cid, key });
     },
     transition(cid, itemId, to) {
       return request({ type: ${JSON.stringify(VIEW_MESSAGE.intent)}, kind: "transition", cid, itemId, to });
