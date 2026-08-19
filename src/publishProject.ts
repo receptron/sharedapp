@@ -37,7 +37,7 @@
 // pins that the rules accept it.
 
 import type { CollectionSchema } from "@mulmoclaude/core/collection";
-import { protocolFor } from "./appProtocol.js";
+import { APP_PROTOCOL } from "./appProtocol.js";
 import {
   normalizeViews,
   participantScope,
@@ -272,12 +272,10 @@ export function projectApp(
   const publicView = normalized.views.find((view) => view.audience === "public");
 
   const config: PublishedConfigDoc = {
-    // WHICH CONTRACT THESE DOCUMENTS KEEP — the number a reader compares before drawing them, and
-    // the one a later publisher compares before overwriting them. Derived from the DECLARATION,
-    // never from the author's floor and no longer from a constant per build: an app using nothing
-    // new is stamped what it always was, so republishing it does not change what its documents say
-    // they are (see `appProtocol.ts`).
-    protocol: protocolFor(authored),
+    // WHICH CONTRACT THESE DOCUMENTS KEEP — the number a reader compares before drawing them.
+    // Never the author's `protocol`, which is a floor: the documents keep what produced them, and
+    // an app claiming a contract its documents do not honour is worse than one claiming none.
+    protocol: APP_PROTOCOL,
     enabled: authored.public?.enabled === true,
     read: authored.public?.read ?? [],
     submit,
@@ -492,7 +490,7 @@ function tierConfig(authored: AuthoredApp, audience: Exclude<ViewAudience, "publ
   const config: AppViewConfigDoc = {
     // Every tier carries it, for the reason `projectApp` gives beside the public one: one publish
     // writes them all, and a reader that can draw one and not another is a half-drawn app.
-    protocol: protocolFor(authored),
+    protocol: APP_PROTOCOL,
     write: tierWrites(authored, audience, cids),
     views: tierViews(authored, audience, views, authored.participantRead ?? []),
     submit: tierSubmit(authored, cids),

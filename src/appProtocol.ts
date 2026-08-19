@@ -19,68 +19,39 @@
 // this key existed is one, and those documents are the ones in Firestore right now. Which is also
 // why this starts at 1.0.0 rather than 0.1.0 — the first contract already shipped.
 
-/** THE VERSION IS PER APP, not per build of this compiler.
+/** WHAT THIS BUILD STAMPS ON EVERY PROJECTION, and what a document carrying no `protocol` is read
+ *  as — apps published before the key existed are exactly that, and those are the documents in
+ *  Firestore now.
  *
- *  It started as one constant — what this build writes — and stamping every app the newest number
- *  is a claim about documents that is not true of them: an app using nothing new is a 1.0.0 app,
- *  and republishing it must not change what it says it is. So the stamp is derived from the
- *  DECLARATION ({@link protocolFor}), and {@link APP_PROTOCOL} is only the ceiling of what this
- *  build could emit.
+ *  ONE constant, and `uidField` is the reason that is worth a note: it went out as a per-app version
+ *  (1.0.0 for apps without it, 2.0.0 and then 1.1.0 for apps with it) and came back, because nothing
+ *  anywhere reads the difference.
  *
- *  It matters most for a number a reader acts on. A reader compares the MAJOR and nothing else
- *  (mulmoserver's `protocolDrawable`), so a major is the one thing in a document that can make an
- *  older browser refuse it — and per-app stamping is what keeps that refusal aimed at the apps that
- *  need it rather than at every app published after the bump. Nothing needs one yet: see
- *  {@link UID_FIELD_PROTOCOL} for the addition that came close and why it did not. */
-
-/** What an app using nothing newer than the first contract is stamped. Apps published before the
- *  key existed carry no version and are read as this — they are the documents in Firestore now. */
-export const BASE_PROTOCOL = "1.0.0";
-
-/** `public.submit.<cid>.uidField` — the submitter's identity in a FIELD rather than in the document
- *  id, for the app whose id is spent on exclusivity (a claim whose id is the task's).
+ *  Four things could have. None do:
  *
- *  A MINOR, and it was very nearly a major. The reader does have to do something it was not doing —
- *  fill the field from the session and keep it out of the drawn form, as it already does for
- *  `emailField` — so the question was what happens on a build that does neither. A major would make
- *  that build refuse the app. It turns out one already does, through a check it has shipped since
- *  the first contract:
+ *    - THE READER'S GATE compares the MAJOR and nothing else (mulmoserver's `protocolDrawable`), so
+ *      any minor is a number it does not act on.
+ *    - A READER'S BEHAVIOUR SWITCH (`protocolAtLeast`) would, and there is not one. The guard is
+ *      deliberately in place before the day it is needed, but no branch asks it anything yet.
+ *    - THE AUTHORED FLOOR is checked by {@link protocolProblems}, which never runs for a key this
+ *      build does not know: `SubmitZ` is `.strict()`, so an older build refuses `uidField` at the
+ *      schema, earlier and more clearly than a version comparison would. Measured on the build
+ *      before the key landed — "Unrecognized key" with the floor declared and without it, the same
+ *      message both times.
+ *    - A HUMAN OR A DIAGNOSTIC reading the published document — which carries `submit.<cid>.uidField`
+ *      itself, three lines from the stamp. A number derived from the declaration, published beside
+ *      the declaration, carries no information at all.
  *
- *    - the rules accept only `request.resource.data.keys().hasOnly(createFields)`, so the uid field
- *      is IN `createFields` for any create to be possible at all;
- *    - the whole point of the key is that the field is not drawn, so it is NOT in the projected
- *      `form.fields`, and the host keeps the collection's form entry even when that leaves it empty;
- *    - and an old reader's `consistent`/`agrees` requires every `createFields` name it does not
- *      recognise as host-filled (it knows three: email, status, stamp) to appear in `form.fields`.
+ *  So a key ADDED to the contract does not move this number, and the strict schema is what makes
+ *  that safe: a build handed a key it has never heard of stops, rather than dropping it.
  *
- *  So the public projection of a uid-bearing app is refused as "a shape this release does not read"
- *  — the same screen a major buys, from a check that predates it. Measured against the real
- *  projection of the todo-board template, not reasoned about.
- *
- *  What the major would additionally have covered is the member/participant tiers, whose config
- *  carries `submit` and no `form` and so has nothing to disagree with. An old build draws those
- *  pages, and every uid-bound write is refused by `uidOk`/`uidHeld` and every own-scope read by the
- *  rules that expect the `where` this build now adds — buttons that do nothing, for the enrolled
- *  few, with no forged uid and nothing leaked. Not worth spending the major on.
- *
- *  The number is still load-bearing in exactly one place, which is why this is a minor rather than
- *  nothing: it is the floor an author declares, and `protocolProblems` refuses to publish a floor
- *  above what the build emits. That is what stops an OLD PUBLISHER from silently dropping the key
- *  and shipping a board where `uid` is an ordinary field anyone may write. */
-export const UID_FIELD_PROTOCOL = "1.1.0";
-
-/** The newest contract this build can emit — the ceiling an authored floor is checked against. */
-export const APP_PROTOCOL = UID_FIELD_PROTOCOL;
-
-/** The contract THIS declaration's documents keep.
- *
- *  Derived from what the declaration contains, never from what the author asked for: the stamp is
- *  a statement about the documents, and an author who names a floor they do not use has not made
- *  their app need a newer reader. */
-export function protocolFor(app: { public?: { submit?: Record<string, { uidField?: string | undefined }> | undefined } | undefined }): string {
-  const submits = Object.values(app.public?.submit ?? {});
-  return submits.some((submit) => submit.uidField !== undefined) ? UID_FIELD_PROTOCOL : BASE_PROTOCOL;
-}
+ *  WHAT WOULD MOVE IT is a change no schema can see — an existing key whose MEANING moves (the
+ *  written shape of a `stampField`, say). Nothing is unrecognised there, so the version is the only
+ *  handle: the author names the contract they wrote against, {@link protocolProblems} refuses to
+ *  publish a floor this build cannot honour, and if the reader must understand it, the major goes
+ *  up and older readers refuse the app. That day the stamp becomes per-app again, so that the
+ *  refusal lands on the apps that need it rather than on everything published afterwards. */
+export const APP_PROTOCOL = "1.0.0";
 
 const SHAPE = /^(?<major>\d+)\.(?<minor>\d+)\.(?<patch>\d+)$/u;
 
