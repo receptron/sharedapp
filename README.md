@@ -39,22 +39,41 @@ e2e suite. Releasing `@mulmoclaude/core` was eight packages and a full CI matrix
 ## The version of the contract
 
 Every projection carries `protocol` — the version of the publish contract the documents keep
-(`src/appProtocol.ts`, `APP_PROTOCOL`, currently **1.0.0**). The renderer (mulmoserver) is released
-separately and runs in browsers that may be a month behind, so this is the only thing in a document
-that lets such a build know it must NOT draw it: a reader refuses a higher MAJOR, and reads a higher
-minor as an addition it simply does not use.
+(`src/appProtocol.ts`). The renderer (mulmoserver) is released separately and runs in browsers that
+may be a month behind, so this is the only thing in a document that lets such a build know it must
+NOT draw it: a reader refuses a higher MAJOR, and reads a higher minor as an addition it simply does
+not use.
 
-- **MAJOR** — a breaking change. Bumping it makes every older reader refuse every app published
-  afterwards, so the reader ships first.
+- **MAJOR** — a change a reader must understand. An older reader refuses the app rather than drawing
+  part of it, so the reader ships first.
 - **MINOR** — an addition an older reader ignores safely (`views[].live` was one).
 - **PATCH** — neither.
+
+**The number is per APP, not per build** (`protocolFor(app)`). An app that uses nothing newer than
+the first contract is stamped `BASE_PROTOCOL` (**1.0.0**) — byte-identical to what it was always
+stamped — and only a declaration using a key the reader must understand is stamped that key's
+version. Today there is one: `public.submit.<cid>.uidField` is `UID_FIELD_PROTOCOL` (**2.0.0**),
+because the page has to fill that field from the session and keep it out of the form, and a reader
+that has not learnt it would draw a box the visitor cannot usefully fill and whose every value the
+rules refuse.
+
+`APP_PROTOCOL` is the CEILING — the newest contract this build can emit (**2.0.0**), and what an
+authored floor is checked against. It is not what a given app is stamped.
+
+That split is the lesson from the first attempt, which made `uidField` a MINOR: readers compare
+the major and nothing else, so a minor is a number no reader acts on. Emitting the new major only
+from the apps that need it is what lets every reader in the wild go on drawing every app it could
+already draw, while refusing precisely the ones it would get wrong.
 
 A document with no `protocol` is 1.0.0. That is not a fallback: apps published before the key existed
 are exactly that, and those are the documents already in Firestore.
 
-`app.json` may declare `protocol` as a FLOOR. It never decides what is published — the projection
-carries what this compiler emits — but publish refuses a declaration NEWER than that, because
-compiling it would stamp a contract the documents do not keep, under a number the reader believes.
+`app.json` may declare `protocol` as a FLOOR. It never decides what is published — the stamp is
+derived from what the declaration CONTAINS, so an author naming a contract they use nothing from has
+not made their app need a newer reader. Publish refuses a declaration newer than the ceiling, and
+requires one for a feature that has a version of its own (`uidField` needs `protocol: "2.0.0"`) —
+which is the author saying which readers the app needs, checked where a publisher can still act on
+it rather than in somebody else's cached tab.
 
 ## What is NOT here
 

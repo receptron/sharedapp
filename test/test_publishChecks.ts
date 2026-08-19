@@ -987,8 +987,8 @@ test("an app declaring a contract newer than this publisher writes is refused", 
   // The floor. Compiled anyway, the app would be published as documents stamped with a version they
   // do not honour — and the page that reads them believes the stamp, which is worse than a refusal
   // the author can act on. The refusal names both versions.
-  const problems = problemsFor({ protocol: "2.0.0" });
-  refuses(problems, 'This app declares `protocol: "2.0.0"`');
+  const problems = problemsFor({ protocol: "3.0.0" });
+  refuses(problems, 'This app declares `protocol: "3.0.0"`');
   // Both versions, so the author can see which side to move.
   refuses(problems, `this publisher writes ${APP_PROTOCOL}`);
 });
@@ -1243,4 +1243,203 @@ test("an enum comparison is a string, and publish does not convert one for the r
   refuses(schemaRefProblems(declared(1), enumState(["1", "2"]) as never), "not one of the values");
   refuses(schemaRefProblems(declared(true), enumState(["true", "false"]) as never), "not one of the values");
   refuses(schemaRefProblems(declared("shut"), enumState(["open", "taken"]) as never), "not one of the values");
+});
+
+// --- uidField: identity without an address ----------------------------------
+//
+// The shape it exists for is a shared to-do board, and the reason it exists is
+// that the document id is spent: the claim's id IS the task's id, which is what
+// stops two people taking one task, so identity has to live in a field. The
+// field version there was is `emailField`, and a board showing who is working on
+// what publishes the whole row — a rule cannot hide a field — so the address
+// goes out with the name.
+
+/** The board, as it publishes: one claim per task, taken by whoever is signed
+ *  in, given back by them alone. */
+const boardDraft = (): Record<string, unknown> => ({
+  protocol: "2.0.0",
+  collections: { claims: { submitOnly: true, statusField: "status", transitions: { initial: ["doing"], doing: ["done"] } } },
+  public: {
+    enabled: true,
+    submit: {
+      claims: {
+        auth: "verifiedEmail",
+        uidField: "uid",
+        createFields: ["taskId", "name", "uid", "status"],
+        initialStatus: "doing",
+        idFrom: "field",
+        idField: "taskId",
+        idIn: { collection: "tasks" },
+        selfUpdate: { doing: ["name"] },
+        selfDelete: ["doing"],
+      },
+    },
+  },
+});
+
+const CLAIM_CIDS = [
+  { cid: "claims", primaryKey: "id" },
+  { cid: "tasks", primaryKey: "id" },
+];
+
+const board = (edit: (draft: Record<string, unknown>) => void = () => {}) => {
+  const draft = boardDraft();
+  edit(draft);
+  return publishProblems(app(draft), CLAIM_CIDS, OWNER);
+};
+
+/** The claim declaration inside a draft, as the tests reach for it. */
+const claimOf = (draft: Record<string, unknown>) =>
+  ((draft.public as Record<string, unknown>).submit as Record<string, Record<string, unknown>>).claims as Record<string, unknown>;
+
+test("publishes a board that identifies its submitters by uid and collects no address", () => {
+  // FIRST, because every refusal below is only worth what this accepts.
+  assert.deepEqual(board(), []);
+});
+
+test("uidField binds the record to its submitter, so the collection needs submitOnly", () => {
+  // Same reason as the other four bindings: the writer branch never meets the
+  // public-create checks, so without submitOnly the desk can manufacture rows
+  // that MEAN "this person took this task".
+  refuses(
+    board((draft) => {
+      delete (draft.collections as Record<string, Record<string, unknown>>).claims!.submitOnly;
+    }),
+    "collections.claims.submitOnly must be true",
+  );
+});
+
+test("an app declaring uidField states the protocol floor its readers need", () => {
+  // Not decoration. The page fills that field from the session and keeps it out
+  // of the form, exactly as it does for emailField; a reader that predates the
+  // key draws a box asking the visitor to type their uid, and the rules refuse
+  // what comes back. Nothing errors — the form simply never works, and only on
+  // somebody else's browser.
+  refuses(
+    board((draft) => {
+      delete draft.protocol;
+    }),
+    'needs `protocol: "2.0.0"`',
+  );
+  refuses(
+    board((draft) => {
+      draft.protocol = "1.0.0";
+    }),
+    'needs `protocol: "2.0.0"`',
+  );
+  // And a floor states the MAJOR the reader needs, not a number near it: 1.9.9 is still a reader
+  // that compares majors and draws this app wrongly.
+  refuses(
+    board((draft) => {
+      draft.protocol = "1.9.9";
+    }),
+    'needs `protocol: "2.0.0"`',
+  );
+});
+
+test("uidField must be in createFields, like every other field a rule reads", () => {
+  // Unsatisfiable both ways: carrying it fails `hasOnly(createFields)`, omitting
+  // it fails `uidOk`. The submitter cannot resolve either.
+  refuses(
+    board((draft) => {
+      claimOf(draft).createFields = ["taskId", "name", "status"];
+    }),
+    'createFields must include "uid"',
+  );
+});
+
+test("uidField may not be listed in selfUpdate", () => {
+  // The rules freeze it (`uidHeld`), so the declaration does not loosen
+  // anything — it draws a button with nothing behind it and reads, to the next
+  // person, like a granted permission.
+  refuses(
+    board((draft) => {
+      claimOf(draft).selfUpdate = { doing: ["name", "uid"] };
+    }),
+    "selfUpdate.doing lets the submitter write 'uid'",
+  );
+});
+
+test('uidField is refused with auth "none", and accepted with "anonymous"', () => {
+  // The pairing that has no other spelling is the accepted one: an anonymous
+  // session has no address at all, so `emailField` cannot say whose row this is.
+  // With nobody signed in there is no uid either, and every create is refused
+  // with nothing to explain it.
+  refuses(
+    board((draft) => {
+      claimOf(draft).auth = "none";
+    }),
+    "there is no session and therefore no uid",
+  );
+  assert.deepEqual(
+    board((draft) => {
+      claimOf(draft).auth = "anonymous";
+    }),
+    [],
+  );
+});
+
+test("a participant view reaches a collection scoped by uidField", () => {
+  // `ownRow` grants it, so a projection answering "a participant cannot read
+  // this" would be the projection disagreeing with the rules — the one
+  // direction this package is not allowed to be wrong in.
+  assert.deepEqual(
+    board((draft) => {
+      draft.views = [{ id: "mine", audience: "participant", path: "views/mine.html", collections: ["claims"] }];
+    }),
+    [],
+  );
+});
+
+// --- two system bindings on one field ---------------------------------------
+
+test("refuses one field claimed by two of the bindings the host fills in", () => {
+  // Nothing is misspelt: each key is individually correct, each check that looks at one of them
+  // passes, and the runtime writes the field twice — so the surviving value depends on the order
+  // `recordOf` happens to use. The rules require both, and every create is denied.
+  refuses(
+    board((draft) => {
+      claimOf(draft).stampField = "uid";
+      claimOf(draft).createFields = ["taskId", "name", "uid", "status"];
+    }),
+    "points uidField and stampField at the same field 'uid'",
+  );
+  // The pairs that predate uidField are the same mistake and were equally silent.
+  refuses(
+    board((draft) => {
+      claimOf(draft).emailField = "uid";
+    }),
+    "points emailField and uidField at the same field 'uid'",
+  );
+  refuses(
+    board((draft) => {
+      claimOf(draft).uidField = "status";
+      claimOf(draft).createFields = ["taskId", "name", "status"];
+    }),
+    "at the same field 'status'",
+  );
+});
+
+test("a field claimed three times is one line naming all three", () => {
+  // Per field rather than per pair: three lines saying the same thing about one field is three
+  // round trips to fix one mistake, and publish is a manual step with a person waiting.
+  const problems = board((draft) => {
+    claimOf(draft).emailField = "uid";
+    claimOf(draft).stampField = "uid";
+  });
+  refuses(problems, "points emailField and uidField and stampField at the same field 'uid'");
+  assert.equal(problems.filter((problem) => problem.includes("at the same field")).length, 1);
+});
+
+test("the same names in different collections are not a collision", () => {
+  // The acceptance half. Every app here calls its stamp `createdAt`; the check is about one
+  // declaration pointing two bindings at one field, not about a name being popular.
+  const draft = boardDraft();
+  (draft.collections as Record<string, Record<string, unknown>>).notes = { submitOnly: true };
+  ((draft.public as Record<string, unknown>).submit as Record<string, unknown>).notes = {
+    auth: "verifiedEmail",
+    uidField: "uid",
+    createFields: ["body", "uid"],
+  };
+  assert.deepEqual(publishProblems(app(draft), [...CLAIM_CIDS, { cid: "notes", primaryKey: "id" }], OWNER), []);
 });

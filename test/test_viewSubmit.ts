@@ -39,7 +39,7 @@ const submit: SubmitSpec = {
   initialStatus: "requested",
 };
 
-const fields = () => writableFields(drawn, submit.createFields, submit.emailField);
+const fields = () => writableFields(drawn, submit);
 const account = { uid: "uid_visitor", email: "visitor@example.com" };
 
 test("the record carries what the visitor typed, their verified address and the pinned status", () => {
@@ -62,7 +62,7 @@ test("a declared stampField is written, with the value the HOST produced", () =>
   // `stampOk` refuses a create unless the field is present AND equal to `request.time`, so a
   // record without this key is refused for every first-come app there is.
   const stamped: SubmitSpec = { ...submit, createFields: [...submit.createFields, "createdAt"], stampField: "createdAt" };
-  const record = recordOf(writableFields(drawn, stamped.createFields, stamped.emailField), drawn, stamped, { memberName: "A" }, account, serverTime);
+  const record = recordOf(writableFields(drawn, stamped), drawn, stamped, { memberName: "A" }, account, serverTime);
   assert.equal(record.createdAt, SENTINEL);
 });
 
@@ -81,7 +81,7 @@ test("the server's clock wins over anything drawn for the same field", () => {
   // is asserted anyway, because the one value the rules will accept is the one they set.
   const stamped: SubmitSpec = { ...submit, createFields: ["createdAt"], stampField: "createdAt" };
   const withBox: DrawnForm = { fields: { createdAt: { label: "When" } } };
-  const record = recordOf(writableFields(withBox, stamped.createFields, undefined), withBox, stamped, { createdAt: "1999-01-01" }, account, serverTime);
+  const record = recordOf(writableFields(withBox, { ...stamped, emailField: undefined }), withBox, stamped, { createdAt: "1999-01-01" }, account, serverTime);
   assert.equal(record.createdAt, SENTINEL);
 });
 
@@ -129,7 +129,7 @@ const slotDrawn: DrawnForm = { fields: { slotId: { label: "Slot", required: true
 
 test("an id built from a field is refused when the field carries nothing", () => {
   // `""` is not a document id, and the SDK's complaint about it names a path rather than a field.
-  const record = recordOf(writableFields(slotDrawn, slot.createFields, slot.emailField), slotDrawn, slot, { memberName: "A" }, account, serverTime);
+  const record = recordOf(writableFields(slotDrawn, slot), slotDrawn, slot, { memberName: "A" }, account, serverTime);
   assert.equal(missingIdField(slot, record), "slotId");
   const thrown = refusalOf(() => recordId(slot, account.uid, record, "unused"));
   assert.equal(thrown.code, MISSING_ID_FIELD);
@@ -162,7 +162,7 @@ test("an id built from person AND field is refused rather than collapsing to one
 test("the ids the deployed apps already write are unchanged", () => {
   // The acceptance half. tennis claims a slot by its id; gym and live key one record per person
   // per thing. Both must come out byte-for-byte as they did before the refusal existed.
-  const record = recordOf(writableFields(slotDrawn, slot.createFields, slot.emailField), slotDrawn, slot, { slotId: "sat-0900" }, account, serverTime);
+  const record = recordOf(writableFields(slotDrawn, slot), slotDrawn, slot, { slotId: "sat-0900" }, account, serverTime);
   assert.equal(missingIdField(slot, record), undefined);
   assert.equal(recordId(slot, account.uid, record, "unused"), "sat-0900");
   assert.equal(recordId({ ...slot, idFrom: "auth.uid+field" }, account.uid, record, "unused"), "uid_visitor_sat-0900");
@@ -178,7 +178,7 @@ test("a stamped field is not a box to fill in, and is stamped anyway", () => {
   // server was about to overwrite.
   const stamped: SubmitSpec = { ...submit, createFields: [...submit.createFields, "createdAt"], stampField: "createdAt" };
   const stampedDrawn: DrawnForm = { ...drawn, fields: { ...drawn.fields, createdAt: { label: "When", required: true } } };
-  const withStamp = writableFields(stampedDrawn, stamped.createFields, stamped.emailField, stamped.stampField);
+  const withStamp = writableFields(stampedDrawn, stamped);
   assert.deepEqual(
     withStamp.map((field) => field.name),
     ["memberName", "note"],
@@ -187,9 +187,61 @@ test("a stamped field is not a box to fill in, and is stamped anyway", () => {
   assert.equal(recordOf(withStamp, stampedDrawn, stamped, { memberName: "A" }, account, serverTime).createdAt, SENTINEL);
 });
 
-test("passing the stamp of an app that has none changes no field list", () => {
-  // The compatibility half: the fourth argument is optional, and an app with nothing to stamp must
-  // draw exactly what it drew from three arguments.
-  assert.deepEqual(writableFields(drawn, submit.createFields, submit.emailField, submit.stampField), fields());
-  assert.deepEqual(writableFields(drawn, submit.createFields, submit.emailField, undefined), fields());
+test("a declaration with nothing to stamp and nobody to name draws the same list", () => {
+  // The acceptance half of the signature change: the fields a visitor fills are decided by which
+  // keys the declaration HAS, so an app declaring none of them must come out exactly as it did.
+  assert.deepEqual(writableFields(drawn, { ...submit, stampField: undefined }), fields());
+  assert.deepEqual(writableFields(drawn, { ...submit, uidField: undefined }), fields());
+});
+
+// --- uidField: the binding for an app that collects no address ---------------
+
+/** A shared to-do board: the claim's id IS the task's, so identity lives in a field, and the field
+ *  is the uid because a board that shows who is working on what publishes the whole row. */
+const claim: SubmitSpec = {
+  auth: "verifiedEmail",
+  createFields: ["taskId", "name", "uid", "status"],
+  uidField: "uid",
+  initialStatus: "doing",
+  idFrom: "field",
+  idField: "taskId",
+};
+const claimDrawn: DrawnForm = {
+  fields: { taskId: { label: "Task", required: true }, name: { label: "Name", required: true }, uid: { label: "uid" } },
+  statusField: "status",
+};
+
+test("a uid is not a box to fill in", () => {
+  // It is in `createFields` because the rules require the record to carry it, exactly as the
+  // address is — and drawn, it is worse than the stamp's empty box: a visitor CAN type into it,
+  // and `uidOk` refuses every value but the one the account already has.
+  assert.deepEqual(
+    writableFields(claimDrawn, claim).map((field) => field.name),
+    ["taskId", "name"],
+  );
+});
+
+test("the uid the record carries is the account's, whatever the page sent", () => {
+  // The forged half, and the reason the injection goes on after what was typed: a host still
+  // drawing the box, or a frame composing its own record, must not be able to write somebody
+  // else's uid — the rules would refuse it, and the refusal names nothing.
+  const record = recordOf(writableFields(claimDrawn, claim), claimDrawn, claim, { taskId: "t1", name: "Ada", uid: "forged" }, account, serverTime);
+  assert.deepEqual(record, { taskId: "t1", name: "Ada", uid: "uid_visitor", status: "doing" });
+  // And the id is still the task's, which is what makes the claim exclusive.
+  assert.equal(recordId(claim, account.uid, record, "unused"), "t1");
+});
+
+test("with nobody signed in the uid is absent rather than empty", () => {
+  // `uidOk` tests the value against the session; a record carrying "" would be refused just the
+  // same, and an app declaring uidField with `auth: "none"` is refused at publish. What must not
+  // happen here is inventing a uid for a visitor who has none.
+  const record = recordOf(writableFields(claimDrawn, claim), claimDrawn, claim, { taskId: "t1", name: "Ada" }, null, serverTime);
+  assert.equal("uid" in record, false);
+});
+
+test("an address app is untouched by the key it does not declare", () => {
+  // The acceptance half: uidField is absent from every app published so far, and their records
+  // must come out exactly as they did.
+  const record = recordOf(fields(), drawn, submit, { memberName: "A" }, account, serverTime);
+  assert.deepEqual(record, { memberName: "A", memberEmail: "visitor@example.com", status: "requested" });
 });

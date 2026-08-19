@@ -16,7 +16,9 @@
 //   invented a random id instead would write a booking that took nothing, successfully, for ever.
 //
 //   the ADDRESS is not the visitor's to type. The rules compare it to `request.auth.token.email`,
-//   so it is filled from the account and a field for it would only be a field to get wrong.
+//   so it is filled from the account and a field for it would only be a field to get wrong. The
+//   UID (`uidField`) is the same binding for an app that collects no address, and less typeable
+//   still: every value but the account's own is refused by `uidOk`.
 //
 //   the STATUS goes in the field `collections[cid].statusField` names, which is a convention only
 //   until an app names something else.
@@ -45,6 +47,13 @@ export interface SubmitSpec {
   createFields: string[];
   /** The field carrying the submitter's verified address. */
   emailField?: string | undefined;
+  /** The field carrying the submitter's UID — the same binding as `emailField` for an app that
+   *  collects no address, and the rules compare it to `request.auth.uid` on create (`uidOk`).
+   *
+   *  Filled here for the reason the address is, and the reason is sharper: a uid is not something
+   *  a person can type. Drawn as a box, whatever the visitor puts in it is refused, and the refusal
+   *  names nothing. */
+  uidField?: string | undefined;
   /** The value the status field must hold on a create. */
   initialStatus?: string | undefined;
   idFrom?: string | undefined;
@@ -75,28 +84,26 @@ export interface WritableField {
 /** Does a submission need somebody signed in? */
 export const needsAccount = (submit: SubmitSpec): boolean => submit.auth !== undefined && submit.auth !== "none";
 
-/** The inputs, in the order the declaration lists them — and WITHOUT the three the visitor does not
- *  choose. See the note at the top: the address is compared to their token, the status is pinned to
- *  `initialStatus`, and the stamp is the SERVER's clock, so a box for any of them can only be
- *  filled in wrongly.
+/** The inputs, in the order the declaration lists them — and WITHOUT the four the visitor does not
+ *  choose. See the note at the top: the address is compared to their token, the uid IS their token,
+ *  the status is pinned to `initialStatus`, and the stamp is the SERVER's clock, so a box for any
+ *  of them can only be filled in wrongly.
  *
- *  `stampField` is the fourth argument and optional because it arrived after the hosts did: a
- *  three-argument call still compiles and still draws what it drew, so the two hosts can adopt it
- *  one at a time. Passing it is what a host wants, though — declared and required in the schema,
- *  the stamp was drawn as an empty box the visitor could not usefully fill, and then `missingRequired`
- *  stopped the submission over the one field `recordOf` was about to overwrite anyway. */
-export const writableFields = (
-  drawn: DrawnForm,
-  createFields: readonly string[],
-  emailField: string | undefined,
-  stampField?: string | undefined,
-): WritableField[] =>
-  createFields.flatMap((name) => {
-    if (name === emailField || name === drawn.statusField || (stampField !== undefined && name === stampField)) return [];
+ *  IT TAKES THE WHOLE DECLARATION, and that is the fix `uidField` arrived with. The list used to be
+ *  positional and growing — `(drawn, createFields, emailField, stampField?)` — with the newest
+ *  argument optional so the hosts could adopt it one at a time. What that buys is a host that
+ *  silently keeps drawing a box for the field it has not heard of: the stamp was drawn as an empty
+ *  box the visitor could not fill, and a uid would be drawn as one they CAN fill and whose every
+ *  value the rules refuse. A host that has not been updated should fail to compile, not to submit. */
+export const writableFields = (drawn: DrawnForm, submit: SubmitSpec): WritableField[] => {
+  const filled = new Set([submit.emailField, submit.uidField, drawn.statusField, submit.stampField].filter((name): name is string => name !== undefined));
+  return submit.createFields.flatMap((name) => {
+    if (filled.has(name)) return [];
     const spec = drawn.fields[name];
     if (spec === undefined) return [];
     return [{ name, label: spec.label ?? name, required: spec.required === true }];
   });
+};
 
 /** Which required fields were left empty, by LABEL — so an answer can name them instead of arriving
  *  as a permission error that names nothing.
@@ -144,9 +151,15 @@ export const recordOf = (
     return value === "" ? [] : [[field.name, value] as const];
   });
   const email = submit.emailField !== undefined && account?.email != null ? [[submit.emailField, account.email] as const] : [];
+  // The uid, on the same terms as the address and for a sharper reason: `uidOk` compares this field
+  // with `request.auth.uid` on the create, so the ONLY value that is ever written here is the one
+  // the account carries. It goes on after `written`, so a page that managed to send a value for it
+  // — an old host still drawing the box, a frame that composed its own record — has that value
+  // replaced rather than submitted and refused.
+  const uid = submit.uidField !== undefined && account !== null && account.uid !== "" ? [[submit.uidField, account.uid] as const] : [];
   const status = submit.initialStatus !== undefined && drawn.statusField !== undefined ? [[drawn.statusField, submit.initialStatus] as const] : [];
   const stamp = submit.stampField !== undefined ? [[submit.stampField, serverTime()] as const] : [];
-  return Object.fromEntries([...written, ...email, ...status, ...stamp]);
+  return Object.fromEntries([...written, ...email, ...uid, ...status, ...stamp]);
 };
 
 /** The record's value for a field, as the rules would read it. A non-string is empty rather than

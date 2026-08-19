@@ -215,6 +215,22 @@ const SubmitZ = z
   .object({
     auth: z.enum(["none", "anonymous", "verifiedEmail"]),
     emailField: z.string().trim().min(1).optional(),
+    /** The submitter's UID, in a field — the same binding as `emailField` and
+     *  the only one available when the document id is spent on exclusivity.
+     *
+     *  A claim whose id IS the task's id is what stops two people taking one
+     *  task, so identity cannot also live in the id; it has to be a field. The
+     *  field version there was is `emailField`, and a board that shows who is
+     *  working on what publishes the whole row (a rule cannot hide a field —
+     *  the boundary is the document), so the address goes out with the name.
+     *  A uid says the same thing and carries no address.
+     *
+     *  Rules-side: `ownRow` reads it, `uidOk` pins it to the writer's own uid
+     *  on the public create, and `uidHeld` freezes it afterwards for EVERYONE
+     *  — so unlike an address, staff cannot correct it and reassignment is
+     *  delete-and-retake. Nobody can type a uid, so there was no reassignment
+     *  UI to keep. */
+    uidField: z.string().trim().min(1).optional(),
     createFields: z.array(z.string().trim().min(1)).min(1),
     initialStatus: z.string().trim().min(1).optional(),
     /** `field` is the mode that makes a CONTESTED resource exclusive: the

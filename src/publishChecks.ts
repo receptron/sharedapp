@@ -29,7 +29,7 @@
 import type { CollectionFieldSpec, CollectionSchema } from "@mulmoclaude/core/collection";
 import { isSafeCustomViewPath } from "@mulmoclaude/core/collection/server";
 import { normalizeViews, participantScope, type NormalizedView } from "./appViews.js";
-import { APP_PROTOCOL, protocolOf, protocolWithin } from "./appProtocol.js";
+import { APP_PROTOCOL, BASE_PROTOCOL, UID_FIELD_PROTOCOL, protocolOf, protocolWithin } from "./appProtocol.js";
 import type { AuthoredApp, AuthoredCollectionConfig, AuthoredSubmit } from "./publishManifest.js";
 
 /** What publish knows about a shared collection in this repository, as far as
@@ -56,7 +56,17 @@ export interface PublishableCollection {
  *  restricted to a named participant. A record created through the writer
  *  branch carries the same shape and none of that meaning. */
 export function bindsSubmitterIdentity(submit: AuthoredSubmit): boolean {
-  return submit.idFrom === "auth.uid" || submit.idFrom === "auth.uid+field" || submit.emailField !== undefined || submit.audience === "participant";
+  return (
+    submit.idFrom === "auth.uid" ||
+    submit.idFrom === "auth.uid+field" ||
+    submit.emailField !== undefined ||
+    // The same meaning as `emailField` with no address in it: the row says
+    // whose it is, and the rules read it. Missing here, an app that identifies
+    // its submitters by uid would have been the one shape that could be padded
+    // by a writer while claiming to be per-person.
+    submit.uidField !== undefined ||
+    submit.audience === "participant"
+  );
 }
 
 /** The fields a rule actually CHECKS the value of, for one collection.
@@ -93,6 +103,10 @@ function identityBindings(submit: AuthoredSubmit): string[] {
   const bindings: string[] = [];
   if (submit.idFrom === "auth.uid" || submit.idFrom === "auth.uid+field") bindings.push(`idFrom: "${submit.idFrom}"`);
   if (submit.emailField !== undefined) bindings.push(`emailField: "${submit.emailField}"`);
+  // Kept in step with `bindsSubmitterIdentity` above, and the pair is easy to split: this one only
+  // WORDS the refusal, so a binding missing here does not change which declarations are refused —
+  // it empties the parentheses that were supposed to say what made the app one of them.
+  if (submit.uidField !== undefined) bindings.push(`uidField: "${submit.uidField}"`);
   if (submit.audience === "participant") bindings.push(`audience: "participant"`);
   return bindings;
 }
@@ -153,6 +167,19 @@ function authProblems(app: AuthoredApp): string[] {
         `public.submit.${cid}.auth is "none": nobody is signed in, so there is no uid, so \`idFrom\` can only be "auto" and ` +
           `nothing stops the same person submitting again — and again. Use "anonymous": the visitor's browser opens a session by itself, ` +
           `with no sign-in screen, and it gives the rules a uid to bind the record to.`,
+      );
+    }
+    // Asked of "none" ONLY, and so it sits above the early return rather than
+    // beside the emailField guard below: a uid is exactly what an anonymous
+    // session HAS, and `uidField` with `auth: "anonymous"` is the pairing that
+    // has no other spelling. With nobody signed in there is no uid at all, so
+    // `uidOk` is false for every create and the collection accepts nothing —
+    // fail-closed and silent, a form that refuses everything with no reason to
+    // read off it.
+    if (submit.auth === "none" && submit.uidField !== undefined) {
+      problems.push(
+        `public.submit.${cid}.auth is "none" and names uidField '${submit.uidField}': there is no session and therefore no uid, ` +
+          'so the rules refuse every create and the form is shut with nothing to explain it. Use "anonymous" (a session with no sign-in screen, which still has a uid).',
       );
     }
     // NO EARLY RETURN, and that is the point: "none" carries no identity either,
@@ -331,6 +358,12 @@ function ruleReadFields(submit: AuthoredSubmit): { field: string; why: string }[
   const fields: { field: string; why: string }[] = [];
   if (submit.emailField !== undefined) {
     fields.push({ field: submit.emailField, why: `public.submit.<cid>.emailField — the rules compare it to the submitter's verified address` });
+  }
+  if (submit.uidField !== undefined) {
+    fields.push({
+      field: submit.uidField,
+      why: `public.submit.<cid>.uidField — the rules compare it to the submitter's own uid, and refuse a create that carries another`,
+    });
   }
   if ((submit.idFrom === "auth.uid+field" || submit.idFrom === "field") && submit.idField !== undefined) {
     fields.push({ field: submit.idField, why: `public.submit.<cid>.idField — the rules rebuild the document id from it` });
@@ -617,9 +650,38 @@ function protocolProblems(app: AuthoredApp): string[] {
   ];
 }
 
+/** A key whose READER has to have learnt it, declared by an app that says it will run on readers
+ *  that have not.
+ *
+ *  `uidField` is filled from the session and kept OUT of the drawn form, exactly as `emailField`
+ *  is. A reader that knows neither half draws a box asking the visitor to type their uid, sends
+ *  whatever they type, and the rules refuse it (`uidOk` compares the field with the writer's own
+ *  uid). Nothing errors on the way — the app is simply a form that never works, on some people's
+ *  browsers and not the author's.
+ *
+ *  What actually STOPS that is the stamp: a uid-bearing app is published as {@link
+ *  UID_FIELD_PROTOCOL}, a new major, and a reader that has not learnt the key refuses the whole
+ *  projection instead of drawing half of it (`protocolFor`). This check is the other half — the
+ *  AUTHOR saying which contract they are writing against, so that a declaration whose page needs a
+ *  newer reader cannot be published by a build, or into a fleet, that predates it. Without it the
+ *  first news of the mismatch is a page that will not draw, and nothing to say why. */
+function protocolFloorProblems(app: AuthoredApp): string[] {
+  const users = Object.entries(app.public?.submit ?? {}).filter(([, submit]) => submit.uidField !== undefined);
+  if (users.length === 0) return [];
+  const floor = protocolOf(UID_FIELD_PROTOCOL);
+  const stated = app.protocol === undefined ? null : protocolOf(app.protocol);
+  if (floor !== null && stated !== null && protocolWithin(floor, stated)) return [];
+  const named = users.map(([cid]) => `public.submit.${cid}`).join(", ");
+  return [
+    `${named} declares uidField, which needs \`protocol: "${UID_FIELD_PROTOCOL}"\` at the top of app.json (this app says ${app.protocol === undefined ? `nothing, which is ${BASE_PROTOCOL}` : `"${app.protocol}"`}).`,
+    `The page fills that field from the session and keeps it out of the form, so an app using it is published as ${UID_FIELD_PROTOCOL} and every reader older than that refuses to draw it. Declaring the floor is how the app says which readers it needs — and it is what stops this being published by a build, or into a fleet, that predates the key.`,
+  ];
+}
+
 export function publishProblems(app: AuthoredApp, collections: readonly PublishableCollection[], publisherEmail: string): string[] {
   return [
     ...protocolProblems(app),
+    ...protocolFloorProblems(app),
     ...unknownCidProblems(app, collections),
     ...publisherProblems(app, publisherEmail),
     ...submitOnlyProblems(app),
@@ -631,6 +693,7 @@ export function publishProblems(app: AuthoredApp, collections: readonly Publisha
     ...primaryKeyProblems(app, collections),
     ...assigneeProblems(app),
     ...stampProblems(app),
+    ...systemBindingProblems(app),
     ...systemFieldProblems(app),
     ...windowRefProblems(app, collections),
     ...idTargetProblems(app, collections),
@@ -734,6 +797,50 @@ function stampProblems(app: AuthoredApp): string[] {
   });
 }
 
+/** TWO SYSTEM BINDINGS ON ONE FIELD.
+ *
+ *  Four keys make the host write a field rather than the visitor: `emailField` (the account's
+ *  address), `uidField` (the account's uid), the `statusField` under an `initialStatus`, and
+ *  `stampField` (the server's clock). Name the same field twice and the declaration asks for two
+ *  different values in one place — which is not a contradiction anything reports, because each key
+ *  is individually correct and each check that looks at one of them passes.
+ *
+ *  What happens instead is that the host writes one value over the other (`recordOf` fills them in
+ *  a fixed order, so the loser depends on that order rather than on anything an author decided) and
+ *  the rules require BOTH: `uidOk` compares the field with `request.auth.uid`, `stampOk` with
+ *  `request.time`. Every create is denied, on a declaration where nothing was misspelt.
+ *
+ *  Reported per field rather than per pair, and with the bindings sorted, so a field claimed three
+ *  times is one line naming all three. */
+function systemBindingProblems(app: AuthoredApp): string[] {
+  return Object.entries(app.public?.submit ?? {}).flatMap(([cid, submit]) => {
+    const statusField = app.collections?.[cid]?.statusField;
+    const claims: { field: string | undefined; by: string; writes: string }[] = [
+      { field: submit.emailField, by: `emailField`, writes: "the submitter's verified address" },
+      { field: submit.uidField, by: `uidField`, writes: "the submitter's uid" },
+      {
+        field: submit.initialStatus === undefined ? undefined : statusField,
+        by: `initialStatus (collections.${cid}.statusField)`,
+        writes: `"${submit.initialStatus}"`,
+      },
+      { field: submit.stampField, by: `stampField`, writes: "the server's clock" },
+    ];
+    const byField = new Map<string, { by: string; writes: string }[]>();
+    for (const claim of claims) {
+      if (claim.field === undefined) continue;
+      byField.set(claim.field, [...(byField.get(claim.field) ?? []), { by: claim.by, writes: claim.writes }]);
+    }
+    return [...byField.entries()]
+      .filter(([, holders]) => holders.length > 1)
+      .map(
+        ([field, holders]) =>
+          `public.submit.${cid} points ${holders.map((holder) => holder.by).join(" and ")} at the same field '${field}', and each of them writes something different ` +
+          `(${holders.map((holder) => holder.writes).join(", ")}). The host fills it in twice and one value survives; the rules require all of them, so every submission is refused ` +
+          `with nothing misspelt anywhere. Give each binding its own field.`,
+      );
+  });
+}
+
 /** The fields a `selfUpdate` list may never contain, because each of them is
  *  what some OTHER check pinned down.
  *
@@ -761,6 +868,12 @@ function selfUpdateSystemProblems(app: AuthoredApp, cid: string, submit: Authore
       why:
         `it is public.submit.${cid}.emailField, the field the rules compare with the submitter's verified address. ` +
         "A submitter who may rewrite it can move their own record onto somebody else's name",
+    },
+    {
+      field: submit.uidField,
+      why:
+        `it is public.submit.${cid}.uidField, the field the rules compare with the submitter's own uid. ` +
+        "The rules freeze it (`uidHeld`) so the write is refused rather than obeyed — a button the page draws with nothing behind it, and a declaration that reads like it grants something",
     },
     {
       field: submit.idFrom === "field" || submit.idFrom === "auth.uid+field" ? submit.idField : undefined,
@@ -975,8 +1088,8 @@ function viewCollectionProblems(app: AuthoredApp, view: NormalizedView, cid: str
   // declaration, so the question is answerable right here.
   if (view.audience === "participant" && participantScope(app, cid, app.participantRead ?? []) === null) {
     return [
-      `${view.where}.collections names '${cid}', which a participant cannot read: it is not in participantRead, and public.submit.${cid} declares neither ` +
-        'an emailField nor idFrom "auth.uid", so there is no row the rules would call theirs. The page would be refused the read, not handed fewer records.',
+      `${view.where}.collections names '${cid}', which a participant cannot read: it is not in participantRead, and public.submit.${cid} declares no ` +
+        'emailField, no uidField and no idFrom "auth.uid", so there is no row the rules would call theirs. The page would be refused the read, not handed fewer records.',
     ];
   }
   return [];

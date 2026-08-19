@@ -37,7 +37,7 @@
 // pins that the rules accept it.
 
 import type { CollectionSchema } from "@mulmoclaude/core/collection";
-import { APP_PROTOCOL } from "./appProtocol.js";
+import { protocolFor } from "./appProtocol.js";
 import {
   normalizeViews,
   participantScope,
@@ -273,9 +273,10 @@ export function projectApp(
 
   const config: PublishedConfigDoc = {
     // WHICH CONTRACT THESE DOCUMENTS KEEP, so a reader older than it refuses rather than drawing
-    // them wrongly. The compiler's own version, never the author's declaration: the author states a
-    // floor, and what is true of the documents is what produced them.
-    protocol: APP_PROTOCOL,
+    // them wrongly. Derived from the DECLARATION, never from the author's floor and no longer from
+    // a constant per build: an app using nothing new is stamped what it always was, and one using a
+    // key its reader must understand is stamped a major that reader refuses (see `appProtocol.ts`).
+    protocol: protocolFor(authored),
     enabled: authored.public?.enabled === true,
     read: authored.public?.read ?? [],
     submit,
@@ -490,7 +491,7 @@ function tierConfig(authored: AuthoredApp, audience: Exclude<ViewAudience, "publ
   const config: AppViewConfigDoc = {
     // Every tier carries it, for the reason `projectApp` gives beside the public one: one publish
     // writes them all, and a reader that can draw one and not another is a half-drawn app.
-    protocol: APP_PROTOCOL,
+    protocol: protocolFor(authored),
     write: tierWrites(authored, audience, cids),
     views: tierViews(authored, audience, views, authored.participantRead ?? []),
     submit: tierSubmit(authored, cids),
