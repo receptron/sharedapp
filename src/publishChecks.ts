@@ -29,7 +29,7 @@
 import type { CollectionFieldSpec, CollectionSchema } from "@mulmoclaude/core/collection";
 import { isSafeCustomViewPath } from "@mulmoclaude/core/collection/server";
 import { normalizeViews, participantScope, type NormalizedView } from "./appViews.js";
-import { APP_PROTOCOL, BASE_PROTOCOL, UID_FIELD_PROTOCOL, protocolOf, protocolWithin } from "./appProtocol.js";
+import { APP_PROTOCOL, protocolOf, protocolWithin } from "./appProtocol.js";
 import type { AuthoredApp, AuthoredCollectionConfig, AuthoredSubmit } from "./publishManifest.js";
 
 /** What publish knows about a shared collection in this repository, as far as
@@ -650,40 +650,9 @@ function protocolProblems(app: AuthoredApp): string[] {
   ];
 }
 
-/** A key whose PUBLISHER has to have learnt it, declared by an app that may be handed to one that
- *  has not.
- *
- *  This is the one thing the version number does that nothing else does. An old build of this
- *  compiler does not know `uidField`; handed a declaration that names one, it would drop the key
- *  and publish the rest — a projection where the uid is an ordinary `createFields` name, bound to
- *  nobody, because the rules enforce `uidOk` only for an app whose published submit declares it.
- *  The board would work, and anyone could write anyone's uid into it.
- *
- *  Naming the floor is what turns that into a refusal: `protocolProblems` will not publish a
- *  contract above what the build emits, so the old build stops on the number instead of quietly
- *  shipping an app missing the half that made it safe.
- *
- *  Note what this check is NOT for. The READER is looked after elsewhere and by something older: a
- *  build that has not learnt the key refuses a uid-bearing public projection through the
- *  `submit`/`form` consistency check it has had since the first contract (see {@link
- *  UID_FIELD_PROTOCOL}), which is why the floor here is a minor and not a major. */
-function protocolFloorProblems(app: AuthoredApp): string[] {
-  const users = Object.entries(app.public?.submit ?? {}).filter(([, submit]) => submit.uidField !== undefined);
-  if (users.length === 0) return [];
-  const floor = protocolOf(UID_FIELD_PROTOCOL);
-  const stated = app.protocol === undefined ? null : protocolOf(app.protocol);
-  if (floor !== null && stated !== null && protocolWithin(floor, stated)) return [];
-  const named = users.map(([cid]) => `public.submit.${cid}`).join(", ");
-  return [
-    `${named} declares uidField, which needs \`protocol: "${UID_FIELD_PROTOCOL}"\` at the top of app.json (this app says ${app.protocol === undefined ? `nothing, which is ${BASE_PROTOCOL}` : `"${app.protocol}"`}).`,
-    `Declaring the floor is what stops this app being published by a build that predates the key: such a build would drop uidField and publish a collection where that field is bound to nobody and anyone may write anyone's uid into it. It refuses the floor instead.`,
-  ];
-}
-
 export function publishProblems(app: AuthoredApp, collections: readonly PublishableCollection[], publisherEmail: string): string[] {
   return [
     ...protocolProblems(app),
-    ...protocolFloorProblems(app),
     ...unknownCidProblems(app, collections),
     ...publisherProblems(app, publisherEmail),
     ...submitOnlyProblems(app),

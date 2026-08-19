@@ -5,39 +5,38 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { APP_PROTOCOL, BASE_PROTOCOL, UID_FIELD_PROTOCOL, protocolFor, protocolOf, protocolWithin } from "../src/appProtocol.js";
+import { APP_PROTOCOL, protocolOf, protocolWithin } from "../src/appProtocol.js";
 
-test("an app using nothing new is stamped what it has always been stamped", () => {
-  // The compatibility assertion, and the whole reason the version is per app rather than per build.
-  // It started at 1.0.0 rather than 0.1.0: apps published before this key existed carry no version,
-  // and a reader treats those as 1.0.0 — they are the documents in Firestore right now. Every
-  // reader in the wild draws major 1, so anything that moves this line stops them all.
-  assert.equal(BASE_PROTOCOL, "1.0.0");
-  assert.equal(protocolFor({}), BASE_PROTOCOL);
-  assert.equal(protocolFor({ public: { submit: { responses: {} } } }), BASE_PROTOCOL);
+test("every app is stamped the first contract, uidField included", () => {
+  // The compatibility assertion. It started at 1.0.0 rather than 0.1.0: apps published before this
+  // key existed carry no version and a reader treats those as 1.0.0 — they are the documents in
+  // Firestore right now. Every reader in the wild draws major 1, so anything that moves this line
+  // stops them all.
+  assert.equal(APP_PROTOCOL, "1.0.0");
+  assert.equal(APP_PROTOCOL, APP_PROTOCOL);
 });
 
-test("an app using uidField says so, in a version that stays inside major 1", () => {
-  assert.equal(protocolFor({ public: { submit: { claims: { uidField: "uid" } } } }), UID_FIELD_PROTOCOL);
-  // The major is what makes an older reader refuse an app, and this addition does not need one: a
-  // reader that has not learnt uidField already refuses such a projection through the submit/form
-  // consistency check it has had since 1.0.0 (the uid is in `createFields`, because the rules take
-  // no key outside it, and never in `form.fields`, because not drawing it IS the feature). Moving
-  // this to 2 would refuse every uid app on every reader in the wild to buy a screen they already
-  // show. What the number is for here is the authored floor, which an old PUBLISHER refuses.
-  assert.equal(protocolOf(UID_FIELD_PROTOCOL)?.major, 1);
-  assert.ok(protocolOf(UID_FIELD_PROTOCOL)!.minor > protocolOf(BASE_PROTOCOL)!.minor);
-  // One collection out of several is enough: the app is published, and read, whole.
-  assert.equal(protocolFor({ public: { submit: { tasks: {}, claims: { uidField: "uid" } } } }), UID_FIELD_PROTOCOL);
+test("adding a key to the contract does not move the number, because nothing reads the move", () => {
+  // `uidField` shipped as 2.0.0, then 1.1.0, then as nothing at all, and this is the reasoning that
+  // has to survive the next addition shaped like it. Four things could have read the difference:
+  //
+  //   - the reader's gate compares the MAJOR only (`protocolDrawable`), so a minor is inert;
+  //   - a reader's behaviour switch (`protocolAtLeast`) would read it, and there is not one;
+  //   - the authored floor is checked by `protocolProblems`, which never runs for a key an older
+  //     build does not know — `SubmitZ` is `.strict()`, so that build stops at the schema first;
+  //   - and a human reading the document finds `submit.<cid>.uidField` in it, beside the stamp.
+  //
+  // A number derived from the declaration and published next to the declaration carries nothing.
+  assert.equal(APP_PROTOCOL, "1.0.0");
 });
 
-test("a feature floor is a version this compiler can actually emit", () => {
-  // A floor above what publish writes would refuse every app that declared it — including the one
-  // the floor was added for, which is the shape that gets shipped because nothing else tests it.
+test("a floor above what this build emits is not within it", () => {
+  // What the version still exists for: a key whose MEANING moves is invisible to a strict schema,
+  // so the author names the contract and `protocolProblems` refuses one this build cannot honour.
   const emitted = protocolOf(APP_PROTOCOL);
-  const floor = protocolOf(UID_FIELD_PROTOCOL);
-  assert.notEqual(floor, null);
-  assert.ok(emitted !== null && floor !== null && protocolWithin(floor, emitted));
+  assert.notEqual(emitted, null);
+  assert.ok(emitted !== null && !protocolWithin({ major: 1, minor: 1, patch: 0 }, emitted));
+  assert.ok(emitted !== null && protocolWithin({ major: 1, minor: 0, patch: 0 }, emitted));
 });
 
 test("a version is three numbers, and anything else is not one", () => {

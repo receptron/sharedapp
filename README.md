@@ -49,34 +49,37 @@ not use.
 - **MINOR** — an addition an older reader ignores safely (`views[].live` was one).
 - **PATCH** — neither.
 
-**The number is per APP, not per build** (`protocolFor(app)`). An app that uses nothing newer than
-the first contract is stamped `BASE_PROTOCOL` (**1.0.0**) — byte-identical to what it was always
-stamped — and only a declaration using a newer key is stamped that key's version. Today there is
-one: `public.submit.<cid>.uidField` is `UID_FIELD_PROTOCOL` (**1.1.0**). `APP_PROTOCOL` is the
-CEILING — the newest contract this build can emit (**1.1.0**), and what an authored floor is checked
-against. It is not what a given app is stamped.
+**Every projection is stamped `APP_PROTOCOL`, which is still 1.0.0** — the contract has not moved,
+and `uidField` is the reason that is worth saying. It went out as 2.0.0, then 1.1.0, then as nothing
+at all, because nothing anywhere reads the difference:
 
-**No major has been needed yet, including for `uidField`.** The page does have to fill that field
-from the session and keep it out of the form, so a reader that has not learnt it must not draw the
-app — and one already does not. The uid is in `createFields` (the rules accept no key outside it)
-and never in `form.fields` (not drawing it is the feature), and the `submit`/`form` consistency
-check that has shipped since 1.0.0 refuses exactly that shape. A major would buy the same screen at
-the price of refusing every uid app on every older reader.
+- the reader's gate compares the MAJOR only, so a minor is a number it does not act on;
+- a reader's behaviour switch would read one, and there is no such switch yet;
+- the authored floor is checked by `protocolProblems`, which never runs for a key an older build does
+  not know — the manifest schema is `.strict()`, so that build refuses `uidField` at the parse,
+  earlier and more clearly than any version comparison ("Unrecognized key", with a floor declared and
+  without it, the same message both times);
+- and a human reading the document finds `submit.<cid>.uidField` in it, three lines from the stamp.
 
-What the version does buy is on the WRITING side: the floor an author declares. An old build of this
-compiler, handed a declaration it does not understand, would drop `uidField` and publish a
-collection where the uid is bound to nobody and anyone may write anyone's — so publish refuses a
-floor above what it emits, and the author declaring `protocol: "1.1.0"` is what makes it stop.
+So **adding a key does not move the number**, and the strict schema is what makes that safe: a build
+handed a key it has never heard of stops rather than dropping it. A reader that has not learnt
+`uidField` refuses such an app too, on its shape — the uid is in `createFields` (the rules take no
+key outside it) and never in `form.fields` (not drawing it is the feature), which the `submit`/`form`
+consistency check has refused since 1.0.0.
+
+**What would move it** is a change no schema can see: an existing key whose MEANING moves. Nothing is
+unrecognised there, so the version is the only handle — the author names the contract, publish
+refuses a floor above the ceiling, and if the reader must understand the change, the major goes up
+and older readers refuse the app. That day the stamp goes back to being per app, so the refusal lands
+on the apps that need it rather than on everything published afterwards.
 
 A document with no `protocol` is 1.0.0. That is not a fallback: apps published before the key existed
 are exactly that, and those are the documents already in Firestore.
 
-`app.json` may declare `protocol` as a FLOOR. It never decides what is published — the stamp is
-derived from what the declaration CONTAINS, so an author naming a contract they use nothing from has
-not made their app need a newer reader. Publish refuses a declaration newer than the ceiling, and
-requires one for a feature that has a version of its own (`uidField` needs `protocol: "1.1.0"`) —
-which is what makes an older PUBLISHER stop on the number instead of dropping the key it does not
-know and publishing the app without it.
+`app.json` may declare `protocol` as a FLOOR. It never decides what is published — the documents keep
+whatever produced them, and an app claiming a contract its documents do not honour is worse than one
+claiming none. Publish refuses a declaration newer than the ceiling, and requires a floor for
+nothing: no feature has a version of its own.
 
 ## What is NOT here
 

@@ -15,7 +15,7 @@ import assert from "node:assert/strict";
 
 import { AuthoredAppZ, type AuthoredApp } from "../src/publishManifest.js";
 import { projectApp, projectAppViews, type PublishStamp } from "../src/publishProject.js";
-import { BASE_PROTOCOL, UID_FIELD_PROTOCOL } from "../src/appProtocol.js";
+import { APP_PROTOCOL } from "../src/appProtocol.js";
 import type { CollectionSchema } from "@mulmoclaude/core/collection";
 
 const STAMP: PublishStamp = { uid: "uid_owner", email: "owner@salon.jp", publishedAt: 1_760_000_000_000, commit: "abc123def456" };
@@ -268,25 +268,23 @@ test("every projection states the contract it was written against", () => {
   // must NOT draw them — so it rides in the public config and in every tier, from one publish.
   const app = authored();
   const { config } = projectApp(app, [], STAMP, null);
-  assert.equal(config.protocol, BASE_PROTOCOL);
+  assert.equal(config.protocol, APP_PROTOCOL);
   for (const tier of projectAppViews(app, STAMP)) {
-    assert.equal(tier.config.protocol, BASE_PROTOCOL, `${tier.tier} states no contract`);
+    assert.equal(tier.config.protocol, APP_PROTOCOL, `${tier.tier} states no contract`);
   }
 });
 
-test("the contract is the one THIS declaration needs, and it moves the whole app at once", () => {
-  // Per app rather than per build: an app that uses nothing new is stamped what it always was (the
-  // test above), so republishing it does not change what its documents claim to be. The tiers move
-  // with the public config — one publish writes them all, and a reader that could draw one and not
-  // another would show half an app.
+test("an app using uidField is stamped the same contract as one that does not", () => {
+  // Deliberately not a version of its own. Adding a key does not move the number (see
+  // `appProtocol.ts`), and stamping uid apps apart would have refused them on every older reader —
+  // which they already refuse, on the shape, through the submit/form consistency check.
   const app = AuthoredAppZ.parse({
     ...authored(),
-    protocol: "1.1.0",
     public: { enabled: true, submit: { claims: { auth: "verifiedEmail", uidField: "uid", createFields: ["taskId", "uid"] } } },
   });
-  assert.equal(projectApp(app, [], STAMP, null).config.protocol, UID_FIELD_PROTOCOL);
+  assert.equal(projectApp(app, [], STAMP, null).config.protocol, APP_PROTOCOL);
   for (const tier of projectAppViews(app, STAMP)) {
-    assert.equal(tier.config.protocol, UID_FIELD_PROTOCOL, `${tier.tier} states the wrong contract`);
+    assert.equal(tier.config.protocol, APP_PROTOCOL, `${tier.tier} states the wrong contract`);
   }
 });
 
@@ -295,10 +293,10 @@ test("what is published is the contract this compiler emits, not the author's de
   // produced them. Publishing the author's number instead would let an app claim a contract its
   // documents do not honour, under a version a reader believes.
   const declared = AuthoredAppZ.parse({ ...authored(), protocol: "1.0.0" });
-  assert.equal(projectApp(declared, [], STAMP, null).config.protocol, BASE_PROTOCOL);
+  assert.equal(projectApp(declared, [], STAMP, null).config.protocol, APP_PROTOCOL);
   // And the other direction, which is the one the floor makes tempting: an author who names a
   // contract they use nothing from has not made their app need a newer reader, so the documents
   // must not say they do — the stamp is a statement about the documents.
-  const asked = AuthoredAppZ.parse({ ...authored(), protocol: UID_FIELD_PROTOCOL });
-  assert.equal(projectApp(asked, [], STAMP, null).config.protocol, BASE_PROTOCOL);
+  const asked = AuthoredAppZ.parse({ ...authored(), protocol: "1.0.0" });
+  assert.equal(projectApp(asked, [], STAMP, null).config.protocol, APP_PROTOCOL);
 });

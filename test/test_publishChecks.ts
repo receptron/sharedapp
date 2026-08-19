@@ -1257,7 +1257,6 @@ test("an enum comparison is a string, and publish does not convert one for the r
 /** The board, as it publishes: one claim per task, taken by whoever is signed
  *  in, given back by them alone. */
 const boardDraft = (): Record<string, unknown> => ({
-  protocol: "1.1.0",
   collections: { claims: { submitOnly: true, statusField: "status", transitions: { initial: ["doing"], doing: ["done"] } } },
   public: {
     enabled: true,
@@ -1309,31 +1308,19 @@ test("uidField binds the record to its submitter, so the collection needs submit
   );
 });
 
-test("an app declaring uidField states the protocol floor its publisher needs", () => {
-  // Not decoration, and not about the reader — a reader that predates the key
-  // refuses this projection on its own (submit/form consistency). This is about
-  // the WRITING side: an old build of the compiler drops the key it does not
-  // know and publishes a collection where the uid is bound to nobody and anyone
-  // may write anyone's. The floor is what makes it stop on the number instead.
+test("declaring uidField needs no protocol floor, because a build that lacks the key stops sooner", () => {
+  // It used to require `protocol: "1.1.0"`. Removed after measuring what an older build does with
+  // this declaration: `SubmitZ` is `.strict()`, so it answers `Unrecognized key: "uidField"` —
+  // before any version is compared, and identically whether or not a floor was declared. A floor
+  // that changes nothing is friction taught to every author of a board.
+  assert.deepEqual(board(), []);
+  // And the floor mechanism is still there for the change a schema cannot see — a key whose
+  // MEANING moves. Naming a contract this build does not implement is refused, floor or no floor.
   refuses(
     board((draft) => {
-      delete draft.protocol;
+      draft.protocol = "1.1.0";
     }),
-    'needs `protocol: "1.1.0"`',
-  );
-  refuses(
-    board((draft) => {
-      draft.protocol = "1.0.0";
-    }),
-    'needs `protocol: "1.1.0"`',
-  );
-  // A floor is the version the feature landed in, not a number near it: 1.0.9 is
-  // a build that predates the key just as much as 1.0.0 does.
-  refuses(
-    board((draft) => {
-      draft.protocol = "1.0.9";
-    }),
-    'needs `protocol: "1.1.0"`',
+    "this publisher writes 1.0.0",
   );
 });
 
