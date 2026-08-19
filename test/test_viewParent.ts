@@ -243,3 +243,96 @@ test("an ask nobody is waiting on is not answered, and an unrecognised one is", 
   await settle();
   assert.equal(far.posted.at(-1)?.error, UNSUPPORTED_REQUEST);
 });
+
+test("a submit port that throws SYNCHRONOUSLY still answers, and still reports", async () => {
+  // `.catch()` alone reaches a rejected promise and not an exception thrown on the way to returning
+  // one. Without this the throw left `accept` altogether: `sending` stayed true, the dialog stayed
+  // open over a write nobody could retry, the page's promise never settled, and the host was told
+  // nothing. Every other port in this file was already written the careful way; this one was not.
+  const far = fakeChannel();
+  const defects: (string | null)[] = [];
+  const cell = cells();
+  const parent = opened(
+    {
+      state: () => ({}),
+      submit: () => {
+        throw new Error("the host blew up before it returned a promise");
+      },
+      defect: (_error, requestId) => defects.push(requestId),
+    },
+    far,
+    cell,
+  );
+  far.send(ASKS[0].message);
+  await settle();
+  await parent.accept();
+  await settle();
+
+  assert.deepEqual(cell.pending.value, null, "the confirmation must not be left open");
+  assert.equal(cell.sending.value, false, "and it must not be left disabled");
+  // The RESULT, not the last message: the state is re-sent behind it, because as far as this parent
+  // knows the write may have landed before the host threw.
+  const answered = far.posted.find((message) => message.type === VIEW_MESSAGE.result);
+  assert.equal(answered?.requestId, "r-submit");
+  assert.equal(answered?.ok, false);
+  assert.deepEqual(defects, ["r-submit"], "the host's own bug is reported, after the view is answered");
+});
+
+test("a write that lands after a restart answers its OWN page, and settles nobody else's", async () => {
+  // A view is republished, or the reader navigates, while a write is in flight. The cells are the
+  // host's and `restart()` clears them — so by the time the write resolves, the confirmation they
+  // hold may be a DIFFERENT visitor's, on a different page, on a different channel.
+  //
+  // Settling unconditionally closed that one: the dialog vanished under their cursor and their own
+  // request was never answered. Answering on `open` posted the old request's result to a page that
+  // never made it.
+  const first = fakeChannel();
+  const second = fakeChannel();
+  let next = first;
+  const cell = cells();
+  // Assigned inside the promise executor, and the executor runs synchronously — so by the time the
+  // write is awaited this is the real `resolve`. Initialised rather than left null because control
+  // flow cannot see that from here, and a test that silently skipped the release would pass by
+  // never testing anything.
+  let release: (outcome: { ok: boolean }) => void = () => {
+    throw new Error("the write was released before it started");
+  };
+  const parent = viewParent(
+    {
+      channel: () => next.channel,
+      state: () => ({}),
+      submit: () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+      defect: () => {},
+    },
+    () => config,
+    () => NONCE,
+    cell,
+  );
+  parent.receive(ready);
+  first.send({ nonce: NONCE });
+  first.posted.length = 0;
+  first.send(ASKS[0].message);
+  await settle();
+  const writing = parent.accept();
+
+  // The page goes. A new one arrives, asks for its own write, and is waiting on its own dialog.
+  parent.restart();
+  next = second;
+  parent.receive(ready);
+  second.send({ nonce: NONCE });
+  second.posted.length = 0;
+  second.send({ type: VIEW_MESSAGE.submit, requestId: "r-second", cid: "bookings", values: { note: "y" } });
+  await settle();
+  assert.equal(cell.pending.value?.requestId, "r-second", "the new page's confirmation is open");
+
+  release({ ok: true });
+  await writing;
+  await settle();
+
+  assert.equal(cell.pending.value?.requestId, "r-second", "and it is still open afterwards");
+  assert.deepEqual([...second.posted], [], "nothing from the old write reaches the new page");
+  assert.equal(first.posted.at(-1)?.requestId, "r-submit", "the page that asked is answered on its own channel");
+});

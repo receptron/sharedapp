@@ -45,17 +45,7 @@ export { viewBridge, type BridgeCells, type BridgePorts, type Channel, type Sign
 // intent against a record that exists, not a stranger's proposal; see
 // `memberBridge.ts`.
 export { HOST_ERROR, UNSUPPORTED_REQUEST, memberBridge, refuseEverything, type MemberBridgePorts, type PerformIntent } from "./memberBridge.js";
-export {
-  capabilityOf,
-  capabilitiesFor,
-  mayTransition,
-  PUBLIC_WRITE_TIER,
-  publicViewerFor,
-  viewerFor,
-  type ViewCapability,
-  type Viewer,
-  type WriteTier,
-} from "./capability.js";
+export { capabilityOf, capabilitiesFor, mayTransition, PUBLIC_WRITE_TIER, viewerFor, type ViewCapability, type Viewer, type WriteTier } from "./capability.js";
 // THE ONE PARENT. `viewBridge` and `memberBridge` above are adapters onto it, kept because
 // published hosts call them; anything wired now takes this, which is the only shape that reaches
 // every port — `perform` and `viewer` on a public page, `mine` and `submit` on a member's.

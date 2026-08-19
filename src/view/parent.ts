@@ -125,8 +125,12 @@ export interface ViewParentPorts {
    *  OPTIONAL, and a host that omits it says nothing about the reader rather than saying the reader
    *  may do nothing — which is why it is omitted from the message entirely rather than sent as
    *  `{ me: null, can: {} }`. A page reading a `can` that is not there draws no controls; a page
-   *  reading one that is there and empty draws none either, but the second is a CLAIM. */
-  viewer?: (() => Viewer) | undefined;
+   *  reading one that is there and empty draws none either, but the second is a CLAIM.
+   *
+   *  A GETTER that may itself answer `undefined`, like `mine`: a host holding this in a reactive
+   *  prop has a moment before the projection has been read, and "not yet" says the same thing as
+   *  "this host does not say" — neither of which is "you may do nothing". */
+  viewer?: (() => Viewer | undefined) | undefined;
   /** THE VISITOR'S OWN ROWS, per collection — what they have already submitted through this page,
    *  projected by the host to the fields a page in this position could have SENT.
    *
@@ -398,18 +402,44 @@ export const viewParent = (ports: ViewParentPorts, config: () => ViewSubmitConfi
       return;
     }
     sending.value = true;
-    // A THROW here is the dangerous case, not a failed write: the write may already have succeeded
-    // and the refresh that follows it may be what failed. Without this the confirmation would stay
-    // open and disabled forever, over a booking that went through.
-    const outcome = await write(request).catch((err: unknown) => {
-      ports.defect(err, request.requestId);
-      return { ok: false, error: messageOf(err) };
-    });
-    settle();
-    answer(request.requestId, outcome.ok, outcome.error);
+    // THE CHANNEL THIS CONFIRMATION BELONGS TO, taken before the await rather than read after it.
+    // `restart()` can happen while a write is in flight — the host published a new view, or the
+    // reader navigated — and `open` is then somebody else's channel. Answering on it would post the
+    // OLD request's result to a page that never made it.
+    const channel = open;
+    // A THROW is the dangerous case, not a failed write: the write may already have succeeded and
+    // the refresh that follows it may be what failed. Without this the confirmation would stay open
+    // and disabled forever, over a booking that went through.
+    //
+    // Called INSIDE a promise so a host that throws SYNCHRONOUSLY is caught here too — `.catch()`
+    // alone reaches only a rejection, and a `submit` port that threw on its way to returning a
+    // promise took the exception straight out of `accept`, leaving `sending` true, the dialog open
+    // over a write nobody could retry, and the page's promise unsettled. The lookup path was
+    // written this way from the start; this one was not.
+    const outcome = await Promise.resolve()
+      .then(() => write(request))
+      .catch((err: unknown) => {
+        ports.defect(err, request.requestId);
+        return { ok: false, error: messageOf(err) };
+      });
+    // STILL THE ONE ON SCREEN? A restart during the write clears the cells, and a new page may have
+    // opened a confirmation of its own since. Settling unconditionally would close THAT one — the
+    // new visitor's dialog vanishing under their cursor, their own request left unanswered for ever
+    // — over a write that belongs to a page nobody is looking at.
+    const current = pending.value === request;
+    if (current) {
+      settle();
+    }
+    // ANSWERED EITHER WAY, and on the channel it arrived on. Somebody was waiting on that promise
+    // and the write really happened; if that document has gone, its port is closed and the post is
+    // a no-op. What must not happen is the answer landing on the page that replaced it.
+    channel?.post({ type: VIEW_MESSAGE.result, requestId: request.requestId, ok: outcome.ok, error: outcome.error });
     // Either it took something or it learned somebody else had; both make the view's picture older
-    // than the truth.
-    sendState();
+    // than the truth. Only for the view that asked: a page that replaced it gets its own state on
+    // its own handshake, and is holding nothing this write made older.
+    if (current) {
+      sendState();
+    }
   };
 
   const decline = () => {

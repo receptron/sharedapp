@@ -206,14 +206,17 @@ export const viewerFor = (write: ProjectedViewWrite[], address: string | null, t
  *  MulmoTerminal's preview of it) must not be able to disagree about it. */
 export const PUBLIC_WRITE_TIER: WriteTier = "roster";
 
-/** The `viewer` a PUBLIC page is handed.
+/** NOTE ON `me` FOR A PUBLIC PAGE: it is the signed-in address when there is one and null when
+ *  there is not, which is the same rule every other page follows. A public visitor may hold an
+ *  anonymous session, which has a uid and no address at all — so null is a real answer here rather
+ *  than an edge case, and nothing on this tier reads it: `capabilityOf`'s roster branch answers
+ *  from the declaration alone.
  *
- *  `me` is null and that is not a gap. It is an ADDRESS everywhere else — the value `assigneeField`
- *  is compared against — and a public visitor may have signed in anonymously, so there may be no
- *  address to give. Nothing on this tier reads it: `capabilityOf`'s roster branch answers from the
- *  declaration alone. Which rows are the reader's own is answered by `viewer.mine` and
- *  `view.mine(cid, key)`, which are reads against the reader's own credentials rather than a
- *  comparison the page performs — and that is the honest way round, because the rules identify an
- *  own row by the uid or the verified address on the record, neither of which a page can be trusted
- *  to hold. */
-export const publicViewerFor = (write: ProjectedViewWrite[]): Viewer => viewerFor(write, null, PUBLIC_WRITE_TIER);
+ *  Which rows are the reader's own is answered by `viewer.mine` and `view.mine(cid, key)` — reads
+ *  made against the reader's own credentials — rather than by a comparison the page performs. That
+ *  is the honest way round: the rules identify an own row by the uid or the verified address ON THE
+ *  RECORD, neither of which a page can be trusted to hold.
+ *
+ *  There is deliberately no `publicViewerFor` wrapper. Every host builds this the one way —
+ *  `viewerFor(writes, address, PUBLIC_WRITE_TIER)` — because a second entry point is a second place
+ *  for the two hosts to disagree, which is the thing this module exists to prevent. */
