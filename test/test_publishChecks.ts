@@ -1390,3 +1390,56 @@ test("a participant view reaches a collection scoped by uidField", () => {
     [],
   );
 });
+
+// --- two system bindings on one field ---------------------------------------
+
+test("refuses one field claimed by two of the bindings the host fills in", () => {
+  // Nothing is misspelt: each key is individually correct, each check that looks at one of them
+  // passes, and the runtime writes the field twice — so the surviving value depends on the order
+  // `recordOf` happens to use. The rules require both, and every create is denied.
+  refuses(
+    board((draft) => {
+      claimOf(draft).stampField = "uid";
+      claimOf(draft).createFields = ["taskId", "name", "uid", "status"];
+    }),
+    "points uidField and stampField at the same field 'uid'",
+  );
+  // The pairs that predate uidField are the same mistake and were equally silent.
+  refuses(
+    board((draft) => {
+      claimOf(draft).emailField = "uid";
+    }),
+    "points emailField and uidField at the same field 'uid'",
+  );
+  refuses(
+    board((draft) => {
+      claimOf(draft).uidField = "status";
+      claimOf(draft).createFields = ["taskId", "name", "status"];
+    }),
+    "at the same field 'status'",
+  );
+});
+
+test("a field claimed three times is one line naming all three", () => {
+  // Per field rather than per pair: three lines saying the same thing about one field is three
+  // round trips to fix one mistake, and publish is a manual step with a person waiting.
+  const problems = board((draft) => {
+    claimOf(draft).emailField = "uid";
+    claimOf(draft).stampField = "uid";
+  });
+  refuses(problems, "points emailField and uidField and stampField at the same field 'uid'");
+  assert.equal(problems.filter((problem) => problem.includes("at the same field")).length, 1);
+});
+
+test("the same names in different collections are not a collision", () => {
+  // The acceptance half. Every app here calls its stamp `createdAt`; the check is about one
+  // declaration pointing two bindings at one field, not about a name being popular.
+  const draft = boardDraft();
+  (draft.collections as Record<string, Record<string, unknown>>).notes = { submitOnly: true };
+  ((draft.public as Record<string, unknown>).submit as Record<string, unknown>).notes = {
+    auth: "verifiedEmail",
+    uidField: "uid",
+    createFields: ["body", "uid"],
+  };
+  assert.deepEqual(publishProblems(app(draft), [...CLAIM_CIDS, { cid: "notes", primaryKey: "id" }], OWNER), []);
+});

@@ -693,6 +693,7 @@ export function publishProblems(app: AuthoredApp, collections: readonly Publisha
     ...primaryKeyProblems(app, collections),
     ...assigneeProblems(app),
     ...stampProblems(app),
+    ...systemBindingProblems(app),
     ...systemFieldProblems(app),
     ...windowRefProblems(app, collections),
     ...idTargetProblems(app, collections),
@@ -793,6 +794,50 @@ function stampProblems(app: AuthoredApp): string[] {
       );
     }
     return problems;
+  });
+}
+
+/** TWO SYSTEM BINDINGS ON ONE FIELD.
+ *
+ *  Four keys make the host write a field rather than the visitor: `emailField` (the account's
+ *  address), `uidField` (the account's uid), the `statusField` under an `initialStatus`, and
+ *  `stampField` (the server's clock). Name the same field twice and the declaration asks for two
+ *  different values in one place — which is not a contradiction anything reports, because each key
+ *  is individually correct and each check that looks at one of them passes.
+ *
+ *  What happens instead is that the host writes one value over the other (`recordOf` fills them in
+ *  a fixed order, so the loser depends on that order rather than on anything an author decided) and
+ *  the rules require BOTH: `uidOk` compares the field with `request.auth.uid`, `stampOk` with
+ *  `request.time`. Every create is denied, on a declaration where nothing was misspelt.
+ *
+ *  Reported per field rather than per pair, and with the bindings sorted, so a field claimed three
+ *  times is one line naming all three. */
+function systemBindingProblems(app: AuthoredApp): string[] {
+  return Object.entries(app.public?.submit ?? {}).flatMap(([cid, submit]) => {
+    const statusField = app.collections?.[cid]?.statusField;
+    const claims: { field: string | undefined; by: string; writes: string }[] = [
+      { field: submit.emailField, by: `emailField`, writes: "the submitter's verified address" },
+      { field: submit.uidField, by: `uidField`, writes: "the submitter's uid" },
+      {
+        field: submit.initialStatus === undefined ? undefined : statusField,
+        by: `initialStatus (collections.${cid}.statusField)`,
+        writes: `"${submit.initialStatus}"`,
+      },
+      { field: submit.stampField, by: `stampField`, writes: "the server's clock" },
+    ];
+    const byField = new Map<string, { by: string; writes: string }[]>();
+    for (const claim of claims) {
+      if (claim.field === undefined) continue;
+      byField.set(claim.field, [...(byField.get(claim.field) ?? []), { by: claim.by, writes: claim.writes }]);
+    }
+    return [...byField.entries()]
+      .filter(([, holders]) => holders.length > 1)
+      .map(
+        ([field, holders]) =>
+          `public.submit.${cid} points ${holders.map((holder) => holder.by).join(" and ")} at the same field '${field}', and each of them writes something different ` +
+          `(${holders.map((holder) => holder.writes).join(", ")}). The host fills it in twice and one value survives; the rules require all of them, so every submission is refused ` +
+          `with nothing misspelt anywhere. Give each binding its own field.`,
+      );
   });
 }
 
