@@ -1,17 +1,5 @@
-import {
-  isReady,
-  isRecord,
-  readLookupMessage,
-  readNotice,
-  readSubmitMessage,
-  type LookupAsk,
-  type PendingSubmit,
-  type SubmitRead,
-  type ViewDataset,
-  type ViewNotice,
-  type ViewSubmitConfig,
-} from "./message.js";
-import { VIEW_MESSAGE } from "./protocol.js";
+import type { LookupAsk, PendingSubmit, ViewDataset, ViewNotice, ViewSubmitConfig } from "./message.js";
+import { viewParent } from "./parent.js";
 
 // The parent's side of the conversation with a sandboxed view.
 //
@@ -53,11 +41,6 @@ export interface BridgeCells {
   /** The document in the frame has answered on the channel. */
   readied: Signal<boolean>;
 }
-
-/** The error, as a string, without deciding what to do about it. Kept private
- *  and tiny rather than shared: every host already has this three-line function
- *  under its own name, and exporting a second one only invites a rename. */
-const messageOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 /** What a bridge does to the world: answer the frame, and write a record. Both
  *  injected, for the reason above. */
@@ -155,285 +138,47 @@ export interface BridgePorts {
    *  What arrives has a code from a FIXED list and a bounded `detail` that the
    *  PAGE wrote (see `ViewNotice`). It is not the parent's word. */
   notice?: ((notice: ViewNotice) => void) | undefined;
+  /** Where a defect of the HOST'S OWN goes — a port that rejected, or threw before it returned a
+   *  promise.
+   *
+   *  OPTIONAL HERE and required on `ViewParentPorts`, which is the difference between a shape that
+   *  already shipped and one being written now: a host calling this adapter was compiled before the
+   *  hook existed, and making it required would break the callers this adapter exists for. Left
+   *  out, such a defect is dropped exactly as it always was. */
+  defect?: ((error: unknown, requestId: string | null) => void) | undefined;
 }
 
-/** Why this message will not become a confirmation, or null when it will.
+/** The public page's parent, as it has always been called.
  *
- *  `busy` is the one that is not about the message: a second request while a
- *  confirmation is open would swap the values under the visitor's cursor, so
- *  the click they are about to make would land on a different write. */
-const refusalFor = (read: SubmitRead, open: boolean): { requestId: string; reason: string } | null => {
-  if (!read.ok) {
-    return { requestId: read.requestId, reason: read.reason };
-  }
-  if (open) {
-    return { requestId: read.pending.requestId, reason: "busy" };
-  }
-  return null;
-};
-
-/** The state message, as the two send sites build it identically.
+ *  AN ADAPTER NOW, and nothing else: everything it used to do lives in `parent.ts`, which answers
+ *  the whole vocabulary instead of the half a public page was assumed to speak. The name and the
+ *  port shape are kept because published hosts call them; new wiring should take `viewParent`
+ *  directly, which is the only way to reach `perform` and `viewer`.
  *
- *  `viewer` is omitted rather than sent empty when the host offers no `mine`.
- *  The bootstrap hands the second argument to `onState` either way, so an empty
- *  object would reach a page as "you have submitted nothing" — which is a
- *  different statement from "this host does not know", and the wrong one to
- *  make up. */
-const stateMessage = (ports: BridgePorts) => {
-  const mine = ports.mine?.();
-  const collections = ports.state();
-  if (mine === undefined) {
-    return { type: VIEW_MESSAGE.state, collections };
-  }
-  return { type: VIEW_MESSAGE.state, collections, viewer: { mine } };
-};
-
-/** Answering the frame: the two messages the parent sends, and the rule that
- *  state is only ever sent to a view that asked for it once. */
-const replies = (ports: BridgePorts, nonce: () => string, readied: Signal<boolean>) => {
-  /** The channel, once the document that received it has answered on it. */
-  let open: Channel | null = null;
-  /** Offered and not yet answered. Kept so a second `ready` does not offer
-   *  another one — a frame that navigated keeps answering to `event.source`. */
-  let offered: Channel | null = null;
-
-  const answer = (requestId: string, ok: boolean, error?: string) => {
-    open?.post({ type: VIEW_MESSAGE.result, requestId, ok, error });
-  };
-
-  /** The answer to a `lookup`. Its own message name, because `{ known, found }`
-   *  answers a different question from `{ ok, error }` and a page settling one
-   *  as the other would read "not found" as "refused". */
-  const answerLookup = (requestId: string, found: { known: boolean; found: boolean; record?: Record<string, unknown> }) => {
-    open?.post({ type: VIEW_MESSAGE.lookupResult, requestId, ...found });
-  };
-
-  const sendState = () => {
-    // Nothing before the document has answered on the channel — and the channel
-    // belongs to the document that answered, so nothing reaches one that
-    // replaced it.
-    if (!readied.value) {
-      return;
-    }
-    open?.post(stateMessage(ports));
-  };
-
-  /** A `ready` whose nonce checked out. The reply is the CHANNEL and nothing
-   *  else; the data waits for an answer on it. */
-  const greet = (onRequest: (data: unknown) => void) => {
-    if (readied.value || offered !== null) {
-      return;
-    }
-    const channel = ports.channel();
-    offered = channel;
-    channel.onMessage((data) => {
-      if (!isRecord(data)) {
-        return;
-      }
-      // The window carries exactly ONE thing this page acts on — `ready` — and
-      // everything the view ASKS for arrives here, because the injected bridge
-      // sends on the port from the moment it has one. Routing it was missing:
-      // the handshake was answered and every submission after it was dropped,
-      // so the visitor's page sat on a promise that never settled and no
-      // confirmation was ever drawn. Nothing said so; a submit is a request
-      // with no timeout.
-      if (open === channel) {
-        onRequest(data);
-        return;
-      }
-      // The name only the injected document knows, echoed on the port it was
-      // handed. A document that merely INHERITED the frame cannot send it.
-      if (data.nonce !== nonce()) {
-        return;
-      }
-      open = channel;
-      readied.value = true;
-      channel.post(stateMessage(ports));
-    });
-  };
-
-  /** A new view was published, or the page moved to another app. The frame is
-   *  replaced, so the conversation starts again: the next `ready` is a real
-   *  first one and must be answered, or the new view sits there with no data.
-   *  The previous channel is closed — whatever holds its far end is a document
-   *  we are no longer talking to. */
-  const forget = () => {
-    offered?.close();
-    open = null;
-    offered = null;
-    readied.value = false;
-  };
-
-  return { answer, answerLookup, sendState, greet, forget };
-};
-
-/** Everything that arrives FROM the frame, both ways in.
- *
- *  The window carries exactly one thing this page acts on — `ready` — and the
- *  port carries every request the view makes after it, because the injected
- *  bridge sends on the port from the moment it has one. So the same dispatch is
- *  handed to `greet`, and a submission is read the same way whichever door it
- *  came through. Routing the port was missing: the handshake was answered and
- *  every submission after it was dropped, leaving the visitor's page on a
- *  promise that never settled and no confirmation drawn — a submit has no
- *  timeout, so nothing anywhere said so. */
-const incoming = (deps: {
-  nonce: () => string;
-  config: () => ViewSubmitConfig | null;
-  pending: Signal<PendingSubmit | null>;
-  answer: (requestId: string, ok: boolean, error?: string) => void;
-  /** Settle a lookup the page is waiting on, in the shape a lookup is answered
-   *  in. Separate from `answer` because a refusal must not arrive as one:
-   *  see `dispatch`. */
-  answerLookup: (requestId: string, found: { known: boolean; found: boolean }) => void;
-  look: (ask: LookupAsk) => void;
-  greet: (onRequest: (data: unknown) => void) => void;
-  notice: (notice: ViewNotice) => void;
-}) => {
-  /** A submission the frame sent, once it is known to be one. */
-  const offer = (read: SubmitRead) => {
-    const refusal = refusalFor(read, deps.pending.value !== null);
-    if (refusal === null && read.ok) {
-      deps.pending.value = read.pending;
-      return;
-    }
-    // A refusal with a request id is an authoring mistake in the HTML; one
-    // without is not a submission at all, and answering it would be answering
-    // something nobody asked.
-    if (refusal !== null && refusal.requestId !== "") {
-      deps.answer(refusal.requestId, false, refusal.reason);
-    }
-  };
-  /** A read the page asked for, or a refusal it can act on.
-   *
-   *  Judged BEFORE the message is read as a submission: the two are told apart
-   *  by their type, and a lookup put through `readSubmitMessage` would come back
-   *  as "not a submission" and be answered by nobody — a promise the page waits
-   *  on forever, which is the failure mode a read has no timeout to escape. */
-  const dispatch = (data: unknown) => {
-    const asked = readLookupMessage(data, deps.config());
-    if (asked.ok) {
-      deps.look(asked.ask);
-      return;
-    }
-    if (asked.reason !== "not-a-lookup") {
-      // ANSWERED AS A LOOKUP, not as a result. The page is waiting in `mine()`,
-      // which settles on `lookupResult` and reads `{ known, found }`; a
-      // `result` carrying `{ ok: false }` reaches it with no `known` at all,
-      // which is the shape a page cannot tell apart from "nobody looked" — so
-      // an author's mistake in the HTML arrived as the parent's silence. Both
-      // refusals here mean the same thing to the page: nothing was read, so
-      // nothing is known. WHY it was refused belongs to the author, and a
-      // published page has no use for it.
-      deps.answerLookup(asked.requestId, { known: false, found: false });
-      return;
-    }
-    offer(readSubmitMessage(data, deps.config()));
-  };
-  /** A message that has already been proven to come from our frame. */
-  return (data: unknown) => {
-    // BEFORE the handshake is even considered, because the notices that matter
-    // most arrive before it: a page whose script throws while the document is
-    // being parsed never reaches `ready()`, and that page — stuck on its
-    // loading state, with the reason inside the frame — is the one an author
-    // cannot otherwise diagnose. Read first, too, or `dispatch` would judge a
-    // notice as a submission and answer nobody.
-    const notice = readNotice(data, deps.nonce());
-    if (notice !== null) {
-      deps.notice(notice);
-      return;
-    }
-    if (isReady(data, deps.nonce())) {
-      deps.greet(dispatch);
-      return;
-    }
-    dispatch(data);
-  };
-};
-
+ *  ONE BEHAVIOUR CHANGED on the way through, deliberately: a request posted on the WINDOW is no
+ *  longer acted on. Only the handshake and a notice are, and everything a page asks for travels on
+ *  the private channel — which the bootstrap guarantees by holding its outbox until it has one. The
+ *  member parent already worked that way; this is the stricter of the two rules, so it is the one
+ *  that survived. */
 export const viewBridge = (ports: BridgePorts, config: () => ViewSubmitConfig | null, nonce: () => string, cells: BridgeCells) => {
-  const { pending, sending } = cells;
-  const { answer, answerLookup, sendState, greet, forget } = replies(ports, nonce, cells.readied);
-
-  /** Answer "have I already got this row?" — with a READ, and never with a guess.
-   *
-   *  Three outcomes and only one of them is "no": the host offers no port
-   *  (nobody looked), the read threw (nobody knows), or the read came back. The
-   *  first two are `known: false`, because a page told "no" stops offering the
-   *  action to somebody entitled to it — and that is the bug this whole port
-   *  exists to fix, arriving from the other direction. */
-  const look = async (ask: LookupAsk) => {
-    const port = ports.lookup;
-    if (port === undefined) {
-      answerLookup(ask.requestId, { known: false, found: false });
-      return;
-    }
-    // Called inside a promise so a host that throws SYNCHRONOUSLY is caught here too. Without it
-    // the throw escapes `look` as an unhandled rejection and the page is never answered — the same
-    // hang as an unroutable message, arriving from the host's side.
-    const found = await Promise.resolve()
-      .then(() => port(ask))
-      .catch(() => null);
-    if (found === null) {
-      answerLookup(ask.requestId, { known: false, found: false });
-      return;
-    }
-    // Spread rather than naming `record`: `exactOptionalPropertyTypes` is on, and an explicit
-    // `record: undefined` is a different thing from a key that was never there.
-    answerLookup(ask.requestId, { known: true, ...found });
-  };
-
-  /** One place where a confirmation stops being open, so the two refs cannot
-   *  drift apart. */
-  const settle = () => {
-    sending.value = false;
-    pending.value = null;
-  };
-
-  const receive = incoming({ nonce, config, pending, answer, answerLookup, look, greet, notice: (report) => ports.notice?.(report) });
-
-  const accept = async () => {
-    const request = pending.value;
-    if (request === null || sending.value) {
-      return;
-    }
-    sending.value = true;
-    // A THROW here is the dangerous case, not a failed write: the write may
-    // already have succeeded and the refresh that follows it may be what
-    // failed. Without this the confirmation would stay open and disabled
-    // forever, over a booking that went through.
-    const outcome = await ports.submit(request).catch((err: unknown) => ({ ok: false, error: messageOf(err) }));
-    settle();
-    answer(request.requestId, outcome.ok, outcome.error);
-    // Either it took something or it learned somebody else had; both make the
-    // view's picture older than the truth.
-    sendState();
-  };
-
-  const decline = () => {
-    // NOT while a write is in flight. The buttons are disabled then, but
-    // Escape is not a button: cancelling here would answer the view
-    // "cancelled" while the record is still being written, and a booking that
-    // then succeeds would have been reported as declined. There is no way to
-    // recall a Firestore write, so the honest thing is to make the visitor
-    // wait for the answer they already asked for.
-    const request = pending.value;
-    if (request === null || sending.value) {
-      return;
-    }
-    settle();
-    answer(request.requestId, false, "cancelled");
-  };
-
-  /** Everything that belongs to ONE rendered view. Called when the HTML is
-   *  replaced: a confirmation still open refers to a page the visitor can no
-   *  longer see, and the `ready` count belongs to the frame that is going. */
-  const restart = () => {
-    settle();
-    forget();
-  };
-
-  // The cells are NOT returned. The host made them and already holds them;
-  // handing them back would only invite a second name for one cell.
+  const parent = viewParent(
+    {
+      channel: ports.channel,
+      state: ports.state,
+      // `exactOptionalPropertyTypes` is on: an explicit `undefined` is a different thing from a key
+      // that was never there, and `ViewParentPorts` distinguishes them.
+      ...(ports.mine === undefined ? {} : { mine: ports.mine }),
+      ...(ports.lookup === undefined ? {} : { lookup: ports.lookup }),
+      ...(ports.notice === undefined ? {} : { notice: ports.notice }),
+      submit: ports.submit,
+      // The old shape had nowhere to put a defect of the host's own, which is exactly what
+      // `ViewParentPorts.defect` is required for. A caller that wants it takes `viewParent`.
+      defect: ports.defect ?? (() => {}),
+    },
+    config,
+    nonce,
+    cells,
+  );
+  const { receive, accept, decline, sendState, restart } = parent;
   return { receive, accept, decline, sendState, restart };
 };

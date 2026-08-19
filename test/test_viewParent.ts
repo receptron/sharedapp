@@ -1,0 +1,245 @@
+// ONE PARENT, and the property that made it worth merging two: every ask is ANSWERED on every
+// page.
+//
+// The bug this file exists to keep out is not a wrong answer — it is no answer. A page's `submit`,
+// `transition`, `assign`, `withdraw` and `mine` all return promises with no timeout, so a parent
+// that drops one leaves a button that does nothing and nothing anywhere that says why. That is what
+// the two old parents did to each other's half of the vocabulary: an intent posted to the public
+// page was read as "not a submission" with no request id and dropped, and a submission posted to a
+// member page came back `unsupported-request` however the app was declared.
+//
+// So the table below is the test. Every ask, against a host that serves nothing, and against a host
+// that serves everything — and the assertion in both columns is that SOMETHING came back, addressed
+// to the request that was made.
+
+import { test } from "node:test";
+import assert from "node:assert/strict";
+
+import { viewParent, HOST_ERROR, READ_ONLY, UNSUPPORTED_REQUEST, type ViewParentPorts } from "../src/view/parent.js";
+import { VIEW_MESSAGE } from "../src/view/protocol.js";
+import type { BridgeCells, Channel } from "../src/view/bridge.js";
+import type { ViewSubmitConfig } from "../src/view/message.js";
+
+const NONCE = "nonce-1";
+const ready = { type: VIEW_MESSAGE.ready, nonce: NONCE };
+
+const cells = (): BridgeCells => ({ pending: { value: null }, sending: { value: false }, readied: { value: false } });
+
+const fakeChannel = () => {
+  const posted: Record<string, unknown>[] = [];
+  let handler: ((data: unknown) => void) | null = null;
+  const channel: Channel = {
+    post: (message) => posted.push(message as Record<string, unknown>),
+    onMessage: (fn) => {
+      handler = fn;
+    },
+    close: () => {},
+  };
+  return { channel, posted, send: (data: unknown) => handler?.(data) };
+};
+
+/** Let every port's promise chain finish. A lookup settles through two `then`s, an intent through
+ *  one, and a test that awaited a fixed number of them would pass or fail on that count rather than
+ *  on the behaviour. */
+const settle = async () => {
+  for (let turn = 0; turn < 8; turn += 1) {
+    await Promise.resolve();
+  }
+};
+
+const config: ViewSubmitConfig = { submit: { bookings: { createFields: ["note"] } } };
+
+/** Every ask the bootstrap can make, each addressed to somebody waiting. */
+const ASKS = [
+  { name: "submit", message: { type: VIEW_MESSAGE.submit, requestId: "r-submit", cid: "bookings", values: { note: "x" } } },
+  { name: "lookup", message: { type: VIEW_MESSAGE.lookup, requestId: "r-lookup", cid: "bookings", key: "slot-1" } },
+  { name: "transition", message: { type: VIEW_MESSAGE.intent, requestId: "r-transition", kind: "transition", cid: "bookings", itemId: "i", to: "cancelled" } },
+  { name: "assign", message: { type: VIEW_MESSAGE.intent, requestId: "r-assign", kind: "assign", cid: "bookings", itemId: "i", to: "a@example.com" } },
+  { name: "withdraw", message: { type: VIEW_MESSAGE.intent, requestId: "r-withdraw", kind: "withdraw", cid: "bookings", itemId: "i" } },
+] as const;
+
+const opened = (ports: Omit<ViewParentPorts, "channel">, far: ReturnType<typeof fakeChannel>, cell = cells()) => {
+  const parent = viewParent(
+    { channel: () => far.channel, ...ports },
+    () => config,
+    () => NONCE,
+    cell,
+  );
+  parent.receive(ready);
+  far.send({ nonce: NONCE });
+  far.posted.length = 0; // the state message; not what these tests are about
+  return parent;
+};
+
+test("a host that serves nothing still answers every ask", async () => {
+  // The read-only page: no `submit`, no `perform`, no `lookup`. Every one of the five is refused BY
+  // NAME. Nothing is dropped — which is the whole difference between a disabled control and a
+  // broken one.
+  for (const ask of ASKS) {
+    const far = fakeChannel();
+    opened({ state: () => ({}), defect: () => {} }, far);
+    far.send(ask.message);
+    await settle();
+    const answer = far.posted.at(-1);
+    assert.equal(answer?.requestId, ask.message.requestId, `${ask.name} was dropped`);
+    if (ask.name === "lookup") {
+      // A lookup settles in its OWN shape. A `result` would reach `mine()` with no `known` on it,
+      // which a page cannot tell from "nobody looked" — and "no" is the one answer a parent must
+      // never make up.
+      assert.deepEqual(answer, { type: VIEW_MESSAGE.lookupResult, requestId: "r-lookup", known: false, found: false });
+      continue;
+    }
+    assert.equal(answer?.ok, false);
+    assert.equal(answer?.error, READ_ONLY, `${ask.name} should say the host writes nothing`);
+  }
+});
+
+test("a host that serves everything performs every ask, whatever page it is", async () => {
+  // The same five, on ONE parent with every port wired — which is the shape a public page and a
+  // member page now both get. The public page used to have no `perform` at all, so its three
+  // intents went nowhere; the member page had no `submit` and no `lookup`.
+  for (const ask of ASKS) {
+    const far = fakeChannel();
+    const parent = opened(
+      {
+        state: () => ({}),
+        submit: async () => ({ ok: true }),
+        lookup: async () => ({ found: true, record: { id: "slot-1" } }),
+        perform: () => async (data) => ({ requestId: (data as { requestId: string }).requestId, ok: true }),
+        defect: () => {},
+      },
+      far,
+    );
+    far.send(ask.message);
+    await settle();
+    if (ask.name === "submit") {
+      // A submission is a CONFIRMATION first, on every page: the ask kind decides that, not the
+      // audience. Nothing is posted until the host's dialog is answered.
+      assert.deepEqual([...far.posted], [], "a submission must not be written before it is accepted");
+      await parent.accept();
+      assert.equal(far.posted.at(-1)?.type, VIEW_MESSAGE.state, "the state is re-sent after a write");
+      assert.equal(far.posted.at(0)?.requestId, "r-submit");
+      assert.equal(far.posted.at(0)?.ok, true);
+      continue;
+    }
+    await settle();
+    const answer = far.posted.at(-1);
+    assert.equal(answer?.requestId, ask.message.requestId, `${ask.name} was dropped`);
+    if (ask.name === "lookup") {
+      assert.deepEqual(answer, { type: VIEW_MESSAGE.lookupResult, requestId: "r-lookup", known: true, found: true, record: { id: "slot-1" } });
+      continue;
+    }
+    assert.equal(answer?.ok, true);
+  }
+});
+
+test("the viewer carries both halves, and neither half is invented", () => {
+  // `mine` and `{ me, can }` used to belong to different parents, so a page could have one or the
+  // other. They travel together now — and a host offering neither sends no `viewer` key at all,
+  // because the bootstrap hands `data.viewer || {}` to `onState` and `{}` would reach the page as
+  // "you may do nothing and you have submitted nothing". Two claims a silent host has not made.
+  const both = fakeChannel();
+  viewParent(
+    {
+      channel: () => both.channel,
+      state: () => ({}),
+      viewer: () => ({
+        me: null,
+        can: { bookings: { cid: "bookings", transitionAny: true, transitionOwn: false, assign: false, assignees: [], withdrawFrom: ["pending"] } },
+      }),
+      mine: () => ({ bookings: [{ id: "b1" }] }),
+      defect: () => {},
+    },
+    () => config,
+    () => NONCE,
+    cells(),
+  ).receive(ready);
+  both.send({ nonce: NONCE });
+  const viewer = both.posted[0]?.viewer as Record<string, unknown>;
+  assert.equal(viewer.me, null);
+  assert.deepEqual(viewer.mine, { bookings: [{ id: "b1" }] });
+  assert.equal((viewer.can as Record<string, { transitionAny: boolean }>).bookings?.transitionAny, true);
+
+  const neither = fakeChannel();
+  viewParent(
+    { channel: () => neither.channel, state: () => ({}), defect: () => {} },
+    () => config,
+    () => NONCE,
+    cells(),
+  ).receive(ready);
+  neither.send({ nonce: NONCE });
+  assert.equal(Object.hasOwn(neither.posted[0] ?? {}, "viewer"), false);
+});
+
+test("only the handshake and a notice are acted on from the WINDOW", async () => {
+  // Everything a page asks for travels on the private channel — the bootstrap holds its outbox
+  // until it has one — so an ask arriving on the window is not our document's. The public parent
+  // used to route the window through the same dispatch as the port; this is the stricter of the two
+  // old rules, and the one that survived.
+  const far = fakeChannel();
+  const notices: string[] = [];
+  const parent = viewParent(
+    { channel: () => far.channel, state: () => ({}), submit: async () => ({ ok: true }), notice: (n) => notices.push(n.code), defect: () => {} },
+    () => config,
+    () => NONCE,
+    cells(),
+  );
+  parent.receive(ready);
+  far.send({ nonce: NONCE });
+  far.posted.length = 0;
+  parent.receive({ type: VIEW_MESSAGE.submit, requestId: "r-window", cid: "bookings", values: { note: "x" } });
+  await settle();
+  assert.deepEqual([...far.posted], []);
+  parent.receive({ type: VIEW_MESSAGE.notice, nonce: NONCE, code: "error", detail: "boom" });
+  assert.deepEqual(notices, ["error"]);
+});
+
+test("a port that breaks answers the page first and tells the host second", async () => {
+  // Both directions of the same rule: the view is never left waiting on a host's own bug, and the
+  // bug is never swallowed. `defect` is required for exactly this.
+  const far = fakeChannel();
+  const defects: (string | null)[] = [];
+  opened(
+    {
+      state: () => ({}),
+      perform: () => () => Promise.reject(new Error("boom")),
+      lookup: () => Promise.reject(new Error("also boom")),
+      defect: (_error, requestId) => defects.push(requestId),
+    },
+    far,
+  );
+  far.send({ type: VIEW_MESSAGE.intent, requestId: "r-1", kind: "withdraw", cid: "bookings", itemId: "i" });
+  await settle();
+  assert.equal(far.posted.at(-1)?.error, HOST_ERROR);
+
+  far.send({ type: VIEW_MESSAGE.lookup, requestId: "r-2", cid: "bookings", key: "k" });
+  await settle();
+  // A failed READ is `known: false` — nobody looked — and never `found: false`, which would tell
+  // the visitor they have not answered.
+  assert.deepEqual(far.posted.at(-1), { type: VIEW_MESSAGE.lookupResult, requestId: "r-2", known: false, found: false });
+  assert.deepEqual(defects, ["r-1", "r-2"]);
+});
+
+test("an ask nobody is waiting on is not answered, and an unrecognised one is", async () => {
+  const far = fakeChannel();
+  const performed: unknown[] = [];
+  opened(
+    {
+      state: () => ({}),
+      perform: () => async (data) => {
+        performed.push(data);
+        return null;
+      },
+      defect: () => {},
+    },
+    far,
+  );
+  far.send({ hello: "there" });
+  await settle();
+  assert.deepEqual([...far.posted], [], "no request id is nobody waiting");
+  assert.deepEqual(performed, [], "and the host is not asked about it either");
+
+  far.send({ type: "mc-public-view:something-else", requestId: "r-3" });
+  await settle();
+  assert.equal(far.posted.at(-1)?.error, UNSUPPORTED_REQUEST);
+});

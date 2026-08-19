@@ -388,7 +388,7 @@ function writersOf(app: AuthoredApp, cid: string): string[] {
  *
  *  Both halves or neither. A status field with no table would offer every
  *  value; a table with no field has nothing to write it to. */
-function transitionPart(app: AuthoredApp, audience: Exclude<ViewAudience, "public">, cid: string): Partial<ProjectedViewWrite> {
+function transitionPart(app: AuthoredApp, audience: ViewAudience, cid: string): Partial<ProjectedViewWrite> {
   const config = app.collections?.[cid];
   const transitions = audience === "member" ? config?.transitions : app.public?.submit?.[cid]?.selfTransitions;
   if (config?.statusField === undefined || transitions === undefined) return {};
@@ -408,15 +408,15 @@ function transitionPart(app: AuthoredApp, audience: Exclude<ViewAudience, "publi
  *  status field to read it against — the rules take the CURRENT status off the
  *  record before consulting the list, so a collection without one grants
  *  nothing however the key is written (publish refuses that pair). */
-function withdrawPart(app: AuthoredApp, audience: Exclude<ViewAudience, "public">, cid: string): Partial<ProjectedViewWrite> {
+function withdrawPart(app: AuthoredApp, audience: ViewAudience, cid: string): Partial<ProjectedViewWrite> {
   const submit = app.public?.submit?.[cid];
   const selfDelete = submit?.selfDelete;
-  if (audience !== "participant" || selfDelete === undefined || app.collections?.[cid]?.statusField === undefined) return {};
+  if (audience === "member" || selfDelete === undefined || app.collections?.[cid]?.statusField === undefined) return {};
   if (submit?.mirror === undefined) return { selfDelete };
   return { selfDelete, withdrawMirror: submit.mirror };
 }
 
-function assignPart(app: AuthoredApp, audience: Exclude<ViewAudience, "public">, cid: string): Partial<ProjectedViewWrite> {
+function assignPart(app: AuthoredApp, audience: ViewAudience, cid: string): Partial<ProjectedViewWrite> {
   const assigneeField = app.collections?.[cid]?.assigneeField;
   if (audience !== "member" || assigneeField === undefined) return {};
   return { assigneeField, rowWriters: holdersOf(app, cid, ["assignee"]) };
@@ -424,11 +424,22 @@ function assignPart(app: AuthoredApp, audience: Exclude<ViewAudience, "public">,
 
 /** What `audience` may change about `cid`, or null when the answer is nothing.
  *
- *  The two audiences differ in WHICH transition table applies, in whether
+ *  The audiences differ in WHICH transition table applies, in whether
  *  assignment exists at all, and in whether the roster's answer travels with
  *  it; they agree that the status field is the collection's, since the rules
- *  read one field either way. */
-export function writeFor(app: AuthoredApp, audience: Exclude<ViewAudience, "public">, cid: string): ProjectedViewWrite | null {
+ *  read one field either way.
+ *
+ *  `public` AND `participant` ARE THE SAME ANSWER, and that is a statement about the rules rather
+ *  than a shortcut here. Both are `ownRow` in `firestore.rules` — which asks for `authed()` and
+ *  nothing else: no role, no tier, an anonymous uid will do — and both read their moves out of
+ *  `public.submit[cid]` (`selfTransitions`, `selfDelete`). So the visitor on `/a` who booked a slot
+ *  and the participant on `/p` who booked the same slot may do exactly the same things to it, and
+ *  projecting for one and not the other is how the public page ended up unable to offer a
+ *  cancellation the rules would have allowed. The page could ask; nothing could answer.
+ *
+ *  What `public` never gets is the staff half — no `writers`, no assignment — for the same reason
+ *  `participant` does not. */
+export function writeFor(app: AuthoredApp, audience: ViewAudience, cid: string): ProjectedViewWrite | null {
   const write: ProjectedViewWrite = { cid, ...transitionPart(app, audience, cid), ...assignPart(app, audience, cid), ...withdrawPart(app, audience, cid) };
   if (Object.keys(write).length === 1) return null;
   // Only the staff tier: a participant writes their own row, which the rules

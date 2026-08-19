@@ -300,3 +300,47 @@ test("what is published is the contract this compiler emits, not the author's de
   const asked = AuthoredAppZ.parse({ ...authored(), protocol: "1.0.0" });
   assert.equal(projectApp(asked, [], STAMP, null).config.protocol, APP_PROTOCOL);
 });
+
+test("the public config says what a visitor may change about their own row", () => {
+  // It goes on the world-readable document because that is where the public page reads its
+  // declaration, and it is safe to put there for the reason it exists: the moves are the ones
+  // `firestore.rules` already grants any authenticated submitter over `ownRow`, declared by the
+  // author under `public.submit[cid]`. Nothing here grants anything — it tells the page which
+  // buttons exist, so a control is drawn where the rules would allow it and nowhere else.
+  const cancellable = authored({
+    public: {
+      enabled: true,
+      read: ["services"],
+      submit: {
+        bookings: {
+          auth: "verifiedEmail",
+          emailField: "customerEmail",
+          createFields: ["customerEmail", "status"],
+          initialStatus: "pending",
+          selfTransitions: { pending: ["cancelled"] },
+        },
+      },
+    },
+  });
+  const { config } = projectApp(cancellable, [], STAMP, null);
+  const bookings = config.write?.find((entry) => entry.cid === "bookings");
+  assert.ok(bookings, "a collection with self-writes must be projected to the page that submits to it");
+  assert.equal(bookings.statusField, "status");
+  assert.deepEqual(bookings.transitions, { pending: ["cancelled"] });
+  // And NOT the staff half: no roster travels on a world-readable document.
+  assert.equal(bookings.writers, undefined);
+  assert.equal(bookings.assigneeField, undefined);
+});
+
+test("an app with nothing a visitor may change carries no write key at all", () => {
+  // Absent rather than empty, like every other projection here: an entry is what a page draws a
+  // button from, and `[]` would be a claim where silence is the truth. It is also what every
+  // document published before this key existed looks like, which `projectedWritesOf` reads back as
+  // "nothing writable" — the same answer those apps have today.
+  const readOnly = AuthoredAppZ.parse({
+    ...authored(),
+    collections: { bookings: { statusField: "status" } },
+    public: { enabled: true, read: ["services"], submit: {} },
+  });
+  assert.equal("write" in projectApp(readOnly, [], STAMP, null).config, false);
+});

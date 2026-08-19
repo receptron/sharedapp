@@ -158,16 +158,34 @@ const answersNothing = (far: ReturnType<typeof fakeChannel>) => {
   return bridge;
 };
 
-test("a request perform does not recognise is REFUSED, not dropped", async () => {
-  // ONE bootstrap serves both pages, so a member view holds the public view's whole vocabulary —
-  // and a request outside this parent's is read by `perform`, found not to be an intent, and
-  // answered null. Dropped there, the page sits on a promise that never settles: the dead button,
-  // with nothing anywhere to say why.
+test("a submission from a member page is REFUSED, not dropped", async () => {
+  // ONE bootstrap serves every page, so a member view holds the whole vocabulary and can call
+  // `submit`. Dropped, the page sits on a promise that never settles: the dead button, with nothing
+  // anywhere to say why.
+  //
+  // The word is `unknown-collection` rather than `unsupported-request`, and the change is the point
+  // rather than a detail. A submission is now judged against the DECLARATION the host passed, on
+  // whichever page it arrived — this adapter passes none, so there is no collection to write to and
+  // it says exactly that. A host that wants member submissions declares them and gets a
+  // confirmation, like every other page. What the refusal names is the app, not which factory the
+  // host happened to call.
   const far = fakeChannel();
   answersNothing(far);
-  far.send({ type: VIEW_MESSAGE.submit, requestId: "r7", cid: "bookings", values: { a: 1 } });
+  far.send({ type: VIEW_MESSAGE.submit, requestId: "r7", cid: "bookings", values: { a: "1" } });
   await Promise.resolve();
-  assert.deepEqual(far.posted, [{ type: VIEW_MESSAGE.result, requestId: "r7", ok: false, error: UNSUPPORTED_REQUEST }]);
+  assert.deepEqual(far.posted, [{ type: VIEW_MESSAGE.result, requestId: "r7", ok: false, error: "unknown-collection" }]);
+});
+
+test("a request nobody serves is still refused in one word", async () => {
+  // The other half: a message that IS addressed to somebody waiting and is not a lookup, not a
+  // submission, and not an intent this host recognises. `perform` answers null, and null means "not
+  // recognised" rather than "nobody is waiting" — so the view is told, in the word published pages
+  // compare.
+  const far = fakeChannel();
+  answersNothing(far);
+  far.send({ type: "mc-public-view:whatever", requestId: "r9" });
+  await Promise.resolve();
+  assert.deepEqual(far.posted, [{ type: VIEW_MESSAGE.result, requestId: "r9", ok: false, error: UNSUPPORTED_REQUEST }]);
 });
 
 test("a lookup is settled as a LOOKUP, whatever handler the host passed", async () => {
@@ -327,7 +345,11 @@ test("a rejection about something nobody asked is still not answered", async () 
   far.send({ hello: "there" });
   await Promise.resolve();
   assert.equal(far.posted.length, before);
-  assert.deepEqual(defects, [null]);
+  // AND THE HOST IS NEVER ASKED. A message carrying no request id is nobody waiting, so it does not
+  // reach `perform` at all — which is why there is no defect to report here even though this host's
+  // `perform` rejects everything it is given. It used to be handed over and rejected, and the
+  // rejection was then reported as a defect of the host over a message that was never a request.
+  assert.deepEqual(defects, []);
 });
 
 test("a host that DISCARDS the reason still answers the view", async () => {
