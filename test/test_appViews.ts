@@ -8,7 +8,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { normalizeViews, participantScope, viewDocId, PUBLIC_VIEW_ID } from "../src/appViews.js";
+import { normalizeViews, participantScope, viewDocId, writeFor, PUBLIC_VIEW_ID } from "../src/appViews.js";
 import { projectAppViews } from "../src/publishProject.js";
 import { AuthoredAppZ } from "../src/publishManifest.js";
 
@@ -373,4 +373,38 @@ test("a participant reads a collection the app opens to the world", () => {
   assert.deepEqual(participantScope(declared, "slots", []), { cid: "slots", scope: "all" });
   // Not open, and nothing else reaches it: still null.
   assert.equal(participantScope(app({ public: { enabled: true, read: [], submit: {} } }), "slots", []), null);
+});
+
+test("the public page is projected the SAME writes as the participant", () => {
+  // The statement this pins is about the RULES, not about taste. `ownRow` in `firestore.rules` asks
+  // for `authed()` and nothing else — no role, no membership, an anonymous uid will do — and both
+  // audiences read their moves out of `public.submit[cid]`. So the visitor on `/a` who booked the
+  // slot and the participant on `/p` who booked the same slot may do exactly the same things to it.
+  //
+  // It was projected to `/p` and not to `/a`, which is how a public page came to be unable to offer
+  // a cancellation the rules were waiting to allow: the page could ask, and nothing could answer.
+  const authored = salon();
+  const theirs = writeFor(authored, "participant", "bookings");
+  const visitor = writeFor(authored, "public", "bookings");
+  assert.deepEqual(visitor, theirs);
+  assert.deepEqual(visitor?.transitions, { pending: ["cancelled"] });
+
+  // The withdrawal half of the same statement, on an app that declares one.
+  const withdrawable = salon({
+    collections: { bookings: { statusField: "status", transitions: { initial: ["pending"] } } },
+    public: { submit: { bookings: { auth: "verifiedEmail", emailField: "email", createFields: ["email"], selfDelete: ["pending"] } } },
+  });
+  assert.deepEqual(writeFor(withdrawable, "public", "bookings"), writeFor(withdrawable, "participant", "bookings"));
+  assert.deepEqual(writeFor(withdrawable, "public", "bookings")?.selfDelete, ["pending"]);
+});
+
+test("and never the staff half, for the reason the participant never gets it", () => {
+  // No roster, no assignment: those are answered by a ROLE, and a public visitor holds none. A
+  // `writers` list on a world-readable document would also be an address list published for nothing
+  // (principle 5).
+  const visitor = writeFor(salon(), "public", "bookings");
+  assert.equal(visitor?.writers, undefined);
+  assert.equal(visitor?.rowWriters, undefined);
+  assert.equal(visitor?.assigneeField, undefined);
+  assert.equal(visitor?.mail, undefined);
 });

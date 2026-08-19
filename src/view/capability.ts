@@ -192,3 +192,31 @@ export const viewerFor = (write: ProjectedViewWrite[], address: string | null, t
   me: address,
   can: capabilitiesFor(write, address ?? "", tier),
 });
+
+/** WHICH TIER THE PUBLIC PAGE IS JUDGED AS, and it is not a third one.
+ *
+ *  `roster` means "there are no roles here; the rules answer from the RECORD" — which is exactly
+ *  what a public visitor is. `ownRow` in `firestore.rules` asks for `authed()` and nothing else: no
+ *  role, no membership, an anonymous uid will do. So the visitor on `/a` who booked a slot and the
+ *  participant on `/p` who booked the same slot are the same reader as far as their own row is
+ *  concerned, and giving the public page a tier of its own would only be a second name for this
+ *  answer — one that could drift from it.
+ *
+ *  Named rather than spelled at each call site, because the two hosts (mulmoserver's live page,
+ *  MulmoTerminal's preview of it) must not be able to disagree about it. */
+export const PUBLIC_WRITE_TIER: WriteTier = "roster";
+
+/** NOTE ON `me` FOR A PUBLIC PAGE: it is the signed-in address when there is one and null when
+ *  there is not, which is the same rule every other page follows. A public visitor may hold an
+ *  anonymous session, which has a uid and no address at all — so null is a real answer here rather
+ *  than an edge case, and nothing on this tier reads it: `capabilityOf`'s roster branch answers
+ *  from the declaration alone.
+ *
+ *  Which rows are the reader's own is answered by `viewer.mine` and `view.mine(cid, key)` — reads
+ *  made against the reader's own credentials — rather than by a comparison the page performs. That
+ *  is the honest way round: the rules identify an own row by the uid or the verified address ON THE
+ *  RECORD, neither of which a page can be trusted to hold.
+ *
+ *  There is deliberately no `publicViewerFor` wrapper. Every host builds this the one way —
+ *  `viewerFor(writes, address, PUBLIC_WRITE_TIER)` — because a second entry point is a second place
+ *  for the two hosts to disagree, which is the thing this module exists to prevent. */

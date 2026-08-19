@@ -113,6 +113,22 @@ export interface PublishedConfigDoc extends Record<string, unknown> {
   enabled: boolean;
   read: string[];
   submit: Record<string, Record<string, unknown>>;
+  /** What a VISITOR may change about their own row here — the same shape every tier config carries,
+   *  and for the same purpose: it tells the page which buttons exist, so a control is drawn where
+   *  the rules would allow it and nowhere else.
+   *
+   *  It is here because `ownRow` in the rules asks for `authed()` and nothing else. The person who
+   *  submitted through this page may move their own row along `selfTransitions` and take it away
+   *  along `selfDelete` — declared, as those keys say, on the PUBLIC submit — with no role and no
+   *  membership anywhere. That was projected to the participant tier and not to the page the
+   *  submission came from, so a public page could not offer a cancellation the rules were waiting
+   *  to allow; it could ask, and nothing could answer.
+   *
+   *  Absent where nothing is writable, and absent entirely on every document published before this
+   *  key existed — which reads back as "nothing writable" (`projectedWritesOf`), the same answer
+   *  those apps have today. It is a key, not a contract: see `appProtocol.ts` on why adding one
+   *  does not move the number. */
+  write?: ProjectedViewWrite[];
   /** That the app HAS a published view, and which datasets it asked for.
    *
    *  This is the only place the public page can learn it: the rules' app
@@ -270,6 +286,9 @@ export function projectApp(
   const normalized = normalizeViews(authored);
   if (!normalized.ok) throw new Error(`publish: views declaration is not publishable (${normalized.problems.join(" ")})`);
   const publicView = normalized.views.find((view) => view.audience === "public");
+  const publicWrite = Object.keys(submit)
+    .map((cid) => writeFor(authored, "public", cid))
+    .filter((entry): entry is ProjectedViewWrite => entry !== null);
 
   const config: PublishedConfigDoc = {
     // WHICH CONTRACT THESE DOCUMENTS KEEP — the number a reader compares before drawing them.
@@ -279,6 +298,11 @@ export function projectApp(
     enabled: authored.public?.enabled === true,
     read: authored.public?.read ?? [],
     submit,
+    // The submit cids and only those: a self-write is declared inside `public.submit[cid]`, so a
+    // collection nobody may submit to has nothing here to say. Absent rather than empty for the
+    // reason every other projection is — an entry is what a page draws a button from, and `[]`
+    // would be a claim where silence is the truth.
+    ...(publicWrite.length === 0 ? {} : { write: publicWrite }),
     // Read through the normalization, not off `public.view`: an app that
     // declares its public page in `views[]` must publish the same document, or
     // the page has the HTML and no idea what to send it.
