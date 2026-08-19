@@ -650,21 +650,23 @@ function protocolProblems(app: AuthoredApp): string[] {
   ];
 }
 
-/** A key whose READER has to have learnt it, declared by an app that says it will run on readers
- *  that have not.
+/** A key whose PUBLISHER has to have learnt it, declared by an app that may be handed to one that
+ *  has not.
  *
- *  `uidField` is filled from the session and kept OUT of the drawn form, exactly as `emailField`
- *  is. A reader that knows neither half draws a box asking the visitor to type their uid, sends
- *  whatever they type, and the rules refuse it (`uidOk` compares the field with the writer's own
- *  uid). Nothing errors on the way — the app is simply a form that never works, on some people's
- *  browsers and not the author's.
+ *  This is the one thing the version number does that nothing else does. An old build of this
+ *  compiler does not know `uidField`; handed a declaration that names one, it would drop the key
+ *  and publish the rest — a projection where the uid is an ordinary `createFields` name, bound to
+ *  nobody, because the rules enforce `uidOk` only for an app whose published submit declares it.
+ *  The board would work, and anyone could write anyone's uid into it.
  *
- *  What actually STOPS that is the stamp: a uid-bearing app is published as {@link
- *  UID_FIELD_PROTOCOL}, a new major, and a reader that has not learnt the key refuses the whole
- *  projection instead of drawing half of it (`protocolFor`). This check is the other half — the
- *  AUTHOR saying which contract they are writing against, so that a declaration whose page needs a
- *  newer reader cannot be published by a build, or into a fleet, that predates it. Without it the
- *  first news of the mismatch is a page that will not draw, and nothing to say why. */
+ *  Naming the floor is what turns that into a refusal: `protocolProblems` will not publish a
+ *  contract above what the build emits, so the old build stops on the number instead of quietly
+ *  shipping an app missing the half that made it safe.
+ *
+ *  Note what this check is NOT for. The READER is looked after elsewhere and by something older: a
+ *  build that has not learnt the key refuses a uid-bearing public projection through the
+ *  `submit`/`form` consistency check it has had since the first contract (see {@link
+ *  UID_FIELD_PROTOCOL}), which is why the floor here is a minor and not a major. */
 function protocolFloorProblems(app: AuthoredApp): string[] {
   const users = Object.entries(app.public?.submit ?? {}).filter(([, submit]) => submit.uidField !== undefined);
   if (users.length === 0) return [];
@@ -674,7 +676,7 @@ function protocolFloorProblems(app: AuthoredApp): string[] {
   const named = users.map(([cid]) => `public.submit.${cid}`).join(", ");
   return [
     `${named} declares uidField, which needs \`protocol: "${UID_FIELD_PROTOCOL}"\` at the top of app.json (this app says ${app.protocol === undefined ? `nothing, which is ${BASE_PROTOCOL}` : `"${app.protocol}"`}).`,
-    `The page fills that field from the session and keeps it out of the form, so an app using it is published as ${UID_FIELD_PROTOCOL} and every reader older than that refuses to draw it. Declaring the floor is how the app says which readers it needs — and it is what stops this being published by a build, or into a fleet, that predates the key.`,
+    `Declaring the floor is what stops this app being published by a build that predates the key: such a build would drop uidField and publish a collection where that field is bound to nobody and anyone may write anyone's uid into it. It refuses the floor instead.`,
   ];
 }
 

@@ -21,21 +21,17 @@
 
 /** THE VERSION IS PER APP, not per build of this compiler.
  *
- *  It started as one constant — what this build writes — and `uidField` is what showed that to be
- *  wrong in the one direction that matters. A reader compares the MAJOR and nothing else
- *  (mulmoserver's `protocolDrawable`), so a minor bump is a number no reader acts on: an old
- *  browser reading a uid-bearing app accepts the document, ignores the key it does not know, draws
- *  a box asking the visitor to type their uid, and every submission is refused by `uidOk` with
- *  nothing to explain it. An authored floor does not help — it is checked by the PUBLISHER, and the
- *  reader is somebody else's cached tab.
+ *  It started as one constant — what this build writes — and stamping every app the newest number
+ *  is a claim about documents that is not true of them: an app using nothing new is a 1.0.0 app,
+ *  and republishing it must not change what it says it is. So the stamp is derived from the
+ *  DECLARATION ({@link protocolFor}), and {@link APP_PROTOCOL} is only the ceiling of what this
+ *  build could emit.
  *
- *  So a feature a reader must UNDERSTAND is emitted as a new major, and only by the apps that use
- *  it. An app that declares no such key is stamped exactly what it was stamped before, so every
- *  reader in the wild goes on drawing every app it could already draw, and refuses precisely the
- *  ones it would get wrong.
- *
- *  What this build can emit is {@link APP_PROTOCOL}; what a given declaration IS emitted as is
- *  {@link protocolFor}. */
+ *  It matters most for a number a reader acts on. A reader compares the MAJOR and nothing else
+ *  (mulmoserver's `protocolDrawable`), so a major is the one thing in a document that can make an
+ *  older browser refuse it — and per-app stamping is what keeps that refusal aimed at the apps that
+ *  need it rather than at every app published after the bump. Nothing needs one yet: see
+ *  {@link UID_FIELD_PROTOCOL} for the addition that came close and why it did not. */
 
 /** What an app using nothing newer than the first contract is stamped. Apps published before the
  *  key existed carry no version and are read as this — they are the documents in Firestore now. */
@@ -44,11 +40,34 @@ export const BASE_PROTOCOL = "1.0.0";
 /** `public.submit.<cid>.uidField` — the submitter's identity in a FIELD rather than in the document
  *  id, for the app whose id is spent on exclusivity (a claim whose id is the task's).
  *
- *  A MAJOR because the reader has to do something it was not doing: fill that field from the
- *  session and keep it out of the form, exactly as it already does for `emailField`. A reader that
- *  has not learnt it must refuse the app rather than draw a form that cannot be submitted — and
- *  refusing is what a major buys. */
-export const UID_FIELD_PROTOCOL = "2.0.0";
+ *  A MINOR, and it was very nearly a major. The reader does have to do something it was not doing —
+ *  fill the field from the session and keep it out of the drawn form, as it already does for
+ *  `emailField` — so the question was what happens on a build that does neither. A major would make
+ *  that build refuse the app. It turns out one already does, through a check it has shipped since
+ *  the first contract:
+ *
+ *    - the rules accept only `request.resource.data.keys().hasOnly(createFields)`, so the uid field
+ *      is IN `createFields` for any create to be possible at all;
+ *    - the whole point of the key is that the field is not drawn, so it is NOT in the projected
+ *      `form.fields`, and the host keeps the collection's form entry even when that leaves it empty;
+ *    - and an old reader's `consistent`/`agrees` requires every `createFields` name it does not
+ *      recognise as host-filled (it knows three: email, status, stamp) to appear in `form.fields`.
+ *
+ *  So the public projection of a uid-bearing app is refused as "a shape this release does not read"
+ *  — the same screen a major buys, from a check that predates it. Measured against the real
+ *  projection of the todo-board template, not reasoned about.
+ *
+ *  What the major would additionally have covered is the member/participant tiers, whose config
+ *  carries `submit` and no `form` and so has nothing to disagree with. An old build draws those
+ *  pages, and every uid-bound write is refused by `uidOk`/`uidHeld` and every own-scope read by the
+ *  rules that expect the `where` this build now adds — buttons that do nothing, for the enrolled
+ *  few, with no forged uid and nothing leaked. Not worth spending the major on.
+ *
+ *  The number is still load-bearing in exactly one place, which is why this is a minor rather than
+ *  nothing: it is the floor an author declares, and `protocolProblems` refuses to publish a floor
+ *  above what the build emits. That is what stops an OLD PUBLISHER from silently dropping the key
+ *  and shipping a board where `uid` is an ordinary field anyone may write. */
+export const UID_FIELD_PROTOCOL = "1.1.0";
 
 /** The newest contract this build can emit — the ceiling an authored floor is checked against. */
 export const APP_PROTOCOL = UID_FIELD_PROTOCOL;
