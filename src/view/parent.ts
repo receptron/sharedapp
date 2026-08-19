@@ -107,6 +107,16 @@ const performed = (perform: PerformIntent, data: unknown): Promise<IntentAnswer 
   }
 };
 
+/** `submit` as a promise even when it throws on the way to returning one. The port is called in the
+ *  CURRENT tick — see the note at the call site — and only its failure is deferred. */
+const attempted = (write: (pending: PendingSubmit) => Promise<{ ok: boolean; error?: string }>, request: PendingSubmit) => {
+  try {
+    return write(request);
+  } catch (error) {
+    return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+  }
+};
+
 /** The error, as a string, without deciding what to do about it. */
 const messageOf = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
@@ -411,17 +421,19 @@ export const viewParent = (ports: ViewParentPorts, config: () => ViewSubmitConfi
     // the refresh that follows it may be what failed. Without this the confirmation would stay open
     // and disabled forever, over a booking that went through.
     //
-    // Called INSIDE a promise so a host that throws SYNCHRONOUSLY is caught here too — `.catch()`
-    // alone reaches only a rejection, and a `submit` port that threw on its way to returning a
-    // promise took the exception straight out of `accept`, leaving `sending` true, the dialog open
-    // over a write nobody could retry, and the page's promise unsettled. The lookup path was
-    // written this way from the start; this one was not.
-    const outcome = await Promise.resolve()
-      .then(() => write(request))
-      .catch((err: unknown) => {
-        ports.defect(err, request.requestId);
-        return { ok: false, error: messageOf(err) };
-      });
+    // A SYNCHRONOUS throw is turned into a rejection and nothing else: `.catch()` alone reaches only
+    // a rejection, and a `submit` port that threw on its way to returning a promise took the
+    // exception straight out of `accept` — leaving `sending` true, the dialog open over a write
+    // nobody could retry, and the page's promise unsettled.
+    //
+    // `attempted` CALLS THE PORT IN THIS TICK rather than deferring it into a `Promise.resolve()`
+    // chain, which is not a detail: a host that hands the write a resolver of its own gets it
+    // synchronously, and the extra turn would leave that resolver unassigned for anybody who acts
+    // in the same tick. Same shape as `performed` above, for the same reason.
+    const outcome = await attempted(write, request).catch((err: unknown) => {
+      ports.defect(err, request.requestId);
+      return { ok: false, error: messageOf(err) };
+    });
     // STILL THE ONE ON SCREEN? A restart during the write clears the cells, and a new page may have
     // opened a confirmation of its own since. Settling unconditionally would close THAT one — the
     // new visitor's dialog vanishing under their cursor, their own request left unanswered for ever
