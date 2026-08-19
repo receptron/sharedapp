@@ -17,13 +17,17 @@ test("an app using nothing new is stamped what it has always been stamped", () =
   assert.equal(protocolFor({ public: { submit: { responses: {} } } }), BASE_PROTOCOL);
 });
 
-test("an app using a key its reader must understand is stamped a major that reader refuses", () => {
-  // A minor would be a number no reader acts on: they compare the major and nothing else, so an
-  // old tab would accept the document, ignore uidField, draw a box for it, and have every
-  // submission refused with nothing to explain it.
+test("an app using uidField says so, in a version that stays inside major 1", () => {
   assert.equal(protocolFor({ public: { submit: { claims: { uidField: "uid" } } } }), UID_FIELD_PROTOCOL);
-  assert.equal(protocolOf(UID_FIELD_PROTOCOL)?.major, 2);
-  // One collection out of several is enough: the app is drawn by one reader.
+  // The major is what makes an older reader refuse an app, and this addition does not need one: a
+  // reader that has not learnt uidField already refuses such a projection through the submit/form
+  // consistency check it has had since 1.0.0 (the uid is in `createFields`, because the rules take
+  // no key outside it, and never in `form.fields`, because not drawing it IS the feature). Moving
+  // this to 2 would refuse every uid app on every reader in the wild to buy a screen they already
+  // show. What the number is for here is the authored floor, which an old PUBLISHER refuses.
+  assert.equal(protocolOf(UID_FIELD_PROTOCOL)?.major, 1);
+  assert.ok(protocolOf(UID_FIELD_PROTOCOL)!.minor > protocolOf(BASE_PROTOCOL)!.minor);
+  // One collection out of several is enough: the app is published, and read, whole.
   assert.equal(protocolFor({ public: { submit: { tasks: {}, claims: { uidField: "uid" } } } }), UID_FIELD_PROTOCOL);
 });
 

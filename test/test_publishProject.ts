@@ -275,12 +275,13 @@ test("every projection states the contract it was written against", () => {
 });
 
 test("the contract is the one THIS declaration needs, and it moves the whole app at once", () => {
-  // Per app rather than per build: a key the reader must understand is stamped a major the reader
-  // refuses, and an app that uses none of them is stamped what it always was (the test above). The
-  // tiers move with it — a member page drawn by a reader that refuses the public one is half an app.
+  // Per app rather than per build: an app that uses nothing new is stamped what it always was (the
+  // test above), so republishing it does not change what its documents claim to be. The tiers move
+  // with the public config — one publish writes them all, and a reader that could draw one and not
+  // another would show half an app.
   const app = AuthoredAppZ.parse({
     ...authored(),
-    protocol: "2.0.0",
+    protocol: "1.1.0",
     public: { enabled: true, submit: { claims: { auth: "verifiedEmail", uidField: "uid", createFields: ["taskId", "uid"] } } },
   });
   assert.equal(projectApp(app, [], STAMP, null).config.protocol, UID_FIELD_PROTOCOL);

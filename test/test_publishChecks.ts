@@ -1257,7 +1257,7 @@ test("an enum comparison is a string, and publish does not convert one for the r
 /** The board, as it publishes: one claim per task, taken by whoever is signed
  *  in, given back by them alone. */
 const boardDraft = (): Record<string, unknown> => ({
-  protocol: "2.0.0",
+  protocol: "1.1.0",
   collections: { claims: { submitOnly: true, statusField: "status", transitions: { initial: ["doing"], doing: ["done"] } } },
   public: {
     enabled: true,
@@ -1309,31 +1309,31 @@ test("uidField binds the record to its submitter, so the collection needs submit
   );
 });
 
-test("an app declaring uidField states the protocol floor its readers need", () => {
-  // Not decoration. The page fills that field from the session and keeps it out
-  // of the form, exactly as it does for emailField; a reader that predates the
-  // key draws a box asking the visitor to type their uid, and the rules refuse
-  // what comes back. Nothing errors — the form simply never works, and only on
-  // somebody else's browser.
+test("an app declaring uidField states the protocol floor its publisher needs", () => {
+  // Not decoration, and not about the reader — a reader that predates the key
+  // refuses this projection on its own (submit/form consistency). This is about
+  // the WRITING side: an old build of the compiler drops the key it does not
+  // know and publishes a collection where the uid is bound to nobody and anyone
+  // may write anyone's. The floor is what makes it stop on the number instead.
   refuses(
     board((draft) => {
       delete draft.protocol;
     }),
-    'needs `protocol: "2.0.0"`',
+    'needs `protocol: "1.1.0"`',
   );
   refuses(
     board((draft) => {
       draft.protocol = "1.0.0";
     }),
-    'needs `protocol: "2.0.0"`',
+    'needs `protocol: "1.1.0"`',
   );
-  // And a floor states the MAJOR the reader needs, not a number near it: 1.9.9 is still a reader
-  // that compares majors and draws this app wrongly.
+  // A floor is the version the feature landed in, not a number near it: 1.0.9 is
+  // a build that predates the key just as much as 1.0.0 does.
   refuses(
     board((draft) => {
-      draft.protocol = "1.9.9";
+      draft.protocol = "1.0.9";
     }),
-    'needs `protocol: "2.0.0"`',
+    'needs `protocol: "1.1.0"`',
   );
 });
 

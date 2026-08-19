@@ -272,10 +272,11 @@ export function projectApp(
   const publicView = normalized.views.find((view) => view.audience === "public");
 
   const config: PublishedConfigDoc = {
-    // WHICH CONTRACT THESE DOCUMENTS KEEP, so a reader older than it refuses rather than drawing
-    // them wrongly. Derived from the DECLARATION, never from the author's floor and no longer from
-    // a constant per build: an app using nothing new is stamped what it always was, and one using a
-    // key its reader must understand is stamped a major that reader refuses (see `appProtocol.ts`).
+    // WHICH CONTRACT THESE DOCUMENTS KEEP — the number a reader compares before drawing them, and
+    // the one a later publisher compares before overwriting them. Derived from the DECLARATION,
+    // never from the author's floor and no longer from a constant per build: an app using nothing
+    // new is stamped what it always was, so republishing it does not change what its documents say
+    // they are (see `appProtocol.ts`).
     protocol: protocolFor(authored),
     enabled: authored.public?.enabled === true,
     read: authored.public?.read ?? [],
