@@ -29,7 +29,7 @@
 import type { CollectionFieldSpec, CollectionSchema } from "@mulmoclaude/core/collection";
 import { isSafeCustomViewPath } from "@mulmoclaude/core/collection/server";
 import { normalizeViews, participantScope, type NormalizedView } from "./appViews.js";
-import { APP_PROTOCOL, UID_FIELD_PROTOCOL, protocolOf, protocolWithin } from "./appProtocol.js";
+import { APP_PROTOCOL, BASE_PROTOCOL, UID_FIELD_PROTOCOL, protocolOf, protocolWithin } from "./appProtocol.js";
 import type { AuthoredApp, AuthoredCollectionConfig, AuthoredSubmit } from "./publishManifest.js";
 
 /** What publish knows about a shared collection in this repository, as far as
@@ -103,6 +103,10 @@ function identityBindings(submit: AuthoredSubmit): string[] {
   const bindings: string[] = [];
   if (submit.idFrom === "auth.uid" || submit.idFrom === "auth.uid+field") bindings.push(`idFrom: "${submit.idFrom}"`);
   if (submit.emailField !== undefined) bindings.push(`emailField: "${submit.emailField}"`);
+  // Kept in step with `bindsSubmitterIdentity` above, and the pair is easy to split: this one only
+  // WORDS the refusal, so a binding missing here does not change which declarations are refused —
+  // it empties the parentheses that were supposed to say what made the app one of them.
+  if (submit.uidField !== undefined) bindings.push(`uidField: "${submit.uidField}"`);
   if (submit.audience === "participant") bindings.push(`audience: "participant"`);
   return bindings;
 }
@@ -650,14 +654,17 @@ function protocolProblems(app: AuthoredApp): string[] {
  *  that have not.
  *
  *  `uidField` is filled from the session and kept OUT of the drawn form, exactly as `emailField`
- *  is. A reader older than {@link UID_FIELD_PROTOCOL} knows neither half: it draws a box asking the
- *  visitor to type their uid, sends whatever they type, and the rules refuse it (`uidOk` compares
- *  the field with the writer's own uid). Nothing errors on the way — the app is simply a form that
- *  never works, on some people's browsers and not the author's.
+ *  is. A reader that knows neither half draws a box asking the visitor to type their uid, sends
+ *  whatever they type, and the rules refuse it (`uidOk` compares the field with the writer's own
+ *  uid). Nothing errors on the way — the app is simply a form that never works, on some people's
+ *  browsers and not the author's.
  *
- *  The floor is the app SAYING SO. It is checked against the publisher above (`protocolProblems`),
- *  so declaring it also refuses an older build of this package — which would otherwise reject the
- *  key with a zod error naming the wrong problem. */
+ *  What actually STOPS that is the stamp: a uid-bearing app is published as {@link
+ *  UID_FIELD_PROTOCOL}, a new major, and a reader that has not learnt the key refuses the whole
+ *  projection instead of drawing half of it (`protocolFor`). This check is the other half — the
+ *  AUTHOR saying which contract they are writing against, so that a declaration whose page needs a
+ *  newer reader cannot be published by a build, or into a fleet, that predates it. Without it the
+ *  first news of the mismatch is a page that will not draw, and nothing to say why. */
 function protocolFloorProblems(app: AuthoredApp): string[] {
   const users = Object.entries(app.public?.submit ?? {}).filter(([, submit]) => submit.uidField !== undefined);
   if (users.length === 0) return [];
@@ -666,8 +673,8 @@ function protocolFloorProblems(app: AuthoredApp): string[] {
   if (floor !== null && stated !== null && protocolWithin(floor, stated)) return [];
   const named = users.map(([cid]) => `public.submit.${cid}`).join(", ");
   return [
-    `${named} declares uidField, which needs \`protocol: "${UID_FIELD_PROTOCOL}"\` at the top of app.json (this app says ${app.protocol === undefined ? "nothing, which is 1.0.0" : `"${app.protocol}"`}).`,
-    "The page fills that field from the session and keeps it out of the form; a reader that predates the key asks the visitor to type their uid instead, and every submission is refused with nothing to explain it.",
+    `${named} declares uidField, which needs \`protocol: "${UID_FIELD_PROTOCOL}"\` at the top of app.json (this app says ${app.protocol === undefined ? `nothing, which is ${BASE_PROTOCOL}` : `"${app.protocol}"`}).`,
+    `The page fills that field from the session and keeps it out of the form, so an app using it is published as ${UID_FIELD_PROTOCOL} and every reader older than that refuses to draw it. Declaring the floor is how the app says which readers it needs — and it is what stops this being published by a build, or into a fleet, that predates the key.`,
   ];
 }
 

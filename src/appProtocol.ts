@@ -19,22 +19,49 @@
 // this key existed is one, and those documents are the ones in Firestore right now. Which is also
 // why this starts at 1.0.0 rather than 0.1.0 — the first contract already shipped.
 
-/** The contract this build of the compiler writes.
+/** THE VERSION IS PER APP, not per build of this compiler.
  *
- *  1.1.0 adds `public.submit.<cid>.uidField` — the submitter's identity in a FIELD rather than in
- *  the document id, for the app whose id is spent on exclusivity. MINOR rather than MAJOR because
- *  every app that does not declare it is byte-identical to what 1.0.0 published, and a reader that
- *  refuses a higher MAJOR would otherwise stop drawing apps that never used the key.
+ *  It started as one constant — what this build writes — and `uidField` is what showed that to be
+ *  wrong in the one direction that matters. A reader compares the MAJOR and nothing else
+ *  (mulmoserver's `protocolDrawable`), so a minor bump is a number no reader acts on: an old
+ *  browser reading a uid-bearing app accepts the document, ignores the key it does not know, draws
+ *  a box asking the visitor to type their uid, and every submission is refused by `uidOk` with
+ *  nothing to explain it. An authored floor does not help — it is checked by the PUBLISHER, and the
+ *  reader is somebody else's cached tab.
  *
- *  It is nonetheless a key a reader must UNDERSTAND for the app that uses it: the field is filled
- *  from the session and kept out of the form (the reader already does this for `emailField`), so a
- *  reader that has not learnt it draws a "uid" box for the visitor to type and every submission is
- *  refused. That is what {@link UID_FIELD_PROTOCOL} is for — an app using the key must declare the
- *  floor, which is the app SAYING which readers it needs rather than finding out from a denial. */
-export const APP_PROTOCOL = "1.1.0";
+ *  So a feature a reader must UNDERSTAND is emitted as a new major, and only by the apps that use
+ *  it. An app that declares no such key is stamped exactly what it was stamped before, so every
+ *  reader in the wild goes on drawing every app it could already draw, and refuses precisely the
+ *  ones it would get wrong.
+ *
+ *  What this build can emit is {@link APP_PROTOCOL}; what a given declaration IS emitted as is
+ *  {@link protocolFor}. */
 
-/** The floor an app declaring `uidField` must state. See {@link APP_PROTOCOL}. */
-export const UID_FIELD_PROTOCOL = "1.1.0";
+/** What an app using nothing newer than the first contract is stamped. Apps published before the
+ *  key existed carry no version and are read as this — they are the documents in Firestore now. */
+export const BASE_PROTOCOL = "1.0.0";
+
+/** `public.submit.<cid>.uidField` — the submitter's identity in a FIELD rather than in the document
+ *  id, for the app whose id is spent on exclusivity (a claim whose id is the task's).
+ *
+ *  A MAJOR because the reader has to do something it was not doing: fill that field from the
+ *  session and keep it out of the form, exactly as it already does for `emailField`. A reader that
+ *  has not learnt it must refuse the app rather than draw a form that cannot be submitted — and
+ *  refusing is what a major buys. */
+export const UID_FIELD_PROTOCOL = "2.0.0";
+
+/** The newest contract this build can emit — the ceiling an authored floor is checked against. */
+export const APP_PROTOCOL = UID_FIELD_PROTOCOL;
+
+/** The contract THIS declaration's documents keep.
+ *
+ *  Derived from what the declaration contains, never from what the author asked for: the stamp is
+ *  a statement about the documents, and an author who names a floor they do not use has not made
+ *  their app need a newer reader. */
+export function protocolFor(app: { public?: { submit?: Record<string, { uidField?: string | undefined }> | undefined } | undefined }): string {
+  const submits = Object.values(app.public?.submit ?? {});
+  return submits.some((submit) => submit.uidField !== undefined) ? UID_FIELD_PROTOCOL : BASE_PROTOCOL;
+}
 
 const SHAPE = /^(?<major>\d+)\.(?<minor>\d+)\.(?<patch>\d+)$/u;
 

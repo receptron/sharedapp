@@ -987,8 +987,8 @@ test("an app declaring a contract newer than this publisher writes is refused", 
   // The floor. Compiled anyway, the app would be published as documents stamped with a version they
   // do not honour — and the page that reads them believes the stamp, which is worse than a refusal
   // the author can act on. The refusal names both versions.
-  const problems = problemsFor({ protocol: "2.0.0" });
-  refuses(problems, 'This app declares `protocol: "2.0.0"`');
+  const problems = problemsFor({ protocol: "3.0.0" });
+  refuses(problems, 'This app declares `protocol: "3.0.0"`');
   // Both versions, so the author can see which side to move.
   refuses(problems, `this publisher writes ${APP_PROTOCOL}`);
 });
@@ -1257,7 +1257,7 @@ test("an enum comparison is a string, and publish does not convert one for the r
 /** The board, as it publishes: one claim per task, taken by whoever is signed
  *  in, given back by them alone. */
 const boardDraft = (): Record<string, unknown> => ({
-  protocol: "1.1.0",
+  protocol: "2.0.0",
   collections: { claims: { submitOnly: true, statusField: "status", transitions: { initial: ["doing"], doing: ["done"] } } },
   public: {
     enabled: true,
@@ -1319,13 +1319,21 @@ test("an app declaring uidField states the protocol floor its readers need", () 
     board((draft) => {
       delete draft.protocol;
     }),
-    'needs `protocol: "1.1.0"`',
+    'needs `protocol: "2.0.0"`',
   );
   refuses(
     board((draft) => {
       draft.protocol = "1.0.0";
     }),
-    'needs `protocol: "1.1.0"`',
+    'needs `protocol: "2.0.0"`',
+  );
+  // And a floor states the MAJOR the reader needs, not a number near it: 1.9.9 is still a reader
+  // that compares majors and draws this app wrongly.
+  refuses(
+    board((draft) => {
+      draft.protocol = "1.9.9";
+    }),
+    'needs `protocol: "2.0.0"`',
   );
 });
 
