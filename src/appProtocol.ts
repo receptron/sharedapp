@@ -19,8 +19,22 @@
 // this key existed is one, and those documents are the ones in Firestore right now. Which is also
 // why this starts at 1.0.0 rather than 0.1.0 — the first contract already shipped.
 
-/** The contract this build of the compiler writes. */
-export const APP_PROTOCOL = "1.0.0";
+/** The contract this build of the compiler writes.
+ *
+ *  1.1.0 adds `public.submit.<cid>.uidField` — the submitter's identity in a FIELD rather than in
+ *  the document id, for the app whose id is spent on exclusivity. MINOR rather than MAJOR because
+ *  every app that does not declare it is byte-identical to what 1.0.0 published, and a reader that
+ *  refuses a higher MAJOR would otherwise stop drawing apps that never used the key.
+ *
+ *  It is nonetheless a key a reader must UNDERSTAND for the app that uses it: the field is filled
+ *  from the session and kept out of the form (the reader already does this for `emailField`), so a
+ *  reader that has not learnt it draws a "uid" box for the visitor to type and every submission is
+ *  refused. That is what {@link UID_FIELD_PROTOCOL} is for — an app using the key must declare the
+ *  floor, which is the app SAYING which readers it needs rather than finding out from a denial. */
+export const APP_PROTOCOL = "1.1.0";
+
+/** The floor an app declaring `uidField` must state. See {@link APP_PROTOCOL}. */
+export const UID_FIELD_PROTOCOL = "1.1.0";
 
 const SHAPE = /^(?<major>\d+)\.(?<minor>\d+)\.(?<patch>\d+)$/u;
 

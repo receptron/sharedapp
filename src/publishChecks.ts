@@ -29,7 +29,7 @@
 import type { CollectionFieldSpec, CollectionSchema } from "@mulmoclaude/core/collection";
 import { isSafeCustomViewPath } from "@mulmoclaude/core/collection/server";
 import { normalizeViews, participantScope, type NormalizedView } from "./appViews.js";
-import { APP_PROTOCOL, protocolOf, protocolWithin } from "./appProtocol.js";
+import { APP_PROTOCOL, UID_FIELD_PROTOCOL, protocolOf, protocolWithin } from "./appProtocol.js";
 import type { AuthoredApp, AuthoredCollectionConfig, AuthoredSubmit } from "./publishManifest.js";
 
 /** What publish knows about a shared collection in this repository, as far as
@@ -56,7 +56,17 @@ export interface PublishableCollection {
  *  restricted to a named participant. A record created through the writer
  *  branch carries the same shape and none of that meaning. */
 export function bindsSubmitterIdentity(submit: AuthoredSubmit): boolean {
-  return submit.idFrom === "auth.uid" || submit.idFrom === "auth.uid+field" || submit.emailField !== undefined || submit.audience === "participant";
+  return (
+    submit.idFrom === "auth.uid" ||
+    submit.idFrom === "auth.uid+field" ||
+    submit.emailField !== undefined ||
+    // The same meaning as `emailField` with no address in it: the row says
+    // whose it is, and the rules read it. Missing here, an app that identifies
+    // its submitters by uid would have been the one shape that could be padded
+    // by a writer while claiming to be per-person.
+    submit.uidField !== undefined ||
+    submit.audience === "participant"
+  );
 }
 
 /** The fields a rule actually CHECKS the value of, for one collection.
@@ -153,6 +163,19 @@ function authProblems(app: AuthoredApp): string[] {
         `public.submit.${cid}.auth is "none": nobody is signed in, so there is no uid, so \`idFrom\` can only be "auto" and ` +
           `nothing stops the same person submitting again — and again. Use "anonymous": the visitor's browser opens a session by itself, ` +
           `with no sign-in screen, and it gives the rules a uid to bind the record to.`,
+      );
+    }
+    // Asked of "none" ONLY, and so it sits above the early return rather than
+    // beside the emailField guard below: a uid is exactly what an anonymous
+    // session HAS, and `uidField` with `auth: "anonymous"` is the pairing that
+    // has no other spelling. With nobody signed in there is no uid at all, so
+    // `uidOk` is false for every create and the collection accepts nothing —
+    // fail-closed and silent, a form that refuses everything with no reason to
+    // read off it.
+    if (submit.auth === "none" && submit.uidField !== undefined) {
+      problems.push(
+        `public.submit.${cid}.auth is "none" and names uidField '${submit.uidField}': there is no session and therefore no uid, ` +
+          'so the rules refuse every create and the form is shut with nothing to explain it. Use "anonymous" (a session with no sign-in screen, which still has a uid).',
       );
     }
     // NO EARLY RETURN, and that is the point: "none" carries no identity either,
@@ -331,6 +354,12 @@ function ruleReadFields(submit: AuthoredSubmit): { field: string; why: string }[
   const fields: { field: string; why: string }[] = [];
   if (submit.emailField !== undefined) {
     fields.push({ field: submit.emailField, why: `public.submit.<cid>.emailField — the rules compare it to the submitter's verified address` });
+  }
+  if (submit.uidField !== undefined) {
+    fields.push({
+      field: submit.uidField,
+      why: `public.submit.<cid>.uidField — the rules compare it to the submitter's own uid, and refuse a create that carries another`,
+    });
   }
   if ((submit.idFrom === "auth.uid+field" || submit.idFrom === "field") && submit.idField !== undefined) {
     fields.push({ field: submit.idField, why: `public.submit.<cid>.idField — the rules rebuild the document id from it` });
@@ -617,9 +646,35 @@ function protocolProblems(app: AuthoredApp): string[] {
   ];
 }
 
+/** A key whose READER has to have learnt it, declared by an app that says it will run on readers
+ *  that have not.
+ *
+ *  `uidField` is filled from the session and kept OUT of the drawn form, exactly as `emailField`
+ *  is. A reader older than {@link UID_FIELD_PROTOCOL} knows neither half: it draws a box asking the
+ *  visitor to type their uid, sends whatever they type, and the rules refuse it (`uidOk` compares
+ *  the field with the writer's own uid). Nothing errors on the way — the app is simply a form that
+ *  never works, on some people's browsers and not the author's.
+ *
+ *  The floor is the app SAYING SO. It is checked against the publisher above (`protocolProblems`),
+ *  so declaring it also refuses an older build of this package — which would otherwise reject the
+ *  key with a zod error naming the wrong problem. */
+function protocolFloorProblems(app: AuthoredApp): string[] {
+  const users = Object.entries(app.public?.submit ?? {}).filter(([, submit]) => submit.uidField !== undefined);
+  if (users.length === 0) return [];
+  const floor = protocolOf(UID_FIELD_PROTOCOL);
+  const stated = app.protocol === undefined ? null : protocolOf(app.protocol);
+  if (floor !== null && stated !== null && protocolWithin(floor, stated)) return [];
+  const named = users.map(([cid]) => `public.submit.${cid}`).join(", ");
+  return [
+    `${named} declares uidField, which needs \`protocol: "${UID_FIELD_PROTOCOL}"\` at the top of app.json (this app says ${app.protocol === undefined ? "nothing, which is 1.0.0" : `"${app.protocol}"`}).`,
+    "The page fills that field from the session and keeps it out of the form; a reader that predates the key asks the visitor to type their uid instead, and every submission is refused with nothing to explain it.",
+  ];
+}
+
 export function publishProblems(app: AuthoredApp, collections: readonly PublishableCollection[], publisherEmail: string): string[] {
   return [
     ...protocolProblems(app),
+    ...protocolFloorProblems(app),
     ...unknownCidProblems(app, collections),
     ...publisherProblems(app, publisherEmail),
     ...submitOnlyProblems(app),
@@ -761,6 +816,12 @@ function selfUpdateSystemProblems(app: AuthoredApp, cid: string, submit: Authore
       why:
         `it is public.submit.${cid}.emailField, the field the rules compare with the submitter's verified address. ` +
         "A submitter who may rewrite it can move their own record onto somebody else's name",
+    },
+    {
+      field: submit.uidField,
+      why:
+        `it is public.submit.${cid}.uidField, the field the rules compare with the submitter's own uid. ` +
+        "The rules freeze it (`uidHeld`) so the write is refused rather than obeyed — a button the page draws with nothing behind it, and a declaration that reads like it grants something",
     },
     {
       field: submit.idFrom === "field" || submit.idFrom === "auth.uid+field" ? submit.idField : undefined,
@@ -975,8 +1036,8 @@ function viewCollectionProblems(app: AuthoredApp, view: NormalizedView, cid: str
   // declaration, so the question is answerable right here.
   if (view.audience === "participant" && participantScope(app, cid, app.participantRead ?? []) === null) {
     return [
-      `${view.where}.collections names '${cid}', which a participant cannot read: it is not in participantRead, and public.submit.${cid} declares neither ` +
-        'an emailField nor idFrom "auth.uid", so there is no row the rules would call theirs. The page would be refused the read, not handed fewer records.',
+      `${view.where}.collections names '${cid}', which a participant cannot read: it is not in participantRead, and public.submit.${cid} declares no ` +
+        'emailField, no uidField and no idFrom "auth.uid", so there is no row the rules would call theirs. The page would be refused the read, not handed fewer records.',
     ];
   }
   return [];

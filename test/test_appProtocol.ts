@@ -5,13 +5,27 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { APP_PROTOCOL, protocolOf, protocolWithin } from "../src/appProtocol.js";
+import { APP_PROTOCOL, UID_FIELD_PROTOCOL, protocolOf, protocolWithin } from "../src/appProtocol.js";
 
-test("the contract starts at 1.0.0, because the first contract already shipped", () => {
-  // Not 0.1.0: apps published before this key existed carry no version, and a reader treats those as
-  // 1.0.0 — they are the documents in Firestore right now.
-  assert.equal(APP_PROTOCOL, "1.0.0");
+test("the contract stays on major 1, because every reader in the wild draws major 1", () => {
+  // It started at 1.0.0 rather than 0.1.0: apps published before this key existed carry no version,
+  // and a reader treats those as 1.0.0 — they are the documents in Firestore right now.
+  //
+  // The MAJOR is the assertion. A minor moves when a key is added (1.1.0 = `uidField`) and every
+  // reader keeps drawing every app that does not use it; a major makes every older reader refuse
+  // every app published afterwards, whether or not it uses the new thing, so it is a release plan
+  // and not an edit.
+  assert.equal(protocolOf(APP_PROTOCOL)?.major, 1);
   assert.notEqual(protocolOf(APP_PROTOCOL), null);
+});
+
+test("a feature floor is a version this compiler can actually emit", () => {
+  // A floor above what publish writes would refuse every app that declared it — including the one
+  // the floor was added for, which is the shape that gets shipped because nothing else tests it.
+  const emitted = protocolOf(APP_PROTOCOL);
+  const floor = protocolOf(UID_FIELD_PROTOCOL);
+  assert.notEqual(floor, null);
+  assert.ok(emitted !== null && floor !== null && protocolWithin(floor, emitted));
 });
 
 test("a version is three numbers, and anything else is not one", () => {

@@ -1244,3 +1244,141 @@ test("an enum comparison is a string, and publish does not convert one for the r
   refuses(schemaRefProblems(declared(true), enumState(["true", "false"]) as never), "not one of the values");
   refuses(schemaRefProblems(declared("shut"), enumState(["open", "taken"]) as never), "not one of the values");
 });
+
+// --- uidField: identity without an address ----------------------------------
+//
+// The shape it exists for is a shared to-do board, and the reason it exists is
+// that the document id is spent: the claim's id IS the task's id, which is what
+// stops two people taking one task, so identity has to live in a field. The
+// field version there was is `emailField`, and a board showing who is working on
+// what publishes the whole row — a rule cannot hide a field — so the address
+// goes out with the name.
+
+/** The board, as it publishes: one claim per task, taken by whoever is signed
+ *  in, given back by them alone. */
+const boardDraft = (): Record<string, unknown> => ({
+  protocol: "1.1.0",
+  collections: { claims: { submitOnly: true, statusField: "status", transitions: { initial: ["doing"], doing: ["done"] } } },
+  public: {
+    enabled: true,
+    submit: {
+      claims: {
+        auth: "verifiedEmail",
+        uidField: "uid",
+        createFields: ["taskId", "name", "uid", "status"],
+        initialStatus: "doing",
+        idFrom: "field",
+        idField: "taskId",
+        idIn: { collection: "tasks" },
+        selfUpdate: { doing: ["name"] },
+        selfDelete: ["doing"],
+      },
+    },
+  },
+});
+
+const CLAIM_CIDS = [
+  { cid: "claims", primaryKey: "id" },
+  { cid: "tasks", primaryKey: "id" },
+];
+
+const board = (edit: (draft: Record<string, unknown>) => void = () => {}) => {
+  const draft = boardDraft();
+  edit(draft);
+  return publishProblems(app(draft), CLAIM_CIDS, OWNER);
+};
+
+/** The claim declaration inside a draft, as the tests reach for it. */
+const claimOf = (draft: Record<string, unknown>) =>
+  ((draft.public as Record<string, unknown>).submit as Record<string, Record<string, unknown>>).claims as Record<string, unknown>;
+
+test("publishes a board that identifies its submitters by uid and collects no address", () => {
+  // FIRST, because every refusal below is only worth what this accepts.
+  assert.deepEqual(board(), []);
+});
+
+test("uidField binds the record to its submitter, so the collection needs submitOnly", () => {
+  // Same reason as the other four bindings: the writer branch never meets the
+  // public-create checks, so without submitOnly the desk can manufacture rows
+  // that MEAN "this person took this task".
+  refuses(
+    board((draft) => {
+      delete (draft.collections as Record<string, Record<string, unknown>>).claims!.submitOnly;
+    }),
+    "collections.claims.submitOnly must be true",
+  );
+});
+
+test("an app declaring uidField states the protocol floor its readers need", () => {
+  // Not decoration. The page fills that field from the session and keeps it out
+  // of the form, exactly as it does for emailField; a reader that predates the
+  // key draws a box asking the visitor to type their uid, and the rules refuse
+  // what comes back. Nothing errors — the form simply never works, and only on
+  // somebody else's browser.
+  refuses(
+    board((draft) => {
+      delete draft.protocol;
+    }),
+    'needs `protocol: "1.1.0"`',
+  );
+  refuses(
+    board((draft) => {
+      draft.protocol = "1.0.0";
+    }),
+    'needs `protocol: "1.1.0"`',
+  );
+});
+
+test("uidField must be in createFields, like every other field a rule reads", () => {
+  // Unsatisfiable both ways: carrying it fails `hasOnly(createFields)`, omitting
+  // it fails `uidOk`. The submitter cannot resolve either.
+  refuses(
+    board((draft) => {
+      claimOf(draft).createFields = ["taskId", "name", "status"];
+    }),
+    'createFields must include "uid"',
+  );
+});
+
+test("uidField may not be listed in selfUpdate", () => {
+  // The rules freeze it (`uidHeld`), so the declaration does not loosen
+  // anything — it draws a button with nothing behind it and reads, to the next
+  // person, like a granted permission.
+  refuses(
+    board((draft) => {
+      claimOf(draft).selfUpdate = { doing: ["name", "uid"] };
+    }),
+    "selfUpdate.doing lets the submitter write 'uid'",
+  );
+});
+
+test('uidField is refused with auth "none", and accepted with "anonymous"', () => {
+  // The pairing that has no other spelling is the accepted one: an anonymous
+  // session has no address at all, so `emailField` cannot say whose row this is.
+  // With nobody signed in there is no uid either, and every create is refused
+  // with nothing to explain it.
+  refuses(
+    board((draft) => {
+      claimOf(draft).auth = "none";
+    }),
+    "there is no session and therefore no uid",
+  );
+  assert.deepEqual(
+    board((draft) => {
+      claimOf(draft).auth = "anonymous";
+    }),
+    [],
+  );
+});
+
+test("a participant view reaches a collection scoped by uidField", () => {
+  // `ownRow` grants it, so a projection answering "a participant cannot read
+  // this" would be the projection disagreeing with the rules — the one
+  // direction this package is not allowed to be wrong in.
+  assert.deepEqual(
+    board((draft) => {
+      draft.views = [{ id: "mine", audience: "participant", path: "views/mine.html", collections: ["claims"] }];
+    }),
+    [],
+  );
+});

@@ -198,6 +198,12 @@ export interface ProjectedViewCollection {
   scope: "all" | "own";
   /** `scope: "own"` — the field carrying the reader's verified address. */
   emailField?: string;
+  /** `scope: "own"` — the field carrying the reader's uid. The same query as
+   *  `emailField` against a different token claim, and the only one an app
+   *  that never collects an address can be narrowed by. A reader that does not
+   *  know this key sees `scope: "own"` with neither of the other two and must
+   *  refuse the view rather than draw it unnarrowed. */
+  uidField?: string;
   /** `scope: "own"` — the row is the document whose id is the reader's uid. */
   ownDocId?: "auth.uid";
 }
@@ -207,7 +213,11 @@ export interface ProjectedViewCollection {
  *  Mirrors the rules' read branches for someone holding no role: `publicRead` (the collection is
  *  open to the world, so a participant reads it as anybody does), `partRead` (the whole collection,
  *  by `participantRead`) and `ownRow` (their own record, found by the submit declaration's
- *  `emailField` or by a uid-derived id).
+ *  `emailField` or `uidField`, or by a uid-derived id).
+ *
+ *  `uidField` is here because `ownRow` grants it — a projection that said "a participant cannot
+ *  read this" about a row the rules hand over would be a bug in the projection, which is the one
+ *  direction this file is not allowed to be wrong in.
  *
  *  The PUBLIC branch is not an afterthought: a booking app publishes its slots to the world and
  *  lists them again on the participant's own page, so leaving it out refuses the most ordinary
@@ -223,6 +233,7 @@ export function participantScope(app: AuthoredApp, cid: string, participantRead:
   if (app.public?.enabled === true && (app.public.read ?? []).includes(cid)) return { cid, scope: "all" };
   const submit: AuthoredSubmit | undefined = app.public?.submit?.[cid];
   if (submit?.emailField !== undefined) return { cid, scope: "own", emailField: submit.emailField };
+  if (submit?.uidField !== undefined) return { cid, scope: "own", uidField: submit.uidField };
   if (submit?.idFrom === "auth.uid") return { cid, scope: "own", ownDocId: "auth.uid" };
   return null;
 }
