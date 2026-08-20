@@ -128,6 +128,13 @@ test("an app published before the key existed answers NO, rather than everybody"
 
 test("the roster's tier never carries it, whatever the document says", () => {
   // A participant's deletion is `selfDelete` — their own row, from the statuses the rules read.
-  // `writerDelete` reaching that tier would draw a delete button on every row a visitor can see.
+  // `writerDelete` reaching that tier would draw a delete-anything control on a page whose readers
+  // are participants.
+  //
+  // ASKED WITH THE WRITER'S OWN ADDRESS, which is the only version of this test that means
+  // anything: with a stranger's address the roles branch refuses them anyway, so it passes whether
+  // or not the tier is checked at all. The document is what cannot be trusted here — the roster's
+  // is a different one from the staff's, and this package is not the only thing that can write it.
+  assert.equal(capabilityOf(removable, "desk@gym.jp", "roster").withdrawAny, false);
   assert.equal(capabilityOf(removable, "guest@x.jp", "roster").withdrawAny, false);
 });

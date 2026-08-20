@@ -177,11 +177,20 @@ export const capabilityOf = (write: ProjectedViewWrite, address: string, tier: W
     // different job.
     assignees: [...(write.writers ?? []), ...(write.rowWriters ?? [])].sort((left, right) => left.localeCompare(right)),
     withdrawFrom: withdrawable(write, tier),
-    // The role, and only the role. A projection that names no writers never
-    // reaches here (see `namesRoles` above), so an app published before this
-    // key existed answers no rather than everybody — the same fail-closed
-    // direction as the rest of this tier.
-    withdrawAny: write.writerDelete === true && writer,
+    // The role, and only the role, and only on the tier the role belongs to.
+    //
+    // A projection that names no writers never reaches here (see `namesRoles`
+    // above), so an app published before this key existed answers no rather
+    // than everybody — the same fail-closed direction as the rest of this tier.
+    //
+    // THE TIER IS ASKED even though this package only ever compiles
+    // `writerDelete` into the staff document. What is read back is a DOCUMENT,
+    // and the roster's is a different one; a `writerDelete` appearing in it —
+    // written by hand, left by an older build, produced by a publisher that is
+    // not this one — would otherwise hand a delete-anything control to a page
+    // whose readers are participants. `withdrawable` asks the same question in
+    // the same direction one field above.
+    withdrawAny: tier === "member" && write.writerDelete === true && writer,
   };
 };
 

@@ -1457,3 +1457,10 @@ test("a writerDelete nobody holds the role for is refused", () => {
   );
   refuses(problems, 'nobody holds "owner" or "editor"');
 });
+
+test("a writerDelete held by a collection-level editor is accepted", () => {
+  // The paired acceptance, and it pins the role RESOLUTION as well as the check: the per-collection
+  // entry wins over the app-wide one, which is how the rules resolve it (`role()`), so an app-wide
+  // owner scoped down to `viewer` here is refused above while an editor here is not.
+  assert.deepEqual(problemsFor({ members: { [OWNER]: { "*": "owner", bookings: "editor" } }, collections: { bookings: { writerDelete: true } } }), []);
+});
