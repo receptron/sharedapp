@@ -54,3 +54,21 @@ test("the unreadable entries are dropped and the rest survive, one bad one costi
   assert.equal(read.length, 1);
   assert.equal(read[0]?.cid, "bookings");
 });
+
+test("the writer's delete is read STRICTLY as `true`, and anything else is not a permission", () => {
+  // A document read out of Firestore, where anybody who ever held a role could in principle have
+  // written it. `"false"` and `1` are both truthy, and a truthy read here would turn either into a
+  // delete button for the whole staff tier.
+  assert.equal(projectedWriteOf({ cid: "names", writerDelete: true })?.writerDelete, true);
+  assert.equal(projectedWriteOf({ cid: "names", writerDelete: "true" }), null);
+  assert.equal(projectedWriteOf({ cid: "names", writerDelete: 1 }), null);
+});
+
+test("the mirror is carried by whichever half of the withdrawal it arrived with", () => {
+  // The rules ask `mirrorReleased` before they ask who is deleting, so a staff delete needs the
+  // collection name exactly as a submitter's cancellation does.
+  assert.equal(projectedWriteOf({ cid: "bookings", writerDelete: true, withdrawMirror: "slots" })?.withdrawMirror, "slots");
+  assert.equal(projectedWriteOf({ cid: "bookings", selfDelete: ["pending"], withdrawMirror: "slots" })?.withdrawMirror, "slots");
+  // On its own it names a collection nobody may reopen, so it grants nothing and is not kept.
+  assert.equal(projectedWriteOf({ cid: "bookings", withdrawMirror: "slots" }), null);
+});

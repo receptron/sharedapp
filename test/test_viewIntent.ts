@@ -100,3 +100,79 @@ test("mail rides with the move, and takes only the fields the declaration named"
   // naming nothing, over a template that reads as correct.
   assert.deepEqual(read.intent.mail?.data, { status: "requested" });
 });
+
+// --- the staff half of a withdrawal (`writerDelete`)
+//
+// The permission the rules always had and no page could ask for: `deleteWith` opens with
+// `isWriter(r)` and asks nothing about the record, while the projection carried only `selfDelete`,
+// which is the roster's. An owner who wanted to delete a row had to move the whole page to
+// `participant` — giving up assignment, the staff transitions and the roster's answer about who is
+// who — to reach a permission they already held.
+
+/** A staff projection for a collection whose rows the desk may take away. No `selfDelete`: that is
+ *  the other tier's declaration and this page never carries it. */
+const names: ProjectedViewWrite = { cid: "names", writerDelete: true, writers: ["desk@gym.jp"] };
+
+const withdraw = (cid: string, itemId: string) => ({ type: VIEW_MESSAGE.intent, requestId: "r1", kind: "withdraw", cid, itemId });
+
+test("a writer takes any row away, and needs no status to do it", () => {
+  // NO `statusField` on this collection at all, which is the ordinary shape of a roster of names —
+  // and the participant's half cannot express it: `selfDelete` names statuses, so a collection
+  // without one grants nothing there however it is declared.
+  const read = readIntentMessage(withdraw("names", "n1"), [names], () => null, desk);
+  assert.equal(read.ok, true);
+  if (!read.ok) return;
+  assert.equal(read.intent.kind, "withdraw");
+  assert.equal(read.intent.field, undefined, "a withdrawal moves nothing");
+});
+
+test("the status the row is in does not narrow it, because the rules do not either", () => {
+  // A list here would be a check only the page believes in: the writer branch reads no statuses, so
+  // a page hiding the control in some status hides a deletion the rules would have allowed.
+  const moving: ProjectedViewWrite = { ...names, cid: "bookings", statusField: "status", transitions: { requested: ["approved"] } };
+  const read = readIntentMessage(withdraw("bookings", "b1"), [moving], held, desk);
+  assert.equal(read.ok, true);
+});
+
+test("a reader on the same page who holds no role is NOT-PERMITTED, rather than told nothing is writable", () => {
+  // Two different sentences for two different problems. `not-writable` sends the author to the
+  // declaration; the declaration is right here and the answer is the roster.
+  const observer = { address: "observer@gym.jp", tier: "member" as const };
+  const read = readIntentMessage(withdraw("names", "n1"), [names], () => null, observer);
+  assert.equal(read.ok, false);
+  if (read.ok || read.reason === "not-an-intent") return;
+  assert.equal(read.reason, "not-permitted");
+});
+
+test("a collection that declares neither half is still not-writable", () => {
+  const readOnly: ProjectedViewWrite = { cid: "names", writers: ["desk@gym.jp"] };
+  const read = readIntentMessage(withdraw("names", "n1"), [readOnly], () => null, desk);
+  assert.equal(read.ok, false);
+  if (read.ok || read.reason === "not-an-intent") return;
+  assert.equal(read.reason, "not-writable");
+});
+
+test("the mirror rides with a writer's delete too", () => {
+  // `deleteWith` asks `mirrorReleased` BEFORE it asks who is deleting, so a desk deleting a booking
+  // without reopening the slot is refused exactly as a visitor's cancellation would be — and the
+  // slot would otherwise be unsellable for ever.
+  const mirrored: ProjectedViewWrite = { ...names, cid: "bookings", withdrawMirror: "slots" };
+  const read = readIntentMessage(withdraw("bookings", "b1"), [mirrored], held, desk);
+  assert.equal(read.ok, true);
+  if (!read.ok) return;
+  assert.equal(read.intent.mirror, "slots");
+});
+
+test("a participant's own withdrawal is judged exactly as before", () => {
+  // The staff half is a second permission, not a wider setting of this one: the statuses still
+  // apply, because the rules read this list.
+  const own: ProjectedViewWrite = { cid: "bookings", statusField: "status", selfDelete: ["requested"] };
+  const guest = { address: "guest@x.jp", tier: "roster" as const };
+  assert.equal(readIntentMessage(withdraw("bookings", "b1"), [own], held, guest).ok, true);
+
+  const later = (cid: string, itemId: string) => (cid === "bookings" && itemId === "b1" ? { status: "approved" } : null);
+  const refused = readIntentMessage(withdraw("bookings", "b1"), [own], later, guest);
+  assert.equal(refused.ok, false);
+  if (refused.ok || refused.reason === "not-an-intent") return;
+  assert.equal(refused.reason, "illegal-transition");
+});

@@ -80,6 +80,19 @@ export interface ViewCapability {
    *  because the rules answer from the record, but a deletion is allowed only
    *  where the declaration named the statuses. Nothing to infer it from. */
   withdrawFrom: string[];
+  /** May take ANY row here away — the staff half, and a different permission
+   *  rather than a wider setting of the one above.
+   *
+   *  `withdrawFrom` is the submitter's, answered from the RECORD: their own
+   *  row, in one of the statuses `selfDelete` names, which the rules read. This
+   *  is answered from the ROLE, which `deleteWith` resolves with `isWriter` and
+   *  no status condition at all — so it carries no list, and a page holding it
+   *  draws the control on every row it can see.
+   *
+   *  The two never both answer yes: `writerDelete` is projected to the staff
+   *  tier and `selfDelete` to the roster's, so whichever page a reader is on,
+   *  exactly one of these describes them. */
+  withdrawAny: boolean;
 }
 
 /** Which tier's projection this is — the answer to what ABSENCE means. */
@@ -102,7 +115,7 @@ const namesRoles = (write: ProjectedViewWrite): boolean => write.writers !== und
 
 /** Nothing, said explicitly. The staff tier's answer when the projection
  *  carries no roles: see the header for why it is this way round. */
-const NOTHING = { transitionAny: false, transitionOwn: false, assign: false, assignees: [] as string[], withdrawFrom: [] as string[] };
+const NOTHING = { transitionAny: false, transitionOwn: false, assign: false, assignees: [] as string[], withdrawFrom: [] as string[], withdrawAny: false };
 
 const has = (addresses: string[] | undefined, address: string): boolean => (addresses ?? []).includes(address);
 
@@ -136,7 +149,15 @@ export const capabilityOf = (write: ProjectedViewWrite, address: string, tier: W
     // The participant's own row: the rules answer from the record, so there is
     // no role to be missing. The staff tier's absence is the other case.
     if (tier === "roster") {
-      return { cid: write.cid, transitionAny: movable, transitionOwn: false, assign: false, assignees: [], withdrawFrom: withdrawable(write, tier) };
+      return {
+        cid: write.cid,
+        transitionAny: movable,
+        transitionOwn: false,
+        assign: false,
+        assignees: [],
+        withdrawFrom: withdrawable(write, tier),
+        withdrawAny: false,
+      };
     }
     return { cid: write.cid, ...NOTHING };
   }
@@ -156,6 +177,20 @@ export const capabilityOf = (write: ProjectedViewWrite, address: string, tier: W
     // different job.
     assignees: [...(write.writers ?? []), ...(write.rowWriters ?? [])].sort((left, right) => left.localeCompare(right)),
     withdrawFrom: withdrawable(write, tier),
+    // The role, and only the role, and only on the tier the role belongs to.
+    //
+    // A projection that names no writers never reaches here (see `namesRoles`
+    // above), so an app published before this key existed answers no rather
+    // than everybody — the same fail-closed direction as the rest of this tier.
+    //
+    // THE TIER IS ASKED even though this package only ever compiles
+    // `writerDelete` into the staff document. What is read back is a DOCUMENT,
+    // and the roster's is a different one; a `writerDelete` appearing in it —
+    // written by hand, left by an older build, produced by a publisher that is
+    // not this one — would otherwise hand a delete-anything control to a page
+    // whose readers are participants. `withdrawable` asks the same question in
+    // the same direction one field above.
+    withdrawAny: tier === "member" && write.writerDelete === true && writer,
   };
 };
 

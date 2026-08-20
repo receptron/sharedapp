@@ -408,3 +408,58 @@ test("and never the staff half, for the reason the participant never gets it", (
   assert.equal(visitor?.assigneeField, undefined);
   assert.equal(visitor?.mail, undefined);
 });
+
+// --- `writerDelete`: the staff half of a withdrawal
+//
+// It is projected from a different declaration to a different tier from `selfDelete`, because they
+// are different permissions: the rules answer one with `isWriter` and no status, and the other from
+// the record plus the statuses the list names. The gap this fills was silent — a member page's
+// `withdrawFrom` came back empty exactly as it does for a collection nobody may delete from — and
+// the workaround it forced was to publish the OWNER's page as `participant`, which costs assignment,
+// the staff transitions and the roster's answer about who is who.
+
+/** A salon whose desk may take a booking off the books entirely. */
+const deletable = () =>
+  salon({
+    collections: {
+      bookings: { ...SALON_COLLECTIONS.bookings, writerDelete: true },
+      names: { writerDelete: true },
+    },
+  });
+
+test("the staff tier is handed the writer's delete, and the roster's tier is not", () => {
+  const staff = writeFor(deletable(), "member", "bookings");
+  assert.equal(staff?.writerDelete, true);
+  // And the participant's half is untouched by it: `selfDelete` is what the rules read for THEM,
+  // and this app declares none.
+  assert.equal(staff?.selfDelete, undefined);
+  assert.equal(writeFor(deletable(), "participant", "bookings")?.writerDelete, undefined);
+  assert.equal(writeFor(deletable(), "public", "bookings")?.writerDelete, undefined);
+});
+
+test("a collection with NO status is deletable by a writer, which the participant's half cannot express", () => {
+  // `selfDelete` names statuses, so a roster of names — no `statusField`, nothing to move — grants
+  // nothing there however it is declared. The role branch asks no status at all.
+  const staff = writeFor(deletable(), "member", "names");
+  assert.equal(staff?.writerDelete, true);
+  assert.equal(staff?.statusField, undefined);
+});
+
+test("the mirror rides with a writer's delete, because the rules ask for it before they ask who", () => {
+  // `deleteWith` opens with `mirrorReleased`. A desk handed the permission and not the collection
+  // name could only ever be refused — and the slot would stay unsellable with nothing to show.
+  const mirrored = salon({
+    collections: { bookings: { ...SALON_COLLECTIONS.bookings, writerDelete: true } },
+    public: { submit: { bookings: { ...SALON_PUBLIC.submit.bookings, mirror: "slots", selfDelete: ["pending"] } } },
+  });
+  assert.equal(writeFor(mirrored, "member", "bookings")?.withdrawMirror, "slots");
+  assert.equal(writeFor(mirrored, "participant", "bookings")?.withdrawMirror, "slots");
+});
+
+test("a collection whose ONLY writable thing is the writer's delete still gets an entry", () => {
+  // `writeFor` drops an entry that says nothing — `names` has no transitions, no assignment and no
+  // roster half — so without this the permission would be projected into nothing at all.
+  const entry = writeFor(deletable(), "member", "names");
+  assert.notEqual(entry, null);
+  assert.deepEqual(entry?.writers, [OWNER]);
+});
