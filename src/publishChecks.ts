@@ -30,6 +30,7 @@ import type { CollectionFieldSpec, CollectionSchema } from "@mulmoclaude/core/co
 import { isSafeCustomViewPath } from "@mulmoclaude/core/collection/server";
 import { normalizeViews, participantScope, type NormalizedView } from "./appViews.js";
 import { APP_PROTOCOL, protocolOf, protocolWithin } from "./appProtocol.js";
+import { writersOf } from "./appViews.js";
 import type { AuthoredApp, AuthoredCollectionConfig, AuthoredSubmit } from "./publishManifest.js";
 
 /** What publish knows about a shared collection in this repository, as far as
@@ -663,6 +664,7 @@ export function publishProblems(app: AuthoredApp, collections: readonly Publisha
     ...coherenceProblems(app, collections),
     ...primaryKeyProblems(app, collections),
     ...assigneeProblems(app),
+    ...writerDeleteProblems(app),
     ...stampProblems(app),
     ...systemBindingProblems(app),
     ...systemFieldProblems(app),
@@ -719,6 +721,32 @@ function primaryKeyProblems(app: AuthoredApp, collections: readonly PublishableC
  *  to be right everywhere, and where it is missing it silently means "no
  *  access to this collection" rather than "no scoping here".
  */
+/** A deletion nobody can ever make, and a deletion nobody is left to make.
+ *
+ *  `writerDelete` is a control on a staff page, and both failures below draw it
+ *  and then refuse every press — the mismatch the whole projection exists to
+ *  prevent, and neither one raises anything at the moment it happens: an
+ *  `immutable` collection refuses the delete in the rules with a bare
+ *  permission error, and an app with no writer refuses it because there is
+ *  nobody the capability resolves for. */
+function writerDeleteProblems(app: AuthoredApp): string[] {
+  return Object.entries(app.collections ?? {}).flatMap(([cid, collection]) => {
+    if (collection.writerDelete !== true) return [];
+    if (collection.immutable === true) {
+      return [
+        `collections.${cid} declares both writerDelete and immutable. The rules refuse EVERY delete on an immutable collection, owner included ` +
+          '(`deleteWith` asks `!flagOn(c, "immutable")` before it asks who is asking), so the page would draw a control that cannot work. Drop whichever one ' +
+          "the app does not mean.",
+      ];
+    }
+    if (writersOf(app, cid).length > 0) return [];
+    return [
+      `collections.${cid} declares writerDelete, and nobody holds "owner" or "editor" on it. The permission is a ROLE, so a page would draw the control for ` +
+        "everybody the staff tier admits and the rules would refuse all of them. Give somebody the role, or drop the key.",
+    ];
+  });
+}
+
 function assigneeProblems(app: AuthoredApp): string[] {
   return Object.entries(app.members).flatMap(([email, roles]) =>
     Object.entries(roles).flatMap(([cid, role]) => {

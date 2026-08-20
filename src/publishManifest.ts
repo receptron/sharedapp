@@ -99,6 +99,26 @@ const CollectionConfigZ = z
     transitions: z.record(z.string().trim().min(1), z.array(z.string().trim().min(1))).optional(),
     immutable: z.boolean().optional(),
     submitOnly: z.boolean().optional(),
+    /** A WRITER may take a row of this collection away.
+     *
+     *  The rules already allow it — `deleteWith`'s first branch is
+     *  `isWriter(r)`, with no status condition — and nothing here grants it.
+     *  What was missing was the DECLARATION: `selfDelete` is projected to the
+     *  roster tier only, so a staff page had no way to ask for a deletion the
+     *  rules were waiting to allow, and an author who wanted one had to move
+     *  the page to `participant` and lose the staff half of its projection.
+     *
+     *  A BOOLEAN, unlike `selfDelete`'s list of statuses, and the difference is
+     *  which side reads it. `selfDelete` is read by the rules
+     *  (`s.get("selfDelete", [])`), so its statuses are enforced; the writer
+     *  branch reads nothing, so a list here would be a narrowing only the page
+     *  believes in — declaration and enforcement disagreeing, which is what
+     *  this whole projection exists to prevent. An app that wants a writer
+     *  stopped in some status says so with `immutable`, or not at all.
+     *
+     *  It needs no `statusField`: a writer may delete a row that has no status,
+     *  which is the ordinary case for a roster of names. */
+    writerDelete: z.boolean().optional(),
     /** The field naming the member a row belongs to, for the `assignee` role.
      *
      *  Holds an ADDRESS, because that is the only thing the rules can compare

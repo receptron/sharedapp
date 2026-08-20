@@ -240,13 +240,42 @@ const judgeAssign = (write: ProjectedViewWrite, asked: { to?: string }, who: Who
   return { ok: true, field: write.assigneeField };
 };
 
-/** The withdrawal half.
+/** Whatever else was decided, the mirror rides with it: the rules ask
+ *  `mirrorReleased` before they ask who is deleting, so a delete that leaves
+ *  the projection saying `taken` is refused whoever made it. */
+const withdrawn = (write: ProjectedViewWrite): Judged => {
+  if (write.withdrawMirror === undefined) {
+    return { ok: true };
+  }
+  return { ok: true, mirror: write.withdrawMirror };
+};
+
+/** The withdrawal half, and it answers TWO different permissions.
  *
- *  The declaration's list against the status the page holds — and, like a
- *  transition, a page holding no such record claims nothing. Whether the row is
- *  the READER'S is not checked here at all: `ownRow` compares an address the
- *  projection deliberately does not carry. That one is the rules' to answer. */
-const judgeWithdraw = (write: ProjectedViewWrite, record: Record<string, unknown> | null): Judged => {
+ *  A WRITER takes any row away, in any status — `deleteWith`'s first branch is
+ *  `isWriter(r)` and asks nothing about the record — so there is no list to
+ *  compare and no status to hold it against. The capability resolves the role;
+ *  see `ProjectedViewWrite.writerDelete` for why it carries no statuses.
+ *
+ *  A SUBMITTER takes their OWN row away, from the statuses `selfDelete` names,
+ *  which the rules read. That is the list below, checked against the status the
+ *  page holds — and, like a transition, a page holding no such record claims
+ *  nothing. Whether the row is theirs is not checked here at all: `ownRow`
+ *  compares an address the projection deliberately does not carry. That one is
+ *  the rules' to answer.
+ *
+ *  The refusals are different too. A staff page whose collection declares
+ *  `writerDelete` and whose reader is a `viewer` is `not-permitted` — the
+ *  control exists and is not theirs — where a collection that declares neither
+ *  is `not-writable`. Both used to be `not-writable`, which sent the author of
+ *  the page to the declaration when the answer was the roster. */
+const judgeWithdraw = (write: ProjectedViewWrite, record: Record<string, unknown> | null, who: Who): Judged => {
+  if (capabilityOf(write, who.address, who.tier).withdrawAny) {
+    return withdrawn(write);
+  }
+  if (write.writerDelete === true) {
+    return { ok: false, reason: "not-permitted" };
+  }
   const allowed = write.selfDelete ?? [];
   if (write.statusField === undefined || allowed.length === 0) {
     return NOT_WRITABLE;
@@ -255,10 +284,7 @@ const judgeWithdraw = (write: ProjectedViewWrite, record: Record<string, unknown
   if (current !== null && !allowed.includes(current)) {
     return ILLEGAL;
   }
-  if (write.withdrawMirror === undefined) {
-    return { ok: true };
-  }
-  return { ok: true, mirror: write.withdrawMirror };
+  return withdrawn(write);
 };
 
 const judge = (declared: ProjectedViewWrite, asked: AskedIntent, record: RecordLookup, who: Who): Judged => {
@@ -266,7 +292,7 @@ const judge = (declared: ProjectedViewWrite, asked: AskedIntent, record: RecordL
     return judgeAssign(declared, asked, who);
   }
   if (asked.kind === "withdraw") {
-    return judgeWithdraw(declared, record(asked.cid, asked.itemId));
+    return judgeWithdraw(declared, record(asked.cid, asked.itemId), who);
   }
   return judgeTransition(declared, asked, record(asked.cid, asked.itemId), who);
 };

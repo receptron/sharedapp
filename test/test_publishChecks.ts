@@ -1430,3 +1430,30 @@ test("the same names in different collections are not a collision", () => {
   };
   assert.deepEqual(publishProblems(app(draft), [...CLAIM_CIDS, { cid: "notes", primaryKey: "id" }], OWNER), []);
 });
+
+// --- writerDelete: a control that cannot work must not be published
+
+test("a writerDelete on an immutable collection is refused, and on a mutable one is not", () => {
+  // `deleteWith` asks `!flagOn(c, "immutable")` before it asks who is asking, so this pair draws a
+  // delete button for the owner and refuses every press — with a bare permission error, which says
+  // nothing about the declaration that caused it.
+  refuses(problemsFor({ collections: { bookings: { writerDelete: true, immutable: true } } }), "writerDelete and immutable");
+  assert.deepEqual(problemsFor({ collections: { bookings: { writerDelete: true } } }), []);
+});
+
+test("a writerDelete nobody holds the role for is refused", () => {
+  // The permission is a ROLE. With no owner or editor on the collection the capability resolves to
+  // "no" for everybody the staff tier admits, so the page would draw the control for all of them —
+  // the declaration/enforcement mismatch this projection exists to prevent.
+  const problems = publishProblems(
+    AuthoredAppZ.parse({
+      aid: "app_test",
+      // An app-wide owner is required elsewhere; this one holds it nowhere near `bookings`.
+      members: { [OWNER]: { "*": "owner", bookings: "viewer" } },
+      collections: { bookings: { writerDelete: true } },
+    }),
+    CIDS,
+    OWNER,
+  );
+  refuses(problems, 'nobody holds "owner" or "editor"');
+});

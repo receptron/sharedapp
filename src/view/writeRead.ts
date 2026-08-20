@@ -94,15 +94,30 @@ const addAssignment = (write: ProjectedViewWrite, value: Record<string, unknown>
  *  contested slot declares no mirror, and a withdrawal there is one delete.
  *  An empty list is dropped rather than kept — it reads as "yes, they may" and
  *  means the opposite, and publish refuses it upstream for the same reason. */
+/** The mirror, read back for whichever half carried it. Attached only beside a
+ *  permission: on its own it names a collection nobody may reopen. */
+const addMirror = (write: ProjectedViewWrite, value: Record<string, unknown>): void => {
+  if (typeof value.withdrawMirror === "string" && value.withdrawMirror !== "") {
+    write.withdrawMirror = value.withdrawMirror;
+  }
+};
+
 const addWithdrawal = (write: ProjectedViewWrite, value: Record<string, unknown>): void => {
+  // The STAFF half, which is a role and carries no statuses — see
+  // `ProjectedViewWrite.writerDelete`. Read strictly as `true`: a document
+  // carrying anything else says nothing, and a truthy read here would make
+  // `"false"` a permission.
+  if (value.writerDelete === true) {
+    write.writerDelete = true;
+    addMirror(write, value);
+    return;
+  }
   const selfDelete = stringsOf(value.selfDelete);
   if (selfDelete.length === 0) {
     return;
   }
   write.selfDelete = selfDelete;
-  if (typeof value.withdrawMirror === "string" && value.withdrawMirror !== "") {
-    write.withdrawMirror = value.withdrawMirror;
-  }
+  addMirror(write, value);
 };
 
 export const projectedWriteOf = (value: unknown): ProjectedViewWrite | null => {

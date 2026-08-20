@@ -103,3 +103,31 @@ test("a reader with no verified address is a member of nothing, and still has th
 test("the assignee picker is the two role lists, sorted, and nobody else", () => {
   assert.deepEqual(capabilitiesFor([staff], "desk@gym.jp", "member").bookings?.assignees, ["coach@gym.jp", "desk@gym.jp"]);
 });
+
+// --- `withdrawAny`: the staff half, resolved against the roster
+//
+// `withdrawFrom` is the submitter's list of statuses and this is a role, so the two are separate
+// fields rather than one with a wider setting. A page asks whichever one its tier carries.
+
+const removable: ProjectedViewWrite = { cid: "names", writerDelete: true, writers: ["desk@gym.jp"], rowWriters: ["coach@gym.jp"] };
+
+test("a writer may take any row away; an assignee and an observer may not", () => {
+  assert.equal(capabilityOf(removable, "desk@gym.jp", "member").withdrawAny, true);
+  // An assignee writes the rows assigned to them and the rules stop there: `deleteWith`'s second
+  // branch wants `isAssigned` AND `assignedBefore`, which is about the row, not about this list.
+  assert.equal(capabilityOf(removable, "coach@gym.jp", "member").withdrawAny, false);
+  assert.equal(capabilityOf(removable, "observer@gym.jp", "member").withdrawAny, false);
+});
+
+test("an app published before the key existed answers NO, rather than everybody", () => {
+  // The same fail-closed direction as the rest of this tier: absence on the staff side is "refuse",
+  // because a projection that cannot tell a receptionist from an observer must not be read as
+  // permission. Every projection in the world is in this state until its app is republished.
+  assert.equal(capabilityOf({ cid: "names", writers: ["desk@gym.jp"] }, "desk@gym.jp", "member").withdrawAny, false);
+});
+
+test("the roster's tier never carries it, whatever the document says", () => {
+  // A participant's deletion is `selfDelete` — their own row, from the statuses the rules read.
+  // `writerDelete` reaching that tier would draw a delete button on every row a visitor can see.
+  assert.equal(capabilityOf(removable, "guest@x.jp", "roster").withdrawAny, false);
+});

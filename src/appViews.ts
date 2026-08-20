@@ -330,6 +330,19 @@ export interface ProjectedViewWrite {
    *  about is real: the row is gone afterwards, and with `mirror` the slot is
    *  back on the grid. */
   selfDelete?: string[];
+  /** A writer may delete ANY row here (`collections[cid].writerDelete`).
+   *  `member` tier only, and the counterpart of `selfDelete` rather than a
+   *  variant of it: that one names the statuses a SUBMITTER may take their own
+   *  row away from and the rules read the list; this one is the role branch,
+   *  which the rules answer with `isWriter` and no status at all.
+   *
+   *  Which is why it is a flag and not a list. A page told "these statuses" for
+   *  a check the rules do not make would hide a button the rules would have
+   *  allowed, and the reader has no way to find that out.
+   *
+   *  WHO the writers are is `writers` beside it — the capability resolves the
+   *  two together, so a `viewer` on the same tier is offered nothing. */
+  writerDelete?: boolean;
   /** The projection collection the withdrawal must reopen IN THE SAME BATCH
    *  (`public.submit[cid].mirror`). Rides with `selfDelete` and only with it:
    *  the rules refuse a delete that leaves the mirror saying `taken`, so a page
@@ -379,8 +392,12 @@ function holdersOf(app: AuthoredApp, cid: string, roles: readonly string[]): str
  *
  *  A SNAPSHOT, like everything else published: a member added since the last
  *  publish is absent until the next one. The rules are the authority either
- *  way — this only decides which buttons are drawn. */
-function writersOf(app: AuthoredApp, cid: string): string[] {
+ *  way — this only decides which buttons are drawn.
+ *
+ *  EXPORTED for `publishChecks`, which refuses a `writerDelete` that names a
+ *  role nobody holds. One reading of "who is a writer here", so the check and
+ *  the projection cannot disagree about the app they are both looking at. */
+export function writersOf(app: AuthoredApp, cid: string): string[] {
   return holdersOf(app, cid, ["owner", "editor"]);
 }
 
@@ -408,12 +425,40 @@ function transitionPart(app: AuthoredApp, audience: ViewAudience, cid: string): 
  *  status field to read it against — the rules take the CURRENT status off the
  *  record before consulting the list, so a collection without one grants
  *  nothing however the key is written (publish refuses that pair). */
+/** The mirror a delete has to reopen in the same batch, wherever the delete
+ *  comes from.
+ *
+ *  It rides with BOTH halves below, and it has to: `deleteWith` asks
+ *  `mirrorReleased` before it asks who is deleting, so a staff page handed the
+ *  permission and not the collection name can only ever produce a refusal — the
+ *  same trap the participant's half documents. */
+function withdrawMirrorPart(app: AuthoredApp, cid: string): Partial<ProjectedViewWrite> {
+  const mirror = app.public?.submit?.[cid]?.mirror;
+  return mirror === undefined ? {} : { withdrawMirror: mirror };
+}
+
+/** What may take a row of `cid` away, for this audience.
+ *
+ *  TWO DIFFERENT PERMISSIONS, and they are not two spellings of one. The staff
+ *  half is a ROLE (`isWriter`, any row, any status); the participant's half is
+ *  the RECORD (`ownRow` plus the statuses `selfDelete` names, which the rules
+ *  read). So they are projected from different declarations to different tiers,
+ *  and neither is inferred from the other.
+ *
+ *  The staff half was missing entirely until now, and its absence did not read
+ *  as one: `withdrawFrom` came back empty on a member's page exactly as it does
+ *  for a collection nobody may delete from, so the answer to "the owner cannot
+ *  delete here" was "declare it somewhere else" — which meant moving the page
+ *  to `participant` and giving up assignment, the staff transitions and the
+ *  roster's answer about who is who. */
 function withdrawPart(app: AuthoredApp, audience: ViewAudience, cid: string): Partial<ProjectedViewWrite> {
-  const submit = app.public?.submit?.[cid];
-  const selfDelete = submit?.selfDelete;
-  if (audience === "member" || selfDelete === undefined || app.collections?.[cid]?.statusField === undefined) return {};
-  if (submit?.mirror === undefined) return { selfDelete };
-  return { selfDelete, withdrawMirror: submit.mirror };
+  if (audience === "member") {
+    if (app.collections?.[cid]?.writerDelete !== true) return {};
+    return { writerDelete: true, ...withdrawMirrorPart(app, cid) };
+  }
+  const selfDelete = app.public?.submit?.[cid]?.selfDelete;
+  if (selfDelete === undefined || app.collections?.[cid]?.statusField === undefined) return {};
+  return { selfDelete, ...withdrawMirrorPart(app, cid) };
 }
 
 function assignPart(app: AuthoredApp, audience: ViewAudience, cid: string): Partial<ProjectedViewWrite> {
