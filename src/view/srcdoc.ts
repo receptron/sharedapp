@@ -380,6 +380,46 @@ ${gestureScript()}
 </script>
 `;
 
+/** THE PAGE'S OWN CANVAS, and the floor under every published view.
+ *
+ *  A view is a DOCUMENT, and a document has a paper colour. This one had none:
+ *  the srcdoc was the CSP, the bootstrap and the author's HTML, and an author
+ *  who sets `color` without setting a background — which is every template this
+ *  ecosystem ships and every page written from one — leaves the canvas
+ *  transparent. What shows through is then whatever the EMBEDDER painted behind
+ *  the frame, so the same page was black-on-white on the public site and
+ *  black-on-near-black in MulmoTerminal's pane, unreadable, with nothing wrong
+ *  in it.
+ *
+ *  It belongs here rather than in either host for the reason the parent does:
+ *  the public page, the author's preview pane and the headless run all render
+ *  through this one function, and a colour decided on the host side is a
+ *  colour the author previews differently from what a visitor sees.
+ *
+ *  A FLOOR, NOT A HOUSE STYLE. Three declarations, and the restraint is the
+ *  design: canvas, foreground, and `color-scheme` — which is the one nobody
+ *  remembers and the one the UA reads for form controls, scrollbars and its own
+ *  defaults, so a reader whose OS is dark gets light widgets on the light paper
+ *  they are actually looking at. No font, no spacing, no max-width: a default
+ *  the author has to fight is worse than no default at all.
+ *
+ *  IT IS OVERRIDDEN BY WRITING THE SAME PROPERTY. The selector is the bare
+ *  element (specificity 0,0,1 — lower than `:root`) and this sheet is emitted
+ *  BEFORE the author's HTML, so any rule of theirs wins on order alone. A page
+ *  that wants to be dark says so and is dark, in both hosts.
+ *
+ *  ONE TRAP, and it is why this paints `html`: a background on the root element
+ *  stops the first `<body>`'s background from propagating to the canvas (CSS
+ *  Backgrounds 3, §2.11.2). A page that paints `body` and not `html` therefore
+ *  gets its colour on the body box and this white around it. No template ships
+ *  that shape today — none of them paints a canvas at all — and the guidance
+ *  that goes with this change is "paint `html` if you paint anything".
+ *
+ *  THIS IS THE RUNTIME, NOT THE PUBLISH CONTRACT. Nothing here is projected,
+ *  stored or versioned: it reaches every app already published the moment a
+ *  host ships this package, with no republish and no `APP_PROTOCOL` move. */
+const CANVAS = `<style>html { color-scheme: light; background: #ffffff; color: #1c1c20; }</style>`;
+
 /** The document the iframe renders: our bootstrap, then the author's HTML.
  *
  *  The CSP is deliberately NOT the host's. That one allows several CDNs and
@@ -390,6 +430,9 @@ ${gestureScript()}
 export const publicViewSrcdoc = (html: string, nonce: string): string =>
   [
     `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src 'unsafe-inline'; connect-src 'none'">`,
+    // Before the bootstrap, and long before the author: everything after this
+    // line may overrule it, which is what makes it a floor.
+    CANVAS,
     publicViewBootstrap(nonce),
     html,
   ].join("\n");
