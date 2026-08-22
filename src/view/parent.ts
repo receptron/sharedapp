@@ -472,7 +472,14 @@ export const viewParent = (ports: ViewParentPorts, config: () => ViewSubmitConfi
     // written and this confirmation went then. What follows is still ours — the answer, and the
     // state after whatever the host was doing — and asking the cells again would deny it, because
     // they are empty or hold somebody else's request by now.
-    const current = closed || pending.value === request;
+    //
+    // AND STILL THE PAGE THAT ASKED. `closed` says only that the cells are no longer ours to read,
+    // which a restart makes true as surely as a host reporting the write does — so on its own it
+    // would let a write that finished behind a REPLACED page push a state message onto the page
+    // that replaced it. `sendState` posts to whatever channel is open now, and the new page's own
+    // handshake is what its state belongs to. Comparing the channel is the same test the answer
+    // below already makes, applied to the other half.
+    const current = (closed || pending.value === request) && open === channel;
     if (!closed && pending.value === request) {
       settle();
     }

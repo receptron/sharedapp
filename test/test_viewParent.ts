@@ -471,3 +471,59 @@ test("closing early does not close the confirmation the NEXT page opened", async
   assert.equal(cell.pending.value?.requestId, "r-second", "and still untouched afterwards");
   assert.equal(first.posted.at(-1)?.requestId, "r-submit", "the write that asked is still answered");
 });
+
+test("a write that closed early and finished behind a REPLACED page tells only the page that asked", async () => {
+  // The half `closed` alone gets wrong. It says the cells are not ours to read any more — which a
+  // restart makes true just as surely as the host reporting the write does — so a write still
+  // running when the reader navigates would have pushed its state onto the page that replaced it.
+  // The answer was always scoped to the channel it arrived on; this is the same test for the state.
+  const first = fakeChannel();
+  const second = fakeChannel();
+  let next = first;
+  const cell = cells();
+  let written: () => void = () => {
+    throw new Error("the port was never called");
+  };
+  let release: (outcome: { ok: boolean }) => void = () => {
+    throw new Error("the write was released before it started");
+  };
+  const parent = viewParent(
+    {
+      channel: () => next.channel,
+      state: () => ({}),
+      submit: (_request, say) => {
+        written = say;
+        return new Promise((resolve) => {
+          release = resolve;
+        });
+      },
+      defect: () => {},
+    },
+    () => config,
+    () => NONCE,
+    cell,
+  );
+  parent.receive(ready);
+  first.send({ nonce: NONCE });
+  first.posted.length = 0;
+  first.send(ASKS[0].message);
+  await settle();
+  const writing = parent.accept();
+  written();
+  assert.equal(cell.pending.value, null, "the host said the record landed, so the dialog went");
+
+  // The reader navigates, and the page that replaces them completes its own handshake.
+  parent.restart();
+  next = second;
+  parent.receive(ready);
+  second.send({ nonce: NONCE });
+  second.posted.length = 0;
+
+  release({ ok: true });
+  await writing;
+  await settle();
+
+  assert.deepEqual([...second.posted], [], "the replacement page hears nothing about a write it did not make");
+  assert.equal(first.posted.at(-1)?.requestId, "r-submit", "and the page that asked is still answered");
+  assert.equal(first.posted.at(-1)?.ok, true);
+});
