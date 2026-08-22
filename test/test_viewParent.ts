@@ -338,3 +338,136 @@ test("a write that lands after a restart answers its OWN page, and settles nobod
   assert.deepEqual([...second.posted], [], "nothing from the old write reaches the new page");
   assert.equal(first.posted.at(-1)?.requestId, "r-submit", "the page that asked is answered on its own channel");
 });
+
+// --- `written()`: the confirmation is about the RECORD, not about the host's follow-up work ------
+//
+// A host that refreshes after a write held the dialog open while it did — a modal over the page for
+// two more round trips, and for ever if a read hung. It was hidden for as long as MulmoServer's
+// member page happened to refresh by remounting the frame, which took the dialog with it; the day
+// that stopped, the dialog stayed up on every post.
+
+test("the host may close the confirmation when the record lands, and keep working behind it", async () => {
+  const far = fakeChannel();
+  const cell = cells();
+  // Initialised to a throw rather than to null: assigned inside the port, TypeScript narrows a
+  // nullable to `null` at the call below, and a test that has not started its write should say so
+  // loudly anyway.
+  let release: (outcome: { ok: boolean }) => void = () => {
+    throw new Error("the write was released before it started");
+  };
+  const parent = opened(
+    {
+      state: () => ({}),
+      // The shape a refreshing host has: write, SAY SO, then read back.
+      submit: (_request, written) => {
+        written();
+        return new Promise((resolve) => {
+          release = resolve;
+        });
+      },
+      defect: () => {},
+    },
+    far,
+    cell,
+  );
+  far.send(ASKS[0].message);
+  await settle();
+  assert.equal(cell.pending.value?.requestId, "r-submit", "the confirmation opened");
+
+  const writing = parent.accept();
+  await settle();
+  assert.equal(cell.pending.value, null, "and closed on the write, with the port still outstanding");
+  assert.equal(cell.sending.value, false);
+  // What has NOT happened yet: the page is answered when the port settles, so a host that refreshes
+  // first still sends the fresh state after the answer rather than before it.
+  assert.deepEqual([...far.posted], [], "nobody has been answered yet");
+
+  release({ ok: true });
+  await writing;
+  assert.equal(far.posted.at(0)?.requestId, "r-submit");
+  assert.equal(far.posted.at(0)?.ok, true);
+  assert.equal(far.posted.at(-1)?.type, VIEW_MESSAGE.state, "and the state that follows is the refreshed one");
+});
+
+test("a host that ignores `written` is unchanged: the dialog closes when the write does", async () => {
+  const far = fakeChannel();
+  const cell = cells();
+  // Initialised to a throw rather than to null: assigned inside the port, TypeScript narrows a
+  // nullable to `null` at the call below, and a test that has not started its write should say so
+  // loudly anyway.
+  let release: (outcome: { ok: boolean }) => void = () => {
+    throw new Error("the write was released before it started");
+  };
+  const parent = opened(
+    {
+      state: () => ({}),
+      submit: () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+      defect: () => {},
+    },
+    far,
+    cell,
+  );
+  far.send(ASKS[0].message);
+  await settle();
+  const writing = parent.accept();
+  await settle();
+  assert.equal(cell.pending.value?.requestId, "r-submit", "still open while the port is outstanding");
+
+  release({ ok: true });
+  await writing;
+  assert.equal(cell.pending.value, null);
+});
+
+test("closing early does not close the confirmation the NEXT page opened", async () => {
+  // The same property the in-flight test above pins, on the new path: `written` may arrive after a
+  // restart, and the cells then belong to somebody else. The write still gets its answer, on the
+  // channel it came in on.
+  const first = fakeChannel();
+  const cell = cells();
+  let written: () => void = () => {
+    throw new Error("the port was never called");
+  };
+  // Initialised to a throw rather than to null: assigned inside the port, TypeScript narrows a
+  // nullable to `null` at the call below, and a test that has not started its write should say so
+  // loudly anyway.
+  let release: (outcome: { ok: boolean }) => void = () => {
+    throw new Error("the write was released before it started");
+  };
+  const parent = viewParent(
+    {
+      channel: () => first.channel,
+      state: () => ({}),
+      submit: (_request, say) => {
+        written = say;
+        return new Promise((resolve) => {
+          release = resolve;
+        });
+      },
+      defect: () => {},
+    },
+    () => config,
+    () => NONCE,
+    cell,
+  );
+  parent.receive(ready);
+  first.send({ nonce: NONCE });
+  first.posted.length = 0;
+  first.send(ASKS[0].message);
+  await settle();
+  const writing = parent.accept();
+
+  // The reader navigates; a new page opens a confirmation of its own.
+  parent.restart();
+  cell.pending.value = { requestId: "r-second", cid: "bookings", values: { note: "y" } };
+
+  written();
+  assert.equal(cell.pending.value?.requestId, "r-second", "the new page's dialog is untouched");
+
+  release({ ok: true });
+  await writing;
+  assert.equal(cell.pending.value?.requestId, "r-second", "and still untouched afterwards");
+  assert.equal(first.posted.at(-1)?.requestId, "r-submit", "the write that asked is still answered");
+});

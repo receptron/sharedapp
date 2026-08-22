@@ -109,9 +109,13 @@ const performed = (perform: PerformIntent, data: unknown): Promise<IntentAnswer 
 
 /** `submit` as a promise even when it throws on the way to returning one. The port is called in the
  *  CURRENT tick — see the note at the call site — and only its failure is deferred. */
-const attempted = (write: (pending: PendingSubmit) => Promise<{ ok: boolean; error?: string }>, request: PendingSubmit) => {
+const attempted = (
+  write: (pending: PendingSubmit, written: () => void) => Promise<{ ok: boolean; error?: string }>,
+  request: PendingSubmit,
+  written: () => void,
+) => {
   try {
-    return write(request);
+    return write(request, written);
   } catch (error) {
     return Promise.reject(error instanceof Error ? error : new Error(String(error)));
   }
@@ -154,8 +158,21 @@ export interface ViewParentPorts {
    *
    *  OPTIONAL — a host that reads and never writes (MulmoTerminal's headless run) leaves it out and
    *  every submission is refused {@link READ_ONLY}. A host that offers it MUST draw the
-   *  confirmation: nothing is written until `accept()`. */
-  submit?: ((pending: PendingSubmit) => Promise<{ ok: boolean; error?: string }>) | undefined;
+   *  confirmation: nothing is written until `accept()`.
+   *
+   *  `written` IS THE SECOND HALF OF THE CONTRACT, and hosts that ignore it behave exactly as
+   *  before. The confirmation is open for as long as this promise is — that is what "nothing is
+   *  written until you accept" costs — so a host that keeps working after the record has landed
+   *  keeps a modal over the page while it does. Read-backs are the ordinary case: the view's rows
+   *  and the reader's own rows are both older than the truth the moment a write succeeds, and a
+   *  host that refreshes them before resolving held the dialog for two more round trips, or for
+   *  ever if one of them hung.
+   *
+   *  So a host may call `written()` the moment the RECORD is written, and the confirmation closes
+   *  there — which is the thing the visitor was actually asked about. Everything else is unchanged:
+   *  the page is answered when this promise settles, and the state that follows is the refreshed
+   *  one. Calling it more than once, or after the confirmation has gone, does nothing. */
+  submit?: ((pending: PendingSubmit, written: () => void) => Promise<{ ok: boolean; error?: string }>) | undefined;
   /** "Have I already got this row?", for ONE key the page names — the half that works where `mine`
    *  cannot, because a composite id is `uid + "_" + <field>` and only the page knows the field.
    *
@@ -412,6 +429,18 @@ export const viewParent = (ports: ViewParentPorts, config: () => ViewSubmitConfi
       return;
     }
     sending.value = true;
+    // CLOSED BY THE HOST, when the host says the record is written — see `submit` in the ports. It
+    // is the same `settle` the resolution takes, guarded so it can only ever close THIS
+    // confirmation: a restart, or a page that has opened one of its own since, must not have its
+    // dialog taken away by a write that finished behind it.
+    let closed = false;
+    const written = () => {
+      if (closed || pending.value !== request) {
+        return;
+      }
+      closed = true;
+      settle();
+    };
     // THE CHANNEL THIS CONFIRMATION BELONGS TO, taken before the await rather than read after it.
     // `restart()` can happen while a write is in flight — the host published a new view, or the
     // reader navigated — and `open` is then somebody else's channel. Answering on it would post the
@@ -430,7 +459,7 @@ export const viewParent = (ports: ViewParentPorts, config: () => ViewSubmitConfi
     // chain, which is not a detail: a host that hands the write a resolver of its own gets it
     // synchronously, and the extra turn would leave that resolver unassigned for anybody who acts
     // in the same tick. Same shape as `performed` above, for the same reason.
-    const outcome = await attempted(write, request).catch((err: unknown) => {
+    const outcome = await attempted(write, request, written).catch((err: unknown) => {
       ports.defect(err, request.requestId);
       return { ok: false, error: messageOf(err) };
     });
@@ -438,8 +467,13 @@ export const viewParent = (ports: ViewParentPorts, config: () => ViewSubmitConfi
     // opened a confirmation of its own since. Settling unconditionally would close THAT one — the
     // new visitor's dialog vanishing under their cursor, their own request left unanswered for ever
     // — over a write that belongs to a page nobody is looking at.
-    const current = pending.value === request;
-    if (current) {
+    //
+    // `closed` is the other way of being the one on screen: the host already said the record was
+    // written and this confirmation went then. What follows is still ours — the answer, and the
+    // state after whatever the host was doing — and asking the cells again would deny it, because
+    // they are empty or hold somebody else's request by now.
+    const current = closed || pending.value === request;
+    if (!closed && pending.value === request) {
       settle();
     }
     // ANSWERED EITHER WAY, and on the channel it arrived on. Somebody was waiting on that promise
