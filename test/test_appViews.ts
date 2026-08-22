@@ -288,15 +288,32 @@ test("the statuses a submitter may withdraw from reach a member too, where no ro
   assert.deepEqual(writeOf(withdrawable, "roster")[0]?.selfDelete, ["pending"]);
   assert.deepEqual(writeOf(withdrawable, "member")[0]?.selfDelete, ["pending"]);
 
-  // The staff half still wins where it is declared: an owner deleting by role
-  // does it in any status, and a list beside it would draw a control whose
-  // refusal names the wrong reason.
+  // BOTH DECLARATIONS TRAVEL where both are made. Which one answers is decided
+  // per READER by `capabilityOf` — a writer deletes by role, and the `viewer`
+  // who submitted a row still takes their own away — so the document cannot
+  // make that choice on their behalf. See `test_memberSelfWithdraw.ts`.
   const byRole = salon({
     collections: { bookings: { ...SALON_COLLECTIONS.bookings, writerDelete: true } },
     public: { submit: { bookings: { ...SALON_PUBLIC.submit.bookings, selfDelete: ["pending"] } } },
   });
   assert.equal(writeOf(byRole, "member")[0]?.writerDelete, true);
-  assert.equal(writeOf(byRole, "member")[0]?.selfDelete, undefined);
+  assert.deepEqual(writeOf(byRole, "member")[0]?.selfDelete, ["pending"]);
+});
+
+test("the status field a withdrawal is checked against travels with it, table or no table", () => {
+  // The rules read the CURRENT status off the record before consulting
+  // `selfDelete`, and a collection that is posted and deleted — never moved —
+  // declares no transitions. `statusField` used to ride only with the table, so
+  // exactly those collections lost it and the withdrawal became uncheckable.
+  const noTable = salon({
+    collections: { bookings: { statusField: "status" } },
+    public: { submit: { bookings: { ...SALON_PUBLIC.submit.bookings, selfDelete: ["pending"] } } },
+  });
+  const staff = writeOf(noTable, "member")[0];
+  assert.equal(staff?.statusField, "status");
+  assert.deepEqual(staff?.selfDelete, ["pending"]);
+  // Still not movable: a field with no table must not offer every value.
+  assert.equal(staff?.transitions, undefined);
 });
 
 test("the collection a withdrawal must reopen travels with the permission", () => {

@@ -466,18 +466,27 @@ function withdrawMirrorPart(app: AuthoredApp, cid: string): Partial<ProjectedVie
  *  files for themself. `submitOnly` + `emailField` is what binds them, and it
  *  is exactly what leaves the member tier with no role-based write to project.
  *
- *  The staff half still wins where it is declared, so the two never both
- *  answer: a member holding `writerDelete` deletes by role, in any status, and
- *  handing them a status list as well would draw a control whose refusal names
- *  the wrong reason (which is what this function used to avoid by projecting
- *  nothing at all). */
+ *  BOTH DECLARATIONS TRAVEL, and the reader is what chooses between them.
+ *  `writerDelete` is a property of the COLLECTION; being a writer is a property
+ *  of the PERSON. Emitting only the staff half took the submitter's own delete
+ *  away from every `viewer` and `assignee` on a board that also let staff
+ *  delete — while the rules read `isWriter(r) || selfDelete(...)`, which grants
+ *  it. `capabilityOf` makes the choice per reader; this only carries them.
+ *
+ *  `statusField` RIDES WITH `selfDelete` and not only with the transition
+ *  table. The rules read the CURRENT status off the record before consulting
+ *  the list, so a projection without it describes a withdrawal nobody can
+ *  perform — and a collection that is posted and deleted, never moved, declares
+ *  no transitions at all and so used to lose the field. That is the whole of
+ *  the group-chat case: `withdrawPart` emitted `selfDelete`, and the reader got
+ *  a document the capability could make nothing of. */
 function withdrawPart(app: AuthoredApp, audience: ViewAudience, cid: string): Partial<ProjectedViewWrite> {
-  if (audience === "member" && app.collections?.[cid]?.writerDelete === true) {
-    return { writerDelete: true, ...withdrawMirrorPart(app, cid) };
-  }
+  const config = app.collections?.[cid];
+  const byRole = audience === "member" && config?.writerDelete === true ? { writerDelete: true } : {};
   const selfDelete = app.public?.submit?.[cid]?.selfDelete;
-  if (selfDelete === undefined || app.collections?.[cid]?.statusField === undefined) return {};
-  return { selfDelete, ...withdrawMirrorPart(app, cid) };
+  const own = selfDelete !== undefined && config?.statusField !== undefined ? { selfDelete, statusField: config.statusField } : {};
+  if (Object.keys(byRole).length === 0 && Object.keys(own).length === 0) return {};
+  return { ...byRole, ...own, ...withdrawMirrorPart(app, cid) };
 }
 
 function assignPart(app: AuthoredApp, audience: ViewAudience, cid: string): Partial<ProjectedViewWrite> {

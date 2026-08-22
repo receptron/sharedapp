@@ -103,20 +103,43 @@ const addMirror = (write: ProjectedViewWrite, value: Record<string, unknown>): v
 };
 
 const addWithdrawal = (write: ProjectedViewWrite, value: Record<string, unknown>): void => {
-  // The STAFF half, which is a role and carries no statuses — see
+  // BOTH HALVES ARE READ, because they answer different READERS of the one
+  // document: a writer deletes by role, and anybody else may still take away
+  // the row they submitted. Returning after the first made a collection's staff
+  // permission cancel the submitter's, which the rules never do.
+  //
+  // The STAFF half is a role and carries no statuses — see
   // `ProjectedViewWrite.writerDelete`. Read strictly as `true`: a document
   // carrying anything else says nothing, and a truthy read here would make
   // `"false"` a permission.
+  let carried = false;
   if (value.writerDelete === true) {
     write.writerDelete = true;
-    addMirror(write, value);
-    return;
+    carried = true;
   }
+  // The SUBMITTER's half. The field the rules read the current status from
+  // comes with it and is NOT `addTransitions`' to supply: a collection that is
+  // posted and deleted, never moved, declares no table and used to lose the
+  // field on the way out — which left the reader a `selfDelete` naming statuses
+  // it could not check any record against.
+  //
+  // Attached where the document carries it, and NOT required: a document
+  // published before this change can carry `selfDelete` with no field, and
+  // dropping the whole entry over it would answer the page `unknown-collection`
+  // where the honest answer is `not-writable`. The capability grants nothing
+  // without the field either way, so a lenient read here costs no control and
+  // buys the better refusal.
   const selfDelete = stringsOf(value.selfDelete);
-  if (selfDelete.length === 0) {
+  if (selfDelete.length > 0) {
+    if (typeof value.statusField === "string" && value.statusField !== "") {
+      write.statusField = value.statusField;
+    }
+    write.selfDelete = selfDelete;
+    carried = true;
+  }
+  if (!carried) {
     return;
   }
-  write.selfDelete = selfDelete;
   addMirror(write, value);
 };
 

@@ -273,12 +273,16 @@ const judgeWithdraw = (write: ProjectedViewWrite, record: Record<string, unknown
   if (capabilityOf(write, who.address, who.tier).withdrawAny) {
     return withdrawn(write);
   }
-  if (write.writerDelete === true) {
-    return { ok: false, reason: "not-permitted" };
-  }
   const allowed = write.selfDelete ?? [];
   if (write.statusField === undefined || allowed.length === 0) {
-    return NOT_WRITABLE;
+    // `writerDelete` is asked HERE rather than before the submitter's half,
+    // because a collection may declare both: a reader who is not a writer still
+    // takes their own row away, and refusing them on the staff declaration
+    // denied a delete the rules grant (`isWriter(r) || selfDelete(...)`). So it
+    // only answers where there is no submitter's half to fall through to — the
+    // control exists and is not theirs, which is a different sentence from "no
+    // such control", and that one sends the page's author to the declaration.
+    return write.writerDelete === true ? { ok: false, reason: "not-permitted" } : NOT_WRITABLE;
   }
   const current = statusHeld(record, write.statusField);
   if (current !== null && !allowed.includes(current)) {
