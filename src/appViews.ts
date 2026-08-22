@@ -450,10 +450,29 @@ function withdrawMirrorPart(app: AuthoredApp, cid: string): Partial<ProjectedVie
  *  for a collection nobody may delete from, so the answer to "the owner cannot
  *  delete here" was "declare it somewhere else" — which meant moving the page
  *  to `participant` and giving up assignment, the staff transitions and the
- *  roster's answer about who is who. */
+ *  roster's answer about who is who.
+ *
+ *  A MEMBER GETS THE PARTICIPANT'S HALF TOO, where the collection declares no
+ *  staff one. It reads like a tier violation and it is not: `ownRow` in
+ *  `firestore.rules` asks `authed()` and compares `emailField` — it never asks
+ *  what tier the reader is standing on — so a member who SUBMITTED a row has
+ *  always been allowed to withdraw it. What was missing was any way to say so.
+ *  Projecting nothing here made `writeFor` return null for the whole
+ *  collection, and a page asking got `unknown-collection`: not "you may not",
+ *  but "there is no such collection", about one it was reading from.
+ *
+ *  That is the shape of a members-only app whose records are BOUND to their
+ *  submitter — a group chat, an anonymous suggestion box, minutes each member
+ *  files for themself. `submitOnly` + `emailField` is what binds them, and it
+ *  is exactly what leaves the member tier with no role-based write to project.
+ *
+ *  The staff half still wins where it is declared, so the two never both
+ *  answer: a member holding `writerDelete` deletes by role, in any status, and
+ *  handing them a status list as well would draw a control whose refusal names
+ *  the wrong reason (which is what this function used to avoid by projecting
+ *  nothing at all). */
 function withdrawPart(app: AuthoredApp, audience: ViewAudience, cid: string): Partial<ProjectedViewWrite> {
-  if (audience === "member") {
-    if (app.collections?.[cid]?.writerDelete !== true) return {};
+  if (audience === "member" && app.collections?.[cid]?.writerDelete === true) {
     return { writerDelete: true, ...withdrawMirrorPart(app, cid) };
   }
   const selfDelete = app.public?.submit?.[cid]?.selfDelete;

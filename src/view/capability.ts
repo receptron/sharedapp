@@ -75,10 +75,14 @@ export interface ViewCapability {
    *  puts a button on a booking the desk already closed — refused when
    *  pressed, which is the mismatch this whole mechanism exists to avoid.
    *
-   *  The roster tier only, and unlike the transitions it is NOT inferred from
-   *  the projection's silence: a participant may transition their own row
-   *  because the rules answer from the record, but a deletion is allowed only
-   *  where the declaration named the statuses. Nothing to infer it from. */
+   *  Unlike the transitions it is NOT inferred from the projection's silence: a
+   *  participant may transition their own row because the rules answer from the
+   *  record, but a deletion is allowed only where the declaration named the
+   *  statuses. Nothing to infer it from.
+   *
+   *  The roster tier always, and the member tier where the collection declares
+   *  no `writerDelete` — `ownRow` in the rules never asked which tier the
+   *  reader was on, so a member who submitted a row may withdraw it. */
   withdrawFrom: string[];
   /** May take ANY row here away — the staff half, and a different permission
    *  rather than a wider setting of the one above.
@@ -89,9 +93,10 @@ export interface ViewCapability {
    *  no status condition at all — so it carries no list, and a page holding it
    *  draws the control on every row it can see.
    *
-   *  The two never both answer yes: `writerDelete` is projected to the staff
-   *  tier and `selfDelete` to the roster's, so whichever page a reader is on,
-   *  exactly one of these describes them. */
+   *  The two never both answer yes, and the reason is `writerDelete` itself:
+   *  where it is declared this one answers and `withdrawFrom` is emptied, and
+   *  where it is not, only the submitter's half can answer. So whichever page a
+   *  reader is on, at most one of these describes them. */
   withdrawAny: boolean;
 }
 
@@ -127,15 +132,27 @@ const assignedField = (write: ProjectedViewWrite): { assigneeField?: string } =>
   return { assigneeField: write.assigneeField };
 };
 
-/** The statuses a withdrawal is allowed from, on the tier that has them.
+/** The statuses a withdrawal is allowed from.
  *
- *  A staff page gets none even where the declaration carries them: an owner or
- *  editor deletes by role, through no vocabulary of ours, and offering them a
- *  participant's control would draw a button whose refusal names the wrong
- *  reason. The status field has to be there too — the rules read the CURRENT
+ *  A staff page gets none where the collection declares `writerDelete`: that
+ *  owner or editor deletes by ROLE, in any status, through no vocabulary of
+ *  ours, and offering them a participant's list as well would draw a button
+ *  whose refusal names the wrong reason.
+ *
+ *  Where it declares no staff half, the member gets this one — because the
+ *  rules never asked which tier they were standing on. `ownRow` compares
+ *  `emailField` against the reader's address and nothing else, so a member who
+ *  submitted a row may always withdraw it; a member tier that answered "no
+ *  statuses" was reporting the rules wrongly. See `withdrawPart` in
+ *  `appViews.ts` for the app shape this is about.
+ *
+ *  The status field has to be there either way — the rules read the CURRENT
  *  status off the record before consulting the list. */
 const withdrawable = (write: ProjectedViewWrite, tier: WriteTier): string[] => {
-  if (tier !== "roster" || write.statusField === undefined) {
+  if (write.statusField === undefined) {
+    return [];
+  }
+  if (tier === "member" && write.writerDelete === true) {
     return [];
   }
   return write.selfDelete ?? [];

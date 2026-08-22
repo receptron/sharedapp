@@ -275,14 +275,28 @@ test("the assignee role with no field to compare grants nothing, and says so", (
   assert.deepEqual(staff[0]?.writers, [OWNER, RECEPTION].sort(), "the unscoped writers are still named");
 });
 
-test("the statuses a submitter may withdraw from reach the participant tier only", () => {
-  // Staff already delete by role, and the rules answer a withdrawal from the
-  // RECORD — so this belongs to the tier whose reader owns the row.
+test("the statuses a submitter may withdraw from reach a member too, where no role deletes", () => {
+  // The rules answer a withdrawal from the RECORD: `ownRow` compares
+  // `emailField` and never asks which tier the reader is standing on. So a
+  // member who submitted a row has always been allowed to withdraw it, and the
+  // member tier has to say so — projecting nothing made `writeFor` return null
+  // for the whole collection, and the page's ask came back `unknown-collection`
+  // about a collection it was reading from.
   const withdrawable = salon({
     public: { submit: { bookings: { ...SALON_PUBLIC.submit.bookings, selfDelete: ["pending"] } } },
   });
   assert.deepEqual(writeOf(withdrawable, "roster")[0]?.selfDelete, ["pending"]);
-  assert.equal(writeOf(withdrawable, "member")[0]?.selfDelete, undefined);
+  assert.deepEqual(writeOf(withdrawable, "member")[0]?.selfDelete, ["pending"]);
+
+  // The staff half still wins where it is declared: an owner deleting by role
+  // does it in any status, and a list beside it would draw a control whose
+  // refusal names the wrong reason.
+  const byRole = salon({
+    collections: { bookings: { ...SALON_COLLECTIONS.bookings, writerDelete: true } },
+    public: { submit: { bookings: { ...SALON_PUBLIC.submit.bookings, selfDelete: ["pending"] } } },
+  });
+  assert.equal(writeOf(byRole, "member")[0]?.writerDelete, true);
+  assert.equal(writeOf(byRole, "member")[0]?.selfDelete, undefined);
 });
 
 test("the collection a withdrawal must reopen travels with the permission", () => {
