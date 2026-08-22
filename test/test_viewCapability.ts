@@ -77,9 +77,36 @@ test("a reader holding no role at all is refused, though the tier admitted them"
   assert.equal(observer.assign, false);
 });
 
-test("the staff tier is never handed a participant's withdrawal", () => {
-  const both: ProjectedViewWrite = { ...staff, selfDelete: ["requested"] };
-  assert.deepEqual(capabilityOf(both, "desk@gym.jp", "member").withdrawFrom, []);
+test("a role that deletes takes the whole answer, and no status list rides beside it", () => {
+  // `writerDelete` is any row in any status. Handing the same reader a list as
+  // well would draw a control whose refusal names the wrong reason.
+  const byRole: ProjectedViewWrite = { ...staff, writerDelete: true, selfDelete: ["requested"] };
+  const desk = capabilityOf(byRole, "desk@gym.jp", "member");
+  assert.equal(desk.withdrawAny, true);
+  assert.deepEqual(desk.withdrawFrom, []);
+});
+
+test("a member with no role that deletes still gets the submitter's own half", () => {
+  // `ownRow` in the rules asks `authed()` and compares `emailField` — it never
+  // asks which tier the reader is on. So a member who SUBMITTED a row may
+  // withdraw it, and answering `[]` here reported the rules wrongly: the app it
+  // costs is a members-only one whose records are bound to their submitter (a
+  // group chat), where there is no role-based write to project at all.
+  const own: ProjectedViewWrite = { ...staff, selfDelete: ["requested"] };
+  const desk = capabilityOf(own, "desk@gym.jp", "member");
+  assert.equal(desk.withdrawAny, false);
+  assert.deepEqual(desk.withdrawFrom, ["requested"]);
+  // Still never both — that is `writerDelete`'s doing, not the tier's.
+  assert.equal(desk.withdrawAny && desk.withdrawFrom.length > 0, false);
+});
+
+test("a withdrawal needs a status field, whichever tier is asking", () => {
+  // The rules read the CURRENT status off the record before consulting the
+  // list, so a collection with none grants nothing however the key is written.
+  const { statusField: __dropped, ...noStatus } = staff;
+  const write: ProjectedViewWrite = { ...noStatus, selfDelete: ["requested"] };
+  assert.deepEqual(capabilityOf(write, "desk@gym.jp", "member").withdrawFrom, []);
+  assert.deepEqual(capabilityOf(write, "member@example.com", "roster").withdrawFrom, []);
 });
 
 test("`can` is keyed by collection, which is the whole shape a page reads", () => {

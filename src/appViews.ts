@@ -450,15 +450,43 @@ function withdrawMirrorPart(app: AuthoredApp, cid: string): Partial<ProjectedVie
  *  for a collection nobody may delete from, so the answer to "the owner cannot
  *  delete here" was "declare it somewhere else" — which meant moving the page
  *  to `participant` and giving up assignment, the staff transitions and the
- *  roster's answer about who is who. */
+ *  roster's answer about who is who.
+ *
+ *  A MEMBER GETS THE PARTICIPANT'S HALF TOO, where the collection declares no
+ *  staff one. It reads like a tier violation and it is not: `ownRow` in
+ *  `firestore.rules` asks `authed()` and compares `emailField` — it never asks
+ *  what tier the reader is standing on — so a member who SUBMITTED a row has
+ *  always been allowed to withdraw it. What was missing was any way to say so.
+ *  Projecting nothing here made `writeFor` return null for the whole
+ *  collection, and a page asking got `unknown-collection`: not "you may not",
+ *  but "there is no such collection", about one it was reading from.
+ *
+ *  That is the shape of a members-only app whose records are BOUND to their
+ *  submitter — a group chat, an anonymous suggestion box, minutes each member
+ *  files for themself. `submitOnly` + `emailField` is what binds them, and it
+ *  is exactly what leaves the member tier with no role-based write to project.
+ *
+ *  BOTH DECLARATIONS TRAVEL, and the reader is what chooses between them.
+ *  `writerDelete` is a property of the COLLECTION; being a writer is a property
+ *  of the PERSON. Emitting only the staff half took the submitter's own delete
+ *  away from every `viewer` and `assignee` on a board that also let staff
+ *  delete — while the rules read `isWriter(r) || selfDelete(...)`, which grants
+ *  it. `capabilityOf` makes the choice per reader; this only carries them.
+ *
+ *  `statusField` RIDES WITH `selfDelete` and not only with the transition
+ *  table. The rules read the CURRENT status off the record before consulting
+ *  the list, so a projection without it describes a withdrawal nobody can
+ *  perform — and a collection that is posted and deleted, never moved, declares
+ *  no transitions at all and so used to lose the field. That is the whole of
+ *  the group-chat case: `withdrawPart` emitted `selfDelete`, and the reader got
+ *  a document the capability could make nothing of. */
 function withdrawPart(app: AuthoredApp, audience: ViewAudience, cid: string): Partial<ProjectedViewWrite> {
-  if (audience === "member") {
-    if (app.collections?.[cid]?.writerDelete !== true) return {};
-    return { writerDelete: true, ...withdrawMirrorPart(app, cid) };
-  }
+  const config = app.collections?.[cid];
+  const byRole = audience === "member" && config?.writerDelete === true ? { writerDelete: true } : {};
   const selfDelete = app.public?.submit?.[cid]?.selfDelete;
-  if (selfDelete === undefined || app.collections?.[cid]?.statusField === undefined) return {};
-  return { selfDelete, ...withdrawMirrorPart(app, cid) };
+  const own = selfDelete !== undefined && config?.statusField !== undefined ? { selfDelete, statusField: config.statusField } : {};
+  if (Object.keys(byRole).length === 0 && Object.keys(own).length === 0) return {};
+  return { ...byRole, ...own, ...withdrawMirrorPart(app, cid) };
 }
 
 function assignPart(app: AuthoredApp, audience: ViewAudience, cid: string): Partial<ProjectedViewWrite> {
