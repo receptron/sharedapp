@@ -479,7 +479,15 @@ export interface AppViewTier {
  *  For `participant` it is the rules' own answer, which is why it can be null:
  *  a participant with neither `participantRead` nor an own-row submit path
  *  cannot read the collection at all, and a page handed it would fail rather
- *  than render less. */
+ *  than render less.
+ *
+ *  WHICH ROWS, NOT HOW MANY. A member's `all` is whole-collection in the sense
+ *  that the rules place no filter on it — and `tierViews` then puts every scope
+ *  through `limitFor`, so a member page that declared a cap is projected one
+ *  and reads the latest N of that collection. The two are not the same
+ *  question: the scope is what the RULES grant, the cap is what the page ASKED
+ *  for, and the one place they meet is `scope: "own"`, where a cap cannot be
+ *  ordered and `limitFor` omits it. */
 function scopeFor(
   authored: AuthoredApp,
   audience: Exclude<ViewAudience, "public">,
