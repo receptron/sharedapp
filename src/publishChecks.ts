@@ -1162,6 +1162,75 @@ function viewLiveProblems(app: AuthoredApp, view: NormalizedView): string[] {
   return problems;
 }
 
+/** The most a view may be capped to and still be a cap worth declaring.
+ *
+ *  Arbitrary, and deliberately generous: what the key exists to stop is the
+ *  collection with no ceiling at all, not a page that reads eight hundred
+ *  rows. A number above this is either a misunderstanding of what the key does
+ *  or a request for the whole collection, and the second one is spelled by
+ *  leaving the key out. */
+const MAX_VIEW_LIMIT = 1000;
+
+/** The LATEST-N cap: which of a view's datasets may carry one.
+ *
+ *  Three refusals, and each of them is a read that would be WRONG rather than
+ *  merely absent — which is the whole reason the key is gated instead of
+ *  simply passed through.
+ *
+ *  NO `stampField` IS THE IMPORTANT ONE. A limit has to be ordered by
+ *  something, and the only field the rules guarantee on every record of a
+ *  collection is the one they pin to the server clock themselves. Ordered by
+ *  anything else, two things go wrong at once and neither shows: a record
+ *  MISSING the field is excluded from the query rather than sorted last, and a
+ *  field a submitter writes is a field a submitter can hold the window with.
+ *  Ordered by NOTHING — a bare `limit` — Firestore falls back to the document
+ *  id, so a chat room would return an arbitrary twenty rows and never deliver
+ *  another message. That last one is what makes this a fail-closed trap rather
+ *  than a preference: nothing errors, and the page looks like it is working.
+ *
+ *  AN OWN-ROW SCOPE cannot be ordered at all today. The query already carries
+ *  a `where` on the submitter's address, so a second field in the sort needs a
+ *  COMPOSITE INDEX, and `firestore.indexes.json` in mulmoserver declares none —
+ *  the read would come back as a failure, which on a participant's page is a
+ *  blank one. Refused with the reason rather than silently dropped, because the
+ *  author has somewhere to go: cap the page that reads the collection whole. */
+function viewLimitProblems(app: AuthoredApp, view: NormalizedView): string[] {
+  const problems: string[] = [];
+  for (const [cid, rows] of Object.entries(view.limit ?? {})) {
+    if (!view.collections.includes(cid)) {
+      problems.push(
+        `${view.where}.limit names '${cid}', which is not in ${view.where}.collections. The cap applies to a dataset this page is handed — ` +
+          "there is no query here to put it on.",
+      );
+      continue;
+    }
+    if (rows > MAX_VIEW_LIMIT) {
+      problems.push(
+        `${view.where}.limit.${cid} is ${rows}, above the ${MAX_VIEW_LIMIT} this key is for. It exists to stop a collection that grows forever ` +
+          "being read whole on every open; a page that genuinely wants every record declares no limit for this dataset.",
+      );
+      continue;
+    }
+    if (app.public?.submit?.[cid]?.stampField === undefined) {
+      problems.push(
+        `${view.where}.limit caps '${cid}', which declares no public.submit.${cid}.stampField. A cap has to be ordered by something, and that is ` +
+          "the only field the rules put on every record themselves (the server clock, pinned on create and frozen after). Without it the limit " +
+          "falls back to Firestore's document-id order: the page gets an arbitrary N records and a NEW record never reaches it — nothing errors, " +
+          `and the page looks like it is working. Declare public.submit.${cid}.stampField, or drop the cap.`,
+      );
+      continue;
+    }
+    if (view.audience === "participant" && participantScope(app, cid, app.participantRead ?? [])?.scope === "own") {
+      problems.push(
+        `${view.where}.limit caps '${cid}', which a participant reads as their OWN ROWS: the query already carries a where on the field that makes ` +
+          "it readable, so ordering it as well needs a composite index, and the deployment declares none — the read would FAIL rather than return " +
+          "fewer rows. A submitter's own rows are bounded by how much they submitted; cap the page that reads the collection whole instead.",
+      );
+    }
+  }
+  return problems;
+}
+
 function viewProblems(app: AuthoredApp, collections: readonly PublishableCollection[]): string[] {
   const normalized = normalizeViews(app);
   if (!normalized.ok) return normalized.problems;
@@ -1170,6 +1239,7 @@ function viewProblems(app: AuthoredApp, collections: readonly PublishableCollect
     ...viewPathProblems(view),
     ...view.collections.flatMap((cid) => viewCollectionProblems(app, view, cid, known)),
     ...viewLiveProblems(app, view),
+    ...viewLimitProblems(app, view),
   ]);
 }
 

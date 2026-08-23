@@ -379,6 +379,37 @@ const ViewZ = z
      *  view is handed are still declared once, and `live` only says which of
      *  them keep moving. */
     live: z.array(NameZ).min(1).optional(),
+    /** The most recent N records of a dataset, instead of every record there
+     *  is: `{ <cid>: <rows> }`, over a subset of `collections`.
+     *
+     *  WHAT IT IS FOR is the collection that grows forever. A view is handed
+     *  its datasets whole, so a chat room's page reads every message ever
+     *  posted to draw the last twenty — a bill and a payload that grow with
+     *  the app's age and are paid by every reader, on every open, for rows
+     *  nobody looks at. Capping what the PAGE DRAWS does not help: the read
+     *  already happened.
+     *
+     *  IT IS THE LATEST N, NEVER THE FIRST N, and that is not a preference —
+     *  it is what makes the key safe. Firestore's default order is the
+     *  document id, so a bare limit returns an arbitrary N and a NEW record
+     *  sorts wherever its id falls: on a chat, the page would pin itself to
+     *  rows nobody chose and never show another message. So the cap travels
+     *  with an ORDER, and the order is the collection's own
+     *  `public.submit[cid].stampField` — the field the rules pin to the server
+     *  clock on every create and freeze afterwards. A collection without one
+     *  is refused the key rather than ordered by something a submitter can
+     *  write (`viewLimitProblems`).
+     *
+     *  Which is also why the rows arrive NEWEST FIRST. A page that wants them
+     *  the other way up sorts them; a page that sorts by the stamp anyway —
+     *  which is every page that shows a sequence — notices nothing.
+     *
+     *  WHAT IT IS NOT is a permission. The rules cannot cap a read, so anybody
+     *  with their own SDK reads the whole collection exactly as before; what
+     *  is bounded here is what THE PLATFORM'S OWN PAGES fetch. Nor is it
+     *  history: the older rows are still there, and nothing here pages back
+     *  to them. */
+    limit: z.record(NameZ, z.number().int().min(1)).optional(),
   })
   .strict();
 

@@ -39,6 +39,7 @@
 import type { CollectionSchema } from "@mulmoclaude/core/collection";
 import { APP_PROTOCOL } from "./appProtocol.js";
 import {
+  limitFor,
   normalizeViews,
   participantScope,
   VIEW_CONFIG_ID,
@@ -142,7 +143,7 @@ export interface PublishedConfigDoc extends Record<string, unknown> {
    *  be handed on a world-readable document; what the page needs is the
    *  dataset list, and `publishedAt` beside it is what pins this declaration
    *  to the HTML published in the same run. */
-  view?: { collections: string[]; live?: string[] };
+  view?: { collections: string[]; live?: string[]; limit?: Record<string, { rows: number; field: string }> };
   publishedAt: number;
 }
 
@@ -311,7 +312,7 @@ export function projectApp(
     // before this key existed. What lands here is world-readable, and it is
     // the cid NAMES ONLY — the same names `collections` beside it already
     // carries, so the projection tells the world nothing new (principle 5).
-    ...(publicView === undefined ? {} : { view: publicViewProjection(publicView) }),
+    ...(publicView === undefined ? {} : { view: publicViewProjection(authored, publicView) }),
     publishedAt: stamp.publishedAt,
   };
   if (authored.name !== undefined) config.name = authored.name;
@@ -327,9 +328,26 @@ export function projectApp(
  *  `collections` beside it already carries, so nothing new is disclosed by
  *  publishing it (principle 5). The gate has already refused the fan-out cases
  *  (`viewLiveProblems`), so what is here is a subset of `public.read` that
- *  nobody but the app itself writes. */
-function publicViewProjection(view: NormalizedView): { collections: string[]; live?: string[] } {
-  return view.live === undefined ? { collections: view.collections } : { collections: view.collections, live: view.live };
+ *  nobody but the app itself writes.
+ *
+ *  `limit` rides the same way, and a public page is the one audience where
+ *  every scope is `all` — a stranger reads what `public.read` names or nothing
+ *  at all — so the cap is never the own-row case the projection omits. */
+function publicViewProjection(
+  app: AuthoredApp,
+  view: NormalizedView,
+): { collections: string[]; live?: string[]; limit?: Record<string, { rows: number; field: string }> } {
+  const capped = view.collections.map((cid) => ({ cid, limit: limitFor(app, view, { cid, scope: "all" }).limit }));
+  const limit = Object.fromEntries(capped.flatMap((entry) => (entry.limit === undefined ? [] : [[entry.cid, entry.limit]])));
+  return {
+    collections: view.collections,
+    ...(view.live === undefined ? {} : { live: view.live }),
+    // Keyed by cid rather than riding on each entry, because a public page's
+    // `collections` is a list of NAMES: it has no per-collection object to
+    // hang anything on, and turning it into one would change a document every
+    // deployed public runtime already reads.
+    ...(Object.keys(limit).length === 0 ? {} : { limit }),
+  };
 }
 
 /** Everything `publish` writes, as one projection.
@@ -498,7 +516,8 @@ export function tierViews(authored: AuthoredApp, audience: Exclude<ViewAudience,
   return views.map((view) => {
     const collections = view.collections
       .map((cid) => scopeFor(authored, audience, cid, participantRead))
-      .filter((scope): scope is ProjectedViewCollection => scope !== null);
+      .filter((scope): scope is ProjectedViewCollection => scope !== null)
+      .map((scope) => limitFor(authored, view, scope));
     // Narrowed to what this tier is actually handed, for the reason the scopes
     // are: a collection this audience cannot read is dropped above, and naming
     // it here would tell the page to subscribe to a query it never got. Absent

@@ -46,7 +46,9 @@ not use.
 
 - **MAJOR** — a change a reader must understand. An older reader refuses the app rather than drawing
   part of it, so the reader ships first.
-- **MINOR** — an addition an older reader ignores safely (`views[].live` was one).
+- **MINOR** — an addition an older reader ignores safely (`views[].live` was one, and so is
+  `views[].limit`: a reader that does not know it reads the whole collection, which is what every
+  reader did before the key existed — expensive, never wrong).
 - **PATCH** — neither.
 
 **Every projection is stamped `APP_PROTOCOL`, which is still 1.0.0** — the contract has not moved,

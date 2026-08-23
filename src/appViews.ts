@@ -76,6 +76,17 @@ export interface NormalizedView {
    *  same page, and the projection of an app with no `live` must be byte-for-
    *  byte what it was before this key existed. */
   live?: string[];
+  /** `{ <cid>: <rows> }` over a subset of `collections`: read only the LATEST
+   *  `rows` records of that dataset. See `ViewZ.limit` for why it is the
+   *  latest and never the first.
+   *
+   *  Absent, not empty, for the reason `live` is: an app that never declared
+   *  one must project the document it projected before this key existed.
+   *
+   *  Only the `views[]` spelling carries it. `public.view` is the older
+   *  spelling, kept parsing for one release and not extended — a key added to
+   *  a declaration on its way out is one more shape to migrate. */
+  limit?: Record<string, number>;
   where: string;
 }
 
@@ -104,6 +115,7 @@ function declaredViews(app: AuthoredApp): NormalizedViewsResult {
     path: view.path,
     collections: view.collections,
     ...(view.live === undefined ? {} : { live: view.live }),
+    ...(view.limit === undefined ? {} : { limit: view.limit }),
     where: `views[${index}]`,
   }));
   // Past here `views` is EMPTY: the pair is refused above, so a legacy entry
@@ -206,6 +218,26 @@ export interface ProjectedViewCollection {
   uidField?: string;
   /** `scope: "own"` — the row is the document whose id is the reader's uid. */
   ownDocId?: "auth.uid";
+  /** Read only the LATEST `rows` records, ordered by `field` DESCENDING.
+   *
+   *  Both halves or neither, and the reader is bound by both: `rows` without
+   *  the order is a limit over Firestore's document-id ordering, which returns
+   *  an arbitrary N and never delivers a new record — see `ViewZ.limit`. A
+   *  reader that honours one and not the other is worse than one that honours
+   *  neither, because the page it draws looks right.
+   *
+   *  A READER THAT DOES NOT KNOW THIS KEY reads the whole collection, exactly
+   *  as it did before the key existed. That is a cost, not a permission: the
+   *  rows were always readable by this audience, so an older host is expensive
+   *  rather than wrong, and it is why adding this does not move
+   *  `APP_PROTOCOL`.
+   *
+   *  Never projected onto `scope: "own"`. That query already carries a
+   *  `where`, so ordering it needs a COMPOSITE INDEX that no deployment has —
+   *  the read would fail rather than narrow. The gate refuses the pair
+   *  (`viewLimitProblems`); this omits it, so a projection can never promise a
+   *  read that errors. */
+  limit?: { rows: number; field: string };
 }
 
 /** How a participant reaches `cid`, or null if they cannot.
@@ -236,6 +268,28 @@ export function participantScope(app: AuthoredApp, cid: string, participantRead:
   if (submit?.uidField !== undefined) return { cid, scope: "own", uidField: submit.uidField };
   if (submit?.idFrom === "auth.uid") return { cid, scope: "own", ownDocId: "auth.uid" };
   return null;
+}
+
+/** The LATEST-N cap this view declared for `cid`, as the projection carries
+ *  it — or nothing, which is every collection an app never capped.
+ *
+ *  THE ORDER FIELD IS NOT THE AUTHOR'S TO CHOOSE. It is
+ *  `public.submit[cid].stampField`, the one field the rules pin to the server
+ *  clock on create and freeze afterwards, so every record has one and nobody
+ *  can write themself to the top of the window. An author-named field would be
+ *  neither: a record MISSING the ordered field is not sorted last by Firestore,
+ *  it is excluded from the query entirely — a row that exists, that the page
+ *  is entitled to, and that no query it issues will ever return.
+ *
+ *  Silent where it cannot be honoured (no cap declared, no stamp field, or an
+ *  own-row scope). The gate refuses those declarations with an explanation;
+ *  what must not happen is a PROJECTION that describes a read the host would
+ *  be denied — see {@link ProjectedViewCollection.limit}. */
+export function limitFor(app: AuthoredApp, view: NormalizedView, scope: ProjectedViewCollection): ProjectedViewCollection {
+  const rows = view.limit?.[scope.cid];
+  const field = app.public?.submit?.[scope.cid]?.stampField;
+  if (rows === undefined || field === undefined || scope.scope === "own") return scope;
+  return { ...scope, limit: { rows, field } };
 }
 
 /** The declaration as one non-public audience may see it — the document
