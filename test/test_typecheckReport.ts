@@ -123,10 +123,13 @@ const measured = (correctCount: number, totalCount: number, floor: number | null
 });
 
 test("a project exactly ON its floor holds, and one identifier below does not", () => {
+  // Counts chosen to land EXACTLY on the floor. The repository's own 6458/6463 is 99.92264, which
+  // sits above 99.92 and would pass a `<=` comparison too — so it tests the direction of the
+  // inequality without testing its boundary, which is the half that gets edited by accident.
+  assert.deepEqual(floorFailures([measured(9992, 10000, 99.92)]), []);
   // Both directions, because a gate that always fires and a gate that never does are equally
   // useless, and only the pair tells them apart.
-  assert.deepEqual(floorFailures([measured(6458, 6463, 99.92)]), []);
-  assert.equal(floorFailures([measured(6458, 6464, 99.92)]).length, 1);
+  assert.equal(floorFailures([measured(9991, 10000, 99.92)]).length, 1);
 });
 
 test("the floor is compared UNROUNDED, so a regression cannot hide in the display", () => {

@@ -45,8 +45,8 @@ const ROOT = process.cwd();
 const run = (command: string, args: readonly string[]): string => {
   const result = spawnSync(command, [...args], { encoding: "utf8", timeout: TIMEOUT_MS, maxBuffer: MAX_BUFFER_BYTES, cwd: ROOT });
   if (result.error) throw new Error(`${command} ${args.join(" ")} failed to start: ${result.error.message}`);
-  // A non-zero status is not a failure to REPORT: `tsc` exits 1 on a type error and still lists
-  // every file it read, which is exactly the question being asked here.
+  // A non-zero status is not a failure to REPORT — `type-coverage` exits 1 under `--at-least`,
+  // and the counts it printed are still the answer.
   if (typeof result.stdout !== "string") throw new Error(`${command} ${args.join(" ")} produced no output`);
   return result.stdout;
 };
@@ -58,9 +58,15 @@ const binary = (name: string): string => resolve(ROOT, "node_modules", ".bin", n
 const insideRepo = (paths: readonly string[]): string[] =>
   paths.map((path) => relative(ROOT, path)).filter((path) => path !== "" && !path.startsWith("..") && !path.split("/").includes("node_modules"));
 
+/** `--listFilesOnly`, not `--listFiles`: `tsc` writes its DIAGNOSTICS to stdout, so a project with
+ *  a type error prints `src/a.ts(5,3): error TS2322: …` into the middle of the file list, and a
+ *  reader that treats every line as a path counts that as a file. The report runs on `always()`,
+ *  which means it is read most often exactly when a project is failing to compile — the one
+ *  condition under which the old flag was wrong. `--listFilesOnly` stops before type checking, so
+ *  it emits nothing else and needs no `--noEmit`. */
 const projectFiles = (project: string): ProjectFiles => ({
   project,
-  files: insideRepo(run(binary("tsc"), ["-p", project, "--noEmit", "--listFiles"]).split("\n").filter(Boolean)),
+  files: insideRepo(run(binary("tsc"), ["-p", project, "--listFilesOnly"]).split("\n").filter(Boolean)),
 });
 
 const isAnyLocation = (value: unknown): value is { filePath: string; line: number; text: string } =>
@@ -98,8 +104,11 @@ const projectCoverage = (project: string): ProjectCoverage => {
 /** Tracked files only. An untracked scratch file is not something the repository is failing to
  *  check, and `git ls-files` is also what keeps `node_modules` and `dist` out without a rule. */
 const candidates = (): CandidateFile[] =>
-  run("git", ["ls-files"])
-    .split("\n")
+  // `-z`: without it `git ls-files` QUOTES a path holding a newline, a tab or a backslash, and the
+  // quoted text is not the name of any file — so the one tracked source file that needs reporting
+  // most is the one this would crash on.
+  run("git", ["ls-files", "-z"])
+    .split("\0")
     .filter((path) => SOURCE_EXTENSIONS.test(path))
     .map((path) => ({ path, lines: readFileSync(resolve(ROOT, path), "utf8").split("\n").length }));
 
