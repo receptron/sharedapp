@@ -27,6 +27,10 @@ export type ProjectCoverage = {
   readonly correctCount: number;
   readonly totalCount: number;
   readonly anys: readonly AnyLocation[];
+  /** The percentage this project may not fall below, or `null` for a project nobody has set one
+   *  for. Compared against the UNROUNDED percentage: a floor written to match a rounded display
+   *  would pass the very regression it was set to catch. */
+  readonly floor: number | null;
 };
 export type CandidateFile = { readonly path: string; readonly lines: number };
 export type ReportInput = {
@@ -35,7 +39,9 @@ export type ReportInput = {
   readonly coverage: readonly ProjectCoverage[];
 };
 
-const percent = (part: number, whole: number, digits: number): string => (whole === 0 ? (100).toFixed(digits) : ((part * 100) / whole).toFixed(digits));
+const ratio = (part: number, whole: number): number => (whole === 0 ? 100 : (part * 100) / whole);
+
+const percent = (part: number, whole: number, digits: number): string => ratio(part, whole).toFixed(digits);
 
 /** A rule id, a path and a compiler's own text all reach a table cell, and any of them can hold
  *  a `|` that ends the cell or a backtick that ends the code span around it. */
@@ -91,10 +97,22 @@ const anyTable = (anys: readonly AnyLocation[]): string[] => {
   ];
 };
 
+/** The projects that have fallen through their floor. Returned rather than thrown so the runner
+ *  can report EVERY one of them — a gate that stops at the first is a gate you clear one round
+ *  trip at a time. */
+export const floorFailures = (coverage: readonly ProjectCoverage[]): ProjectCoverage[] =>
+  coverage.filter((measured) => measured.floor !== null && ratio(measured.correctCount, measured.totalCount) < measured.floor);
+
+const verdict = (measured: ProjectCoverage): string => {
+  if (measured.floor === null) return "";
+  const held = ratio(measured.correctCount, measured.totalCount) >= measured.floor;
+  return held ? ` — floor ${measured.floor} held` : ` — **BELOW its floor of ${measured.floor}**`;
+};
+
 const coverageSection = (measured: ProjectCoverage): string[] => {
   const anyCount = measured.totalCount - measured.correctCount;
   return [
-    `### ${cell(measured.project)} — ${percent(measured.correctCount, measured.totalCount, TYPE_PERCENT_DIGITS)}% typed (${anyCount} of ${measured.totalCount} any)`,
+    `### ${cell(measured.project)} — ${percent(measured.correctCount, measured.totalCount, TYPE_PERCENT_DIGITS)}% typed (${anyCount} of ${measured.totalCount} any)${verdict(measured)}`,
     "",
     ...pie(`Typed vs any — ${measured.project}`, [
       ["typed", measured.correctCount],

@@ -6,14 +6,37 @@
  *  is the transitive import graph, and a file can be pulled in by an import from three
  *  directories away without appearing in any pattern.
  *
- *  Report-only. `yarn typecheck` is the gate that decides whether the types are right; this
- *  decides nothing, and a summary that cannot be written must not fail the run that produced it. */
+ *  `yarn typecheck` decides whether the types are RIGHT. This decides whether they are still as
+ *  COMPLETE as they were: each project carries a floor, set at the value it stood at, and falling
+ *  through one exits non-zero. A number nobody defends drifts — this repository has the receipt one
+ *  file up, where a lint rule left at warn collected two new violations in the shadow of a note
+ *  saying to raise it. The summary itself is still garnish: one that cannot be WRITTEN must not
+ *  fail the run that produced it. */
 import { spawnSync } from "node:child_process";
 import { appendFileSync, readFileSync } from "node:fs";
 import { relative, resolve } from "node:path";
-import { renderReport, type AnyLocation, type CandidateFile, type ProjectCoverage, type ProjectFiles, type ReportInput } from "./typecheck-report.js";
+import {
+  floorFailures,
+  renderReport,
+  type AnyLocation,
+  type CandidateFile,
+  type ProjectCoverage,
+  type ProjectFiles,
+  type ReportInput,
+} from "./typecheck-report.js";
 
-const DEFAULT_PROJECTS = ["tsconfig.json", "test/tsconfig.json", "scripts/tsconfig.json"];
+/** The floor is today's value, so the only way past it is to type what you added. Raise an entry
+ *  when a project climbs; lowering one is a decision that belongs in a pull request with a reason,
+ *  which is the whole point of it being written down here rather than inferred.
+ *
+ *  Three decimals on the test project, and not for tidiness: its denominator is ~17,000, where one
+ *  new `any` moves the percentage by 0.006. A floor of `99.60` would sit BELOW the value a single
+ *  regression lands on and wave it through. */
+const PROJECTS: readonly { readonly project: string; readonly floor: number }[] = [
+  { project: "tsconfig.json", floor: 99.92 }, //         the shipped package — 5 any, all in DOM event handlers
+  { project: "test/tsconfig.json", floor: 99.605 }, //   src re-checked plus the suite
+  { project: "scripts/tsconfig.json", floor: 100 }, //   nothing untyped here yet, and no reason for the first
+];
 const SOURCE_EXTENSIONS = /\.(ts|tsx|mts|cts|js|mjs|cjs)$/;
 const TIMEOUT_MS = 300_000;
 const MAX_BUFFER_BYTES = 64 * 1024 * 1024;
@@ -63,11 +86,13 @@ const isCoverageResult = (value: unknown): value is { correctCount: number; tota
 const located = (details: readonly unknown[]): AnyLocation[] =>
   details.filter(isAnyLocation).map((detail) => ({ file: relative(ROOT, detail.filePath), line: detail.line, text: detail.text }));
 
+const floorFor = (project: string): number | null => PROJECTS.find((entry) => entry.project === project)?.floor ?? null;
+
 const projectCoverage = (project: string): ProjectCoverage => {
   const output = run(binary("type-coverage"), ["-p", project, "--strict", "--detail", "--json-output"]);
   const parsed: unknown = JSON.parse(output);
   if (!isCoverageResult(parsed)) throw new Error(`type-coverage -p ${project} did not report counts: ${output.slice(0, 200)}`);
-  return { project, correctCount: parsed.correctCount, totalCount: parsed.totalCount, anys: located(parsed.details) };
+  return { project, correctCount: parsed.correctCount, totalCount: parsed.totalCount, anys: located(parsed.details), floor: floorFor(project) };
 };
 
 /** Tracked files only. An untracked scratch file is not something the repository is failing to
@@ -89,10 +114,19 @@ const publish = (report: string): void => {
   }
 };
 
-const projects = process.argv.slice(2).length > 0 ? process.argv.slice(2) : DEFAULT_PROJECTS;
+const named = process.argv.slice(2);
+const projects = named.length > 0 ? named : PROJECTS.map((entry) => entry.project);
 const input: ReportInput = {
   candidates: candidates(),
   projects: projects.map(projectFiles),
   coverage: projects.map(projectCoverage),
 };
 publish(renderReport(input));
+
+// Named on stderr as well as in the report: the summary is a page someone has to open, and this
+// line is what a failed job shows in the log where the failure happened.
+const failures = floorFailures(input.coverage);
+failures.forEach((measured) => {
+  process.stderr.write(`type coverage for ${measured.project} is below its floor of ${measured.floor}: ${measured.correctCount}/${measured.totalCount}\n`);
+});
+if (failures.length > 0) process.exitCode = 1;

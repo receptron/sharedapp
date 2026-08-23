@@ -3,12 +3,12 @@
  *  it, and a path carrying the characters that end a table cell or a chart label. */
 import test from "node:test";
 import assert from "node:assert";
-import { renderReport, type ReportInput } from "../scripts/typecheck-report.js";
+import { floorFailures, renderReport, type ReportInput } from "../scripts/typecheck-report.js";
 
 const input = (overrides: Partial<ReportInput> = {}): ReportInput => ({
   candidates: [{ path: "src/a.ts", lines: 10 }],
   projects: [{ project: "tsconfig.json", files: ["src/a.ts"] }],
-  coverage: [{ project: "tsconfig.json", correctCount: 100, totalCount: 100, anys: [] }],
+  coverage: [{ project: "tsconfig.json", correctCount: 100, totalCount: 100, anys: [], floor: null }],
   ...overrides,
 });
 
@@ -82,7 +82,7 @@ test("a project name that would truncate a chart label is disarmed", () => {
 });
 
 test("type coverage reports two decimals, because one identifier moves the third", () => {
-  const report = renderReport(input({ coverage: [{ project: "tsconfig.json", correctCount: 6458, totalCount: 6463, anys: [] }] }));
+  const report = renderReport(input({ coverage: [{ project: "tsconfig.json", correctCount: 6458, totalCount: 6463, anys: [], floor: null }] }));
   assert.match(report, /99\.92% typed \(5 of 6463 any\)/);
 });
 
@@ -101,6 +101,7 @@ test("the any table ranks files and says how many it left out", () => {
           project: "tsconfig.json",
           correctCount: 88,
           totalCount: 100,
+          floor: null,
           // The first file gets three, so ranking is visible rather than incidental order.
           anys: [...anys, { file: "src/f0.ts", line: 2, text: "y" }, { file: "src/f0.ts", line: 3, text: "z" }],
         },
@@ -111,4 +112,45 @@ test("the any table ranks files and says how many it left out", () => {
   assert.equal(rows.length, 10);
   assert.match(rows[0] ?? "", /`src\/f0\.ts` \| 3 \|/);
   assert.match(report, /2 more files not shown\./);
+});
+
+const measured = (correctCount: number, totalCount: number, floor: number | null) => ({
+  project: "tsconfig.json",
+  correctCount,
+  totalCount,
+  anys: [],
+  floor,
+});
+
+test("a project exactly ON its floor holds, and one identifier below does not", () => {
+  // Both directions, because a gate that always fires and a gate that never does are equally
+  // useless, and only the pair tells them apart.
+  assert.deepEqual(floorFailures([measured(6458, 6463, 99.92)]), []);
+  assert.equal(floorFailures([measured(6458, 6464, 99.92)]).length, 1);
+});
+
+test("the floor is compared UNROUNDED, so a regression cannot hide in the display", () => {
+  // 16932/17000 is 99.60000 and displays as "99.60". A floor written to match that display would
+  // wave through the very `any` it was set to catch; 99.605 is what actually holds the line.
+  assert.equal(floorFailures([measured(16932, 17000, 99.605)]).length, 1);
+  assert.deepEqual(floorFailures([measured(16932, 16999, 99.605)]), []);
+});
+
+test("a project with no floor is never a failure, and says nothing about one", () => {
+  assert.deepEqual(floorFailures([measured(1, 100, null)]), []);
+  const report = renderReport(input({ coverage: [measured(1, 100, null)] }));
+  assert.ok(!report.includes("floor"), "a project nobody set a floor for must not claim one");
+});
+
+test("the report says which side of the floor each project is on", () => {
+  assert.match(renderReport(input({ coverage: [measured(6458, 6463, 99.92)] })), /floor 99\.92 held/);
+  assert.match(renderReport(input({ coverage: [measured(6458, 6464, 99.92)] })), /\*\*BELOW its floor of 99\.92\*\*/);
+});
+
+test("every project below its floor is named, not just the first", () => {
+  const failures = floorFailures([measured(1, 100, 99), { ...measured(1, 100, 99), project: "test/tsconfig.json" }]);
+  assert.deepEqual(
+    failures.map((entry) => entry.project),
+    ["tsconfig.json", "test/tsconfig.json"],
+  );
 });
