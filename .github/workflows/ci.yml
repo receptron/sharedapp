@@ -27,6 +27,19 @@ jobs:
       - run: yarn typecheck
       - run: yarn test
 
+      # A report, not a gate: `yarn typecheck` above decides whether the types are RIGHT, and this
+      # says which files that check even looked at — a file in no `tsconfig` is checked by nobody,
+      # and a green typecheck says nothing about it because it never opened it — plus how much of
+      # what it did see has a real type. Either number alone flatters: an unchecked file cannot
+      # lower a type-coverage percentage, and a file full of `any` counts as checked.
+      #
+      # `always()`, because a failed typecheck is exactly when the question is worth asking, and
+      # the file list survives a type error. One matrix entry, because the job summary is per RUN:
+      # both Node versions writing it would print the same report twice under one heading.
+      - name: Typecheck coverage summary
+        if: always() && matrix.node == '22.x'
+        run: yarn typecheck:summary
+
   # Consumers get `dist/` from the published tarball and never build it, so a
   # `files` list or a `prepublishOnly` that stopped emitting would ship an
   # empty package — MulmoTerminal's `server/` imports this at runtime, so it
