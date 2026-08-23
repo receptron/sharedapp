@@ -132,7 +132,7 @@ const dispatch = async (frame: Frame, type: string, options: { trusted?: boolean
  *  an object retained from a real click reports itself mid-dispatch with nobody touching anything.
  *  (It cannot be redispatched WHILE it is being dispatched — that throws — so this is only ever
  *  afterwards, which is exactly when the phase would otherwise have settled the question.) */
-const redispatch = async (frame: Frame, event: Record<string, unknown>, during: () => void) => {
+const redispatch = async (_frame: Frame, event: Record<string, unknown>, during: () => void) => {
   event.isTrusted = false;
   event.eventPhase = AT_TARGET;
   during();
