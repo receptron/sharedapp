@@ -13,10 +13,29 @@
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
     "noImplicitOverride": true,
-    "verbatimModuleSyntax": false,
+    /* An import that is only ever a type must say so. Consumers get `dist/` from the tarball and
+       never build it, so what this file emits IS the package — and elision decided by inference is
+       the one part of that emit nobody reads. Measured at 0 before it went on. */
+    "verbatimModuleSyntax": true,
+    /* Linting. Every one of these measured 0 across `src` AND `test` when it went in, so each is a
+       floor rather than a cleanup. */
+    "noImplicitReturns": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    /* `enum` and parameter properties are not erasable, and this package is run straight from
+       source by `tsx` in its own tests and compiled for everyone else. */
+    "erasableSyntaxOnly": true,
+    "allowUnreachableCode": false,
+    "allowUnusedLabels": false,
     "skipLibCheck": true,
     "esModuleInterop": true,
     "isolatedModules": true
+    /* Deliberately ABSENT, and this note exists so it is not added by someone matching this file to
+       a stricter one: `noPropertyAccessFromIndexSignature` reports 88 in `src` and 277 in `test`,
+       and every one is a schema field read by the name the author wrote (`fields.status`). Spelling
+       those `fields["status"]` is a house style, not a defect, and it would make the projection
+       code read less like the declaration it projects. */
   },
   "include": ["src"]
 }
