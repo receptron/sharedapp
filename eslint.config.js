@@ -94,7 +94,7 @@ export default tseslint.config(
     // `src/` must not need `@types/node`, so node globals are NOT declared globally. `scripts/` is
     // the opposite: it only ever runs under `node` in CI, so declare exactly what it uses rather
     // than pull in a `globals` dependency for one file.
-    files: ["scripts/**/*.mjs"],
+    files: ["scripts/**/*.{mjs,ts}"],
     languageOptions: {
       globals: { console: "readonly", process: "readonly", URL: "readonly" },
     },
@@ -107,12 +107,13 @@ export default tseslint.config(
     },
   },
   {
-    // Type-aware lint. Scoped to the two TypeScript projects — `scripts/**/*.mjs` belongs to
-    // neither, so naming it here would only produce parse errors.
-    files: ["src/**/*.ts", "test/**/*.ts"],
+    // Type-aware lint, everywhere a tsconfig reaches — which is now `scripts/` too, since the
+    // report that counts unchecked files must not be one. `scripts/**/*.mjs` is deliberately not
+    // here: no project holds a `.mjs`, so naming it would only produce parse errors.
+    files: ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.ts"],
     languageOptions: {
       parser: tseslint.parser,
-      // `projectService` rather than naming the two tsconfigs: with an explicit `project` list,
+      // `projectService` rather than naming each tsconfig: with an explicit `project` list,
       // `eslint --fix` CRASHES on any file where a fix was applied — the re-lint of the modified
       // text sends TypeScript 6.0.3 into `getModuleSpecifiers` with no path, and it throws from
       // inside whichever type-aware rule asked for a type name (measured: 8 files, and turning the

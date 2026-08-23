@@ -25,13 +25,14 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "format": "prettier --write \"{src,test}/**/*.ts\" \"scripts/**/*.mjs\" \"*.{json,md}\"",
-    "format:check": "prettier --check \"{src,test}/**/*.ts\" \"scripts/**/*.mjs\" \"*.{json,md}\"",
+    "format": "prettier --write \"{src,test}/**/*.ts\" \"scripts/**/*.{mjs,ts}\" \"*.{json,md}\" \"{scripts,test}/tsconfig.json\"",
+    "format:check": "prettier --check \"{src,test}/**/*.ts\" \"scripts/**/*.{mjs,ts}\" \"*.{json,md}\" \"{scripts,test}/tsconfig.json\"",
     "lint": "eslint src test scripts",
     "prepare": "tsc -p tsconfig.json",
     "prepublishOnly": "tsc -p tsconfig.json",
     "test": "tsx --test ./test/test_*.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p test/tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p test/tsconfig.json --noEmit && tsc -p scripts/tsconfig.json --noEmit",
+    "typecheck:summary": "tsx scripts/typecheck-summary.ts"
   },
   "dependencies": {
     "zod": "^4.1.13"
@@ -48,6 +49,7 @@
     "eslint-plugin-sonarjs": "^4.2.0",
     "prettier": "^3.0.0",
     "tsx": "^4.0.0",
+    "type-coverage": "^2.30.1",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.0.0"
   },
