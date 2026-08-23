@@ -51,10 +51,16 @@ export const portChannel = (frame: HTMLIFrameElement | null, cloneable: Cloneabl
   // carries nothing — everything else waits for an answer on the port.
   frame?.contentWindow?.postMessage({ type: VIEW_MESSAGE.channel }, "*", [channel.port2]);
   return {
-    post: (message) => channel.port1.postMessage(cloneable(message)),
-    onMessage: (handler) => {
-      channel.port1.onmessage = (event: MessageEvent) => handler(event.data);
+    post: (message) => {
+      channel.port1.postMessage(cloneable(message));
     },
-    close: () => channel.port1.close(),
+    onMessage: (handler) => {
+      channel.port1.onmessage = (event: MessageEvent) => {
+        handler(event.data);
+      };
+    },
+    close: () => {
+      channel.port1.close();
+    },
   };
 };

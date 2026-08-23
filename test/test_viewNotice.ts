@@ -77,7 +77,9 @@ test("a host that takes no notices is not broken by one", () => {
     () => NONCE,
     cells(),
   );
-  assert.doesNotThrow(() => bridge.receive(notice({ code: "error", detail: "boom" })));
+  assert.doesNotThrow(() => {
+    bridge.receive(notice({ code: "error", detail: "boom" }));
+  });
 });
 
 test("a notice is not judged as a submission", () => {

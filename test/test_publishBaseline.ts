@@ -204,7 +204,7 @@ test("the three shapes still compile to the same documents", () => {
   assert.equal(publishedSubmit(live.app, "votes").idFrom, "auth.uid+field");
   // The public config document is the one a STRANGER's page reads, and it carries the submit
   // declaration too — the page draws the form from it.
-  assert.equal((live.config.submit as Record<string, Record<string, unknown>>).votes?.idField, "questionId");
+  assert.equal(live.config.submit.votes?.idField, "questionId");
 
   assert.equal(publishedSubmit(gym.app, "bookings").initialStatus, "requested");
   assert.equal(publishedSubmit(gym.app, "bookings").stampField, "createdAt");

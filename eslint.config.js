@@ -112,7 +112,13 @@ export default tseslint.config(
     files: ["src/**/*.ts", "test/**/*.ts"],
     languageOptions: {
       parser: tseslint.parser,
-      parserOptions: { project: ["./tsconfig.json", "./test/tsconfig.json"], tsconfigRootDir: import.meta.dirname },
+      // `projectService` rather than naming the two tsconfigs: with an explicit `project` list,
+      // `eslint --fix` CRASHES on any file where a fix was applied — the re-lint of the modified
+      // text sends TypeScript 6.0.3 into `getModuleSpecifiers` with no path, and it throws from
+      // inside whichever type-aware rule asked for a type name (measured: 8 files, and turning the
+      // named rule off only moved the crash to the next one). The project service is the path that
+      // handles a file whose content is not what is on disk, which is exactly the fix pass.
+      parserOptions: { projectService: true, tsconfigRootDir: import.meta.dirname },
     },
     rules: {
       // The promise family. A missing `await` makes a rejection vanish and the call look like it
@@ -232,29 +238,10 @@ export default tseslint.config(
     rules: { "@typescript-eslint/require-await": "warn" },
   },
   {
-    // An arrow shorthand returning a void call. Braces fix every one of them.
-    files: [
-      "src/view/channel.ts", // 3
-      "test/test_authoredApp.ts", // 1
-      "test/test_viewGesture.ts", // 10
-      "test/test_viewNotice.ts", // 1
-    ],
-    rules: { "@typescript-eslint/no-confusing-void-expression": "warn" },
-  },
-  {
     // Four conditionals on a nullable string, where "" and absent take the same branch on purpose.
     // Worth spelling out one at a time, since an empty field name is a real authored mistake.
     files: ["src/publishChecks.ts"], // 4
     rules: { "@typescript-eslint/strict-boolean-expressions": "warn" },
-  },
-  {
-    files: [
-      "test/test_publishBaseline.ts", // 1
-      "test/test_viewLookup.ts", // 1
-      "test/test_viewOwnRows.ts", // 1
-      "test/test_viewParent.ts", // 1
-    ],
-    rules: { "@typescript-eslint/no-unnecessary-type-assertion": "warn" },
   },
   {
     files: ["test/test_publishChecks.ts"], // 1

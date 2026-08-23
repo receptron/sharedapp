@@ -143,14 +143,19 @@ const redispatch = async (_frame: Frame, event: Record<string, unknown>, during:
 
 const clickThrough = (frame: Frame, options: Parameters<typeof dispatch>[2] = {}) => dispatch(frame, "click", options);
 
-const onWindow = (frame: Frame, type: string, handler: () => void) =>
+const onWindow = (frame: Frame, type: string, handler: () => void) => {
   (frame.win.addEventListener as (type: string, handler: () => void) => void)(type, handler);
+};
 
 const submit = (frame: Frame) => void frame.bridge.submit("orders", { name: "x" });
 
 test("a submit made inside a trusted click is marked", async () => {
   const frame = runBootstrap();
-  await clickThrough(frame, { during: () => submit(frame) });
+  await clickThrough(frame, {
+    during: () => {
+      submit(frame);
+    },
+  });
   assert.deepEqual(frame.marks(), [true]);
 });
 
@@ -172,7 +177,13 @@ test("a submit from a window listener the click itself added is marked", async (
   // Closing on the window's bubble phase could not do this: the close sat BEFORE any listener added
   // while the click was in flight, and a microtask checkpoint between listeners let it run first.
   const frame = runBootstrap();
-  await clickThrough(frame, { during: () => onWindow(frame, "click", () => submit(frame)) });
+  await clickThrough(frame, {
+    during: () => {
+      onWindow(frame, "click", () => {
+        submit(frame);
+      });
+    },
+  });
   assert.deepEqual(frame.marks(), [true]);
 });
 
@@ -183,7 +194,11 @@ test("a TRUSTED change does not mark, because script can produce one", async () 
   // checkbox of its own. `isTrusted` is the whole of what this can check, and on `change` it does
   // not mean what it means on `click`.
   const frame = runBootstrap();
-  await dispatch(frame, "change", { during: () => submit(frame) });
+  await dispatch(frame, "change", {
+    during: () => {
+      submit(frame);
+    },
+  });
   assert.deepEqual(frame.marks(), [false]);
 });
 
@@ -194,7 +209,11 @@ test("...and the price of that is an unmarked save-on-toggle, which is the fail-
   // writing nothing rather than toward writing what nobody asked for.
   const frame = runBootstrap();
   await clickThrough(frame);
-  await dispatch(frame, "change", { during: () => submit(frame) });
+  await dispatch(frame, "change", {
+    during: () => {
+      submit(frame);
+    },
+  });
   assert.deepEqual(frame.marks(), [false]);
 });
 
@@ -211,7 +230,12 @@ test("a click the PAGE dispatched opens nothing", async () => {
   // `el.click()` and `dispatchEvent(new MouseEvent("click"))` are a page acting on its own with a
   // click's name on it. `isTrusted` is the browser's word and cannot be set from script.
   const frame = runBootstrap();
-  await clickThrough(frame, { trusted: false, during: () => submit(frame) });
+  await clickThrough(frame, {
+    trusted: false,
+    during: () => {
+      submit(frame);
+    },
+  });
   assert.deepEqual(frame.marks(), [false]);
 });
 
@@ -219,7 +243,11 @@ test("typing does not open it either: `input` is not held", async () => {
   // A page that submits on `input` would be marked on every keystroke — and the automated visitor
   // this mark is for fills the form in before it presses anything.
   const frame = runBootstrap();
-  await dispatch(frame, "input", { during: () => submit(frame) });
+  await dispatch(frame, "input", {
+    during: () => {
+      submit(frame);
+    },
+  });
   assert.deepEqual(frame.marks(), [false]);
 });
 
@@ -243,7 +271,12 @@ test("stopping propagation ends the dispatch rather than abandoning it", async (
   // calling stopPropagation() still reaches the end of the algorithm, so the phase is reset like
   // any other. What it submits DURING the click counts; what it defers does not.
   const frame = runBootstrap();
-  await clickThrough(frame, { reachesWindowAgain: false, during: () => submit(frame) });
+  await clickThrough(frame, {
+    reachesWindowAgain: false,
+    during: () => {
+      submit(frame);
+    },
+  });
   submit(frame);
   await settle();
   assert.deepEqual(frame.marks(), [true, false]);
@@ -269,7 +302,9 @@ test("a real click's own Event object, handed back to dispatchEvent, does not ma
   // a page could keep one real click and mint visitor-caused submissions from it for ever.
   const frame = runBootstrap();
   const real = await clickThrough(frame);
-  await redispatch(frame, real, () => submit(frame));
+  await redispatch(frame, real, () => {
+    submit(frame);
+  });
   assert.deepEqual(frame.marks(), [false]);
 });
 

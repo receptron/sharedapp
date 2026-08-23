@@ -25,7 +25,7 @@ const fakeChannel = () => {
   const posted: Record<string, unknown>[] = [];
   let handler: ((data: unknown) => void) | null = null;
   const channel: Channel = {
-    post: (message) => posted.push(message as Record<string, unknown>),
+    post: (message) => posted.push(message),
     onMessage: (fn) => {
       handler = fn;
     },

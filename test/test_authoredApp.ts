@@ -26,11 +26,12 @@ const problems = (overrides: Record<string, unknown>): string[] => {
   return parsed.ok ? [] : parsed.problems;
 };
 
-const refuses = (lines: string[], fragment: string): void =>
+const refuses = (lines: string[], fragment: string): void => {
   assert.ok(
     lines.some((line) => line.includes(fragment)),
     `expected a problem mentioning ${JSON.stringify(fragment)}, got:\n${lines.map((line) => `  - ${line}`).join("\n") || "  (none)"}`,
   );
+};
 
 test("the declaration a whole app is written from parses", () => {
   // First, and not a formality: every refusal below is only meaningful against
