@@ -286,7 +286,12 @@ export function participantScope(app: AuthoredApp, cid: string, participantRead:
  *  what must not happen is a PROJECTION that describes a read the host would
  *  be denied — see {@link ProjectedViewCollection.limit}. */
 export function limitFor(app: AuthoredApp, view: NormalizedView, scope: ProjectedViewCollection): ProjectedViewCollection {
-  const rows = view.limit?.[scope.cid];
+  // `Object.hasOwn` before the lookup, and it is not defensive habit: `constructor`, `toString`
+  // and `hasOwnProperty` are all valid collection names (`isValidCollectionName`), so a plain
+  // index into a map that does not mention this cid reaches Object.prototype and hands back a
+  // FUNCTION. It would pass the gate — which reads the declared entries, not this lookup — and
+  // then be projected as `limit: { rows: <function>, field: … }`, which Firestore cannot write.
+  const rows = view.limit !== undefined && Object.hasOwn(view.limit, scope.cid) ? view.limit[scope.cid] : undefined;
   const field = app.public?.submit?.[scope.cid]?.stampField;
   if (rows === undefined || field === undefined || scope.scope === "own") return scope;
   return { ...scope, limit: { rows, field } };

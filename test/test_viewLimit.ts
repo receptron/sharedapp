@@ -146,6 +146,33 @@ test("an own-row scope is never handed a cap, whatever the declaration says", ()
   ]);
 });
 
+test("a collection named after an Object member is not capped by the prototype", () => {
+  // `constructor`, `toString` and `hasOwnProperty` are valid collection names. A plain index into
+  // a cap map that does not mention this cid would reach Object.prototype and project a FUNCTION
+  // as the row count — a declaration the gate accepts and Firestore cannot write.
+  const authored = app({
+    collections: { constructor: { submitOnly: true }, messages: { submitOnly: true, statusField: "status" } },
+    public: {
+      submit: {
+        constructor: { auth: "verifiedEmail", emailField: "author", createFields: ["author", "at"], stampField: "at" },
+        messages: { auth: "verifiedEmail", emailField: "author", createFields: ["author", "postedAt"], stampField: "postedAt" },
+      },
+    },
+    views: [{ id: "room", audience: "member", path: "views/room.html", collections: ["constructor", "messages"], limit: { messages: 20 } }],
+  });
+  assert.deepEqual(publishProblems(authored, [{ cid: "constructor", primaryKey: "id" }, ...CIDS], OWNER), []);
+  const tiers = projectAppViews(authored, STAMP);
+  assert.deepEqual(tiers.find((tier) => tier.audience === "member")?.config.views, [
+    {
+      id: "room",
+      collections: [
+        { cid: "constructor", scope: "all" },
+        { cid: "messages", scope: "all", limit: { rows: 20, field: "postedAt" } },
+      ],
+    },
+  ]);
+});
+
 test("the public page's cap reaches the world-readable config, keyed by cid", () => {
   // A public page's `collections` is a list of NAMES with nowhere to hang a per-collection
   // value, so the caps ride beside it as a map.
