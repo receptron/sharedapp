@@ -1544,3 +1544,35 @@ test("refuses a refIn comparison the rules could never satisfy", () => {
   assert.deepEqual(schemaRefProblems(declared, roundtableSchemas(MESSAGE_FIELDS, enumStatus(["open", "closed"])) as never), []);
   refuses(schemaRefProblems(declared, roundtableSchemas(MESSAGE_FIELDS, enumStatus(["live", "closed"])) as never), "not one of the values");
 });
+
+// --- sealed: a status a record cannot be deleted from ----------------------
+
+const sealedProblemsFor = (topics: Record<string, unknown>) =>
+  problemsFor(
+    { collections: { topics: { statusField: "status", transitions: { initial: ["open"], open: ["closed"] }, ...topics }, messages: {} } },
+    ROUNDTABLE_CIDS,
+  );
+
+test("accepts sealing a status records actually reach", () => {
+  // The accepted form: without this, deleting the closed topic and writing it
+  // again as `open` undoes the close in two ordinary writes, and `refIn`
+  // reports a genuinely open topic.
+  assert.deepEqual(sealedProblemsFor({ sealed: ["closed"] }), []);
+  assert.deepEqual(sealedProblemsFor({}), []);
+});
+
+test("refuses a sealed list that seals nothing", () => {
+  refuses(sealedProblemsFor({ sealed: [] }), "collections.topics.sealed is an empty list");
+  refuses(sealedProblemsFor({ sealed: ["archived"] }), 'collections.topics.sealed names "archived"');
+});
+
+test("refuses sealed without a statusField to read", () => {
+  // The quiet one: the rules reach a record's status only through
+  // `statusField`, so without it nothing is ever sealed — the app publishes
+  // and the promise is simply not kept.
+  const problems = problemsFor(
+    { collections: { topics: { transitions: { initial: ["open"], open: ["closed"] }, sealed: ["closed"] }, messages: {} } },
+    ROUNDTABLE_CIDS,
+  );
+  refuses(problems, "declares no statusField");
+});

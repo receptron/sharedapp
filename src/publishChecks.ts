@@ -557,6 +557,45 @@ function idInTargetProblems(cid: string, submit: AuthoredSubmit, known: Readonly
   return [];
 }
 
+/** `sealed` names statuses, and the same two ways of naming nothing as
+ *  `selfDelete`: an empty list, and a status no record ever holds.
+ *
+ *  Plus one of its own — without a `statusField` the rules cannot read a
+ *  record's status at all, so `sealedNow` is false for every row and the
+ *  declaration seals nothing. That is the failure this file exists for: the
+ *  app publishes, the page says the record is permanent, and it is not.
+ *
+ *  Judged against `transitions` and against `initialStatus`, because a status
+ *  is reached either by being written first or by being transitioned into. */
+function sealedProblems(app: AuthoredApp): string[] {
+  return Object.entries(app.collections ?? {}).flatMap(([cid, collection]) => {
+    const states = collection.sealed;
+    if (states === undefined) return [];
+    if (states.length === 0) {
+      return [`collections.${cid}.sealed is an empty list, which seals nothing. Name the statuses a record may not be deleted from, or remove the key.`];
+    }
+    if (collection.statusField === undefined) {
+      return [
+        `collections.${cid}.sealed names statuses but collections.${cid} declares no statusField: the rules read a record's status through it, so nothing ` +
+          "is ever sealed and every row stays deletable. Declare the statusField, or remove the key.",
+      ];
+    }
+    const { transitions } = collection;
+    if (transitions === undefined) return [];
+    const reachable = new Set([
+      ...Object.values(transitions).flat(),
+      ...Object.keys(transitions).filter((from) => from !== INITIAL_KEY),
+      ...Object.values(app.public?.submit ?? {}).flatMap((submit) => (submit.initialStatus === undefined ? [] : [submit.initialStatus])),
+    ]);
+    const unreachable = states.filter((state) => !reachable.has(state));
+    if (unreachable.length === 0) return [];
+    return [
+      `collections.${cid}.sealed names ${unreachable.map((state) => `"${state}"`).join(", ")}, which no record ever holds: ` +
+        `it is neither an initialStatus nor a status collections.${cid}.transitions names, so the declaration seals nothing.`,
+    ];
+  });
+}
+
 /** Where a `refIn` says the parent record lives.
  *
  *  The same typo as `idIn`'s and the same silence: the rules `get()` a
@@ -699,6 +738,7 @@ export function publishProblems(app: AuthoredApp, collections: readonly Publisha
     ...windowRefProblems(app, collections),
     ...idTargetProblems(app, collections),
     ...refInTargetProblems(app, collections),
+    ...sealedProblems(app),
     ...mirrorProblems(app, collections),
     ...viewProblems(app, collections),
     ...agentProblems(app, collections),

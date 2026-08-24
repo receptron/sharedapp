@@ -193,6 +193,24 @@ const CollectionConfigZ = z
     /** The parent record's state, checked on every create — writers included.
      *  See {@link RefInZ}. */
     refIn: RefInZ.optional(),
+    /** Statuses a row may not be DELETED from, by anybody — the owner
+     *  included.
+     *
+     *  `deleteWith` asks a writer nothing (`writerDelete` above is read by the
+     *  PAGES; the rules never look at it), so a record whose state is supposed
+     *  to be permanent can be deleted and written again in its initial state.
+     *  Where anything hangs off that record — a `refIn` naming it — the whole
+     *  guarantee comes back with it: delete the closed topic, recreate it
+     *  `open`, and the gate correctly reports an open topic.
+     *
+     *  Per status rather than a flag, exactly like `selfDelete`: "may be taken
+     *  away while it is pending" and "may be taken away once it is history"
+     *  are different promises. A collection where NO state may be removed is
+     *  spelled by declaring every one of them.
+     *
+     *  DELETE only — a sealed record's other fields can still be corrected.
+     *  What it cannot do is stop existing. */
+    sealed: z.array(z.string().trim().min(1)).optional(),
     peerVisibility: z.enum(["public", "hidden"]).optional(),
     revealGated: z.boolean().optional(),
     gatedFrom: NameZ.optional(),
