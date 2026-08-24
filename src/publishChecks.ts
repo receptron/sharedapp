@@ -1333,7 +1333,6 @@ function agentCollectionProblems(app: AuthoredApp, agent: AuthoredAgent, where: 
             : `it is not in participantRead, and public.submit.${cid} declares no emailField, no uidField and no idFrom "auth.uid", so there is no row the rules would call theirs.`) +
           " A duty cannot be given over data the reader is denied.",
       );
-      continue;
     }
     // Naming a collection this audience cannot ACT on is fine as long as one of
     // them can be acted on — a brief may read one dataset in order to write

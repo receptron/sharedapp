@@ -37,6 +37,14 @@ const app = (overrides: Record<string, unknown>) => AuthoredAppZ.parse({ aid: "a
 
 const problemsFor = (overrides: Record<string, unknown>): string[] => publishProblems(app(overrides), CIDS, OWNER);
 
+/** One projected tier, or a failure that says which one was missing — rather than an optional
+ *  chain that turns "the tier was not projected at all" into an assertion that quietly passes. */
+function tierOf(parsed: ReturnType<typeof app>, tier: "member" | "roster") {
+  const found = projectAppViews(parsed, STAMP).find((entry) => entry.tier === tier);
+  if (found === undefined) throw new Error(`no ${tier} tier was projected`);
+  return found;
+}
+
 function refuses(problems: string[], fragment: string): void {
   const bullets = problems.map((problem) => `  - ${problem}`).join("\n");
   assert.ok(
@@ -141,7 +149,7 @@ test("a duty over collections this audience can do nothing to is refused", () =>
 test("a brief with no watch is a warning, not a refusal", () => {
   const declared = desk({ agents: [{ id: "desk", audience: "member", collections: ["bookings"], instruction: "頼まれたら承認する。" }] });
   assert.deepEqual(problemsFor(declared), []);
-  assert.ok(agentWarnings(app(declared))[0]?.includes("no `watch`"));
+  assert.ok(agentWarnings(app(declared)).some((warning) => warning.includes("no `watch`")));
   assert.deepEqual(agentWarnings(app(desk({ agents: [DESK_BRIEF] }))), []);
 });
 
@@ -158,8 +166,7 @@ test("a member brief lands on the member tier and NOWHERE near config/public", (
   const projected = projectApp(parsed, [], STAMP, null);
   assert.equal("agents" in projected.config, false);
 
-  const member = projectAppViews(parsed, STAMP).find((tier) => tier.tier === "member");
-  assert.deepEqual(member?.config.agents, [{ id: "desk", instruction: DESK_BRIEF.instruction, watch: ["bookings"] }]);
+  assert.deepEqual(tierOf(parsed, "member").config.agents, [{ id: "desk", instruction: DESK_BRIEF.instruction, watch: ["bookings"] }]);
 });
 
 test("a public brief lands on config/public and not on the member tier", () => {
@@ -167,8 +174,7 @@ test("a public brief lands on config/public and not on the member tier", () => {
   const projected = projectApp(parsed, [], STAMP, null);
   assert.deepEqual(projected.config.agents, [{ id: "greeter", instruction: "枠を見て案内する。", watch: ["slots"], collections: ["bookings"] }]);
 
-  const member = projectAppViews(parsed, STAMP).find((tier) => tier.tier === "member");
-  assert.equal("agents" in (member?.config ?? {}), false);
+  assert.equal("agents" in tierOf(parsed, "member").config, false);
 });
 
 test("an app with no agents projects the documents it projected before this key existed", () => {
@@ -181,16 +187,15 @@ test("an app with no agents projects the documents it projected before this key 
 });
 
 test("a tier with a duty and NO pages still carries the write projection the duty needs", () => {
-  const parsed = app(desk({ agents: [DESK_BRIEF] }));
-  const member = projectAppViews(parsed, STAMP).find((tier) => tier.tier === "member");
-  assert.deepEqual(member?.views, []);
+  const member = tierOf(app(desk({ agents: [DESK_BRIEF] })), "member");
+  assert.deepEqual(member.views, []);
   // The host keeps the tier because of this, not because of the (absent) pages.
-  assert.equal(member?.agents.length, 1);
+  assert.equal(member.agents.length, 1);
   assert.deepEqual(
-    member?.config.write.map((entry) => entry.cid),
+    member.config.write.map((entry) => entry.cid),
     ["bookings"],
   );
-  assert.deepEqual(member?.config.write[0]?.transitions, { initial: ["pending"], pending: ["approved", "rejected"] });
+  assert.deepEqual(member.config.write[0]?.transitions, { initial: ["pending"], pending: ["approved", "rejected"] });
   // And the submit declaration for it, so the brief's collection can be written to at all.
-  assert.deepEqual(Object.keys(member?.config.submit ?? {}), ["bookings"]);
+  assert.deepEqual(Object.keys(member.config.submit), ["bookings"]);
 });
