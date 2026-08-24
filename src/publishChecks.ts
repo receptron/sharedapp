@@ -28,10 +28,11 @@
 
 import type { CollectionFieldSpec, CollectionSchema } from "@mulmoclaude/core/collection";
 import { isSafeCustomViewPath } from "@mulmoclaude/core/collection/server";
-import { normalizeViews, participantScope, type NormalizedView } from "./appViews.js";
+import { normalizeViews, participantScope, writeFor, type NormalizedView, type ViewAudience } from "./appViews.js";
+import { agentCids, AGENT_ID_PATTERN, AGENT_INSTRUCTION_MAX, RESERVED_AGENT_IDS } from "./appAgents.js";
 import { APP_PROTOCOL, protocolOf, protocolWithin } from "./appProtocol.js";
 import { writersOf } from "./appViews.js";
-import type { AuthoredApp, AuthoredCollectionConfig, AuthoredSubmit } from "./publishManifest.js";
+import type { AuthoredAgent, AuthoredApp, AuthoredCollectionConfig, AuthoredSubmit } from "./publishManifest.js";
 
 /** What publish knows about a shared collection in this repository, as far as
  *  these checks are concerned: its cid and the schema key its records are
@@ -672,6 +673,7 @@ export function publishProblems(app: AuthoredApp, collections: readonly Publisha
     ...idTargetProblems(app, collections),
     ...mirrorProblems(app, collections),
     ...viewProblems(app, collections),
+    ...agentProblems(app, collections),
   ];
 }
 
@@ -1241,6 +1243,206 @@ function viewProblems(app: AuthoredApp, collections: readonly PublishableCollect
     ...viewLiveProblems(app, view),
     ...viewLimitProblems(app, view),
   ]);
+}
+
+// ---------------------------------------------------------------------------
+// The STANDING INSTRUCTIONS — `agents[]`
+//
+// A brief is prose, so almost nothing about it can be checked. What CAN be
+// checked is the same class of thing every other refusal here is about: a duty
+// published where the wrong people can read it, and a duty nobody can carry out.
+//
+// The first is a leak. `config/public` is `allow read: if true` forever, so a
+// public brief is world-readable by construction — and a brief is where an app
+// says when to approve and when to delete. So a public brief may name only what
+// that audience ALREADY has: what `public.read` publishes to the world, plus the
+// collections it may submit to or move its own row in. A name outside that is
+// the app's internal vocabulary going out on a document that never needed it.
+//
+// The second is the file's usual fail-closed trap. A brief asking for a move
+// this audience does not carry is not a smaller job — it is an agent that wakes
+// up, reads the rows and is refused, with the author believing the desk is
+// staffed. `not-permitted` is the answer at the far end, and the author is not
+// the person who hears it.
+
+/** May this audience READ `cid` at all? The same three answers `views[]` gets,
+ *  and for the same reason: a brief that says "watch the bookings" to a reader
+ *  the rules deny is a subscription that never fires. */
+function agentCanRead(app: AuthoredApp, audience: ViewAudience, cid: string): boolean {
+  if (audience === "public") return (app.public?.read ?? []).includes(cid);
+  if (audience === "participant") return participantScope(app, cid, app.participantRead ?? []) !== null;
+  // A member holds a role, and every read branch a role opens is unscoped —
+  // WHICH role is not a property of the declaration (see `writersOf`).
+  return true;
+}
+
+/** Can THIS audience actually submit through `public.submit[cid]`?
+ *
+ *  "A submit declaration exists" is not the question, and reading it as one accepts a duty whose
+ *  one action the rules would refuse. `publicCreate` in `firestore.rules` adds two conditions that
+ *  are properties of the DECLARATION rather than of the writer, so they are answerable here:
+ *
+ *    `audience: "participant"` pins the create branch to the participant ROLE
+ *  (`s.get("audience","") != "participant" || r == "participant"`). The member tier is `staffOf`
+ *  — owner / editor / viewer / assignee — and a stranger on the public face holds no role at all,
+ *  so neither of those may lean on such a form. (Sourcery on receptron/sharedapp#49.)
+ *
+ *  `auth: "none"` is NOT tested here although `publicCreate` also gates it on the master switch:
+ *  `authProblems` refuses that value outright, above, so a condition for it could never fire — and
+ *  a refusal nothing can reach is one nobody can trust is right.
+ *
+ *  Everything else about a create is about the WRITER or the record (`authOk`, `inWindow`,
+ *  `idOk`), and none of those is a reason to refuse a declaration. */
+function agentCanSubmit(app: AuthoredApp, audience: ViewAudience, cid: string): boolean {
+  const submit = app.public?.submit?.[cid];
+  if (submit === undefined) return false;
+  return submit.audience !== "participant" || audience === "participant";
+}
+
+/** Can this audience DO anything to `cid` — move it, hand it over, take it
+ *  away, or send one in? */
+const agentCanAct = (app: AuthoredApp, audience: ViewAudience, cid: string): boolean =>
+  writeFor(app, audience, cid) !== null || agentCanSubmit(app, audience, cid);
+
+/** One brief's id, held to the grammar it is reported under. */
+function agentIdProblems(id: string, where: string, seen: Map<string, string>): string[] {
+  if (RESERVED_AGENT_IDS.includes(id)) return [`${where}.id is '${id}', which is reserved: that is the id every tier's own projection document carries.`];
+  if (!AGENT_ID_PATTERN.test(id)) {
+    return [
+      `${where}.id is '${id}': an agent id must be lowercase letters, digits and hyphens, start with a letter or digit, and be at most 64 characters ` +
+        "(e.g. front-desk). It is what a report names this instruction by when it hands it to an agent.",
+    ];
+  }
+  const first = seen.get(id);
+  if (first !== undefined) {
+    return [`${where}.id is '${id}', which ${first} already uses. Two briefs with one id cannot be told apart in the report that carries them.`];
+  }
+  seen.set(id, where);
+  return [];
+}
+
+/** The instruction itself: prose, and bounded.
+ *
+ *  The cap is not tidiness. This text is published on a document read by every
+ *  agent that opens the app, and it arrives in their context as a request from
+ *  the author — so an unbounded key is a payload delivered by whoever published
+ *  (or cloned and re-published) the app. Bounded, the reader can print it WHOLE,
+ *  which is what lets it promise never to hand back a shortened one. */
+function agentInstructionProblems(instruction: string, where: string): string[] {
+  if (instruction.length <= AGENT_INSTRUCTION_MAX) return [];
+  return [
+    `${where}.instruction is ${instruction.length} characters, above the ${AGENT_INSTRUCTION_MAX} this key allows. A standing instruction is a brief: ` +
+      "it is published to every agent that opens the app and printed whole, so there is a size past which it stops being one. Put the detail on the page.",
+  ];
+}
+
+/** Why this audience is denied a read of `cid`, in the terms that audience's own rules use. */
+const unreadableBecause = (audience: ViewAudience, cid: string): string =>
+  audience === "public"
+    ? "it is not in public.read, so the rules refuse the read and the subscription would never fire."
+    : `it is not in participantRead, and public.submit.${cid} declares no emailField, no uidField and no idFrom "auth.uid", so there is no row the rules would call theirs.`;
+
+/** ONE cid a brief names, judged for the audience the brief is written for.
+ *
+ *  Three refusals, in order: the collection is not in this repository at all; it is WATCHED by a
+ *  reader the rules deny (a subscription that never fires); or it is named by a reader who can
+ *  neither read nor write it.
+ *
+ *  That last one is the principle-5 half, and it is about the NAME rather than the data. Every cid
+ *  a brief names is written onto the document that audience reads — `config/public` for a public
+ *  brief, which is `allow read: if true` forever, and the roster's `live:config` for a participant
+ *  one, which every listed participant reads. A collection the duty cannot use is not a dataset it
+ *  could work from; it is one more of the app's internal names on a document that never needed it.
+ *
+ *  Read-OR-write, never read-and-write: the ordinary public brief names a collection it may only
+ *  SUBMIT to (`public.submit`), which the world may never read, and that greeter is what this key
+ *  exists for. */
+function agentCidProblems(app: AuthoredApp, agent: AuthoredAgent, where: string, cid: string, known: ReadonlySet<string>): string[] {
+  if (!known.has(cid)) {
+    return [
+      `${where} names '${cid}', which is not a shared collection in this repository. ` +
+        `Shared collections here: ${known.size > 0 ? [...known].sort().join(", ") : "(none)"}.`,
+    ];
+  }
+  const readable = agentCanRead(app, agent.audience, cid);
+  if (!readable && (agent.watch ?? []).includes(cid)) {
+    return [
+      `${where}.watch names '${cid}', which an agent reading as '${agent.audience}' cannot read: ${unreadableBecause(agent.audience, cid)}` +
+        " A duty cannot be given over data the reader is denied.",
+    ];
+  }
+  if (readable || agentCanAct(app, agent.audience, cid)) return [];
+  return [
+    `${where} names '${cid}', which an agent reading as '${agent.audience}' can neither read nor write. Every cid a brief names is PUBLISHED on the ` +
+      `document that audience reads${agent.audience === "public" ? " — and the public one is world-readable forever" : ""}, so naming a collection the ` +
+      "duty cannot use puts one more of this app's internal names there for nothing. Name the collections the job actually touches.",
+  ];
+}
+
+/** A brief that cannot act on ANY of the collections it names.
+ *
+ *  Not the same question as the one above, which is asked per cid: a brief may read one dataset in
+ *  order to write another, and that is a job. A brief where nothing is writable is not — the agent
+ *  wakes up, reads the rows and is refused. "Look and report" is what the user of the terminal asks
+ *  for; it is not something an app publishes. */
+function agentInertProblems(app: AuthoredApp, agent: AuthoredAgent, where: string, cids: string[], known: ReadonlySet<string>): string[] {
+  if (cids.length === 0 || cids.some((cid) => known.has(cid) && agentCanAct(app, agent.audience, cid))) return [];
+  return [
+    `${where} names ${cids.map((cid) => `'${cid}'`).join(", ")}, and an agent reading as '${agent.audience}' can do nothing to any of them: ` +
+      "no form to submit through, and no transition, assignment or withdrawal this audience carries. A published standing instruction is a JOB — " +
+      "the agent would wake up, read the rows and be refused. If the agent is only meant to look and report, that is what the user of the terminal " +
+      "asks it for; it is not something the app publishes.",
+  ];
+}
+
+/** The collections a brief names: they exist, this audience may read what it watches, every name
+ *  is one that audience already has, and the duty can actually be carried out. */
+function agentCollectionProblems(app: AuthoredApp, agent: AuthoredAgent, where: string, known: ReadonlySet<string>): string[] {
+  const cids = agentCids(agent);
+  return [...cids.flatMap((cid) => agentCidProblems(app, agent, where, cid, known)), ...agentInertProblems(app, agent, where, cids, known)];
+}
+
+/** What publish refuses about the standing instructions. */
+function agentProblems(app: AuthoredApp, collections: readonly PublishableCollection[]): string[] {
+  const known = new Set(collections.map((collection) => collection.cid));
+  const seen = new Map<string, string>();
+  return (app.agents ?? []).flatMap((agent, index) => {
+    const where = `agents[${index}]`;
+    return [
+      ...agentIdProblems(agent.id, where, seen),
+      ...agentInstructionProblems(agent.instruction, where),
+      ...(agent.audience === "public" && app.public === undefined
+        ? [
+            `${where} is written for audience "public", and this app declares no \`public\` block. There is no public face to sit at, and the document a ` +
+              "public brief is published on is the one the world reads — so there is nowhere to put it that is not an accident.",
+          ]
+        : []),
+      ...agentCollectionProblems(app, agent, where, known),
+    ];
+  });
+}
+
+/** What publish SAYS about the standing instructions without stopping.
+ *
+ *  A warning rather than a refusal because both of these are declarations that
+ *  work — they are just very likely not what the author meant, and the author is
+ *  the only person who can tell. Kept out of {@link publishProblems} on purpose:
+ *  a gate that stops for a maybe teaches people to stop reading it. */
+export function agentWarnings(app: AuthoredApp): string[] {
+  return (app.agents ?? []).flatMap((agent, index) => {
+    const where = `agents[${index}]`;
+    return [
+      ...(agent.watch === undefined
+        ? [
+            `${where} declares no \`watch\`, so nothing will ever wake an agent up for it. It is read once, by whoever runs \`describe\` on the app. ` +
+              "That is a real thing to publish; it is not a standing job.",
+          ]
+        : []),
+      ...(/<\s*(form|script|iframe)\b|__MC_VIEW/i.test(agent.instruction)
+        ? [`${where}.instruction contains markup. A brief is plain text read by an agent — the HTML a person sees belongs in a \`views[]\` page.`]
+        : []),
+    ];
+  });
 }
 
 /** The checks that need a SCHEMA rather than the declaration.

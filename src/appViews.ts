@@ -29,6 +29,7 @@
 //   participant's page builds a query the rules refuse — it does not render
 //   less, it fails.
 import type { AuthoredApp, AuthoredMail, AuthoredSubmit } from "./publishManifest.js";
+import type { ProjectedAgent } from "./appAgents.js";
 
 /** The audiences a view may be written for. A CLOSED set: each one names a
  *  tier with a rule behind it, so an unknown value has nowhere to be
@@ -316,6 +317,16 @@ export interface AppViewConfigDoc extends Record<string, unknown> {
    *  the order the views declare them; absent entries mean "read only", which
    *  is what a page with no buttons is drawn from. */
   write: ProjectedViewWrite[];
+  /** The publisher's STANDING INSTRUCTIONS for whoever sits at this app as this
+   *  audience — see `appAgents.ts`. Absent when the app declared none for this
+   *  tier, which is every app published before the key existed: silence means
+   *  "no published duty", never "invent one".
+   *
+   *  It rides on the tier config rather than on a document of its own for the
+   *  reason everything else here does: the reader has already obtained this
+   *  document by being admitted to the tier, so the brief is readable by
+   *  exactly the audience it is addressed to and by nobody else. */
+  agents?: ProjectedAgent[];
   publishedAt: number;
 }
 

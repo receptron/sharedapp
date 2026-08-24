@@ -46,6 +46,7 @@ export {
   type AuthoredCollectionConfig,
   type AuthoredMail,
   type AuthoredSubmit,
+  type AuthoredAgent,
 } from "./publishManifest.js";
 
 // The pages an app shows, per audience: the declaration, where each audience's
@@ -98,5 +99,10 @@ export {
 // so this is how a reader knows whether it may draw what it is looking at.
 export { APP_PROTOCOL, protocolOf, protocolWithin, type ProtocolVersion } from "./appProtocol.js";
 
-// What publish refuses, and which live records a schema change would break.
-export { publishProblems, schemaRefProblems, bindsSubmitterIdentity, type PublishableCollection } from "./publishChecks.js";
+// What publish refuses, and which live records a schema change would break — plus what it SAYS
+// about a standing instruction without stopping for it.
+export { publishProblems, agentWarnings, schemaRefProblems, bindsSubmitterIdentity, type PublishableCollection } from "./publishChecks.js";
+
+// The standing job a published app asks an agent sitting at it to do: the declaration, where each
+// audience's brief is published, and what a reader is entitled to make of it.
+export { agentsFor, agentCids, agentTierCids, AGENT_ID_PATTERN, AGENT_INSTRUCTION_MAX, RESERVED_AGENT_IDS, type ProjectedAgent } from "./appAgents.js";
