@@ -1336,56 +1336,70 @@ function agentInstructionProblems(instruction: string, where: string): string[] 
   ];
 }
 
-/** The collections a brief names: they exist, this audience may WATCH what it
- *  says it watches, and the duty can actually be carried out. */
+/** Why this audience is denied a read of `cid`, in the terms that audience's own rules use. */
+const unreadableBecause = (audience: ViewAudience, cid: string): string =>
+  audience === "public"
+    ? "it is not in public.read, so the rules refuse the read and the subscription would never fire."
+    : `it is not in participantRead, and public.submit.${cid} declares no emailField, no uidField and no idFrom "auth.uid", so there is no row the rules would call theirs.`;
+
+/** ONE cid a brief names, judged for the audience the brief is written for.
+ *
+ *  Three refusals, in order: the collection is not in this repository at all; it is WATCHED by a
+ *  reader the rules deny (a subscription that never fires); or it is named by a reader who can
+ *  neither read nor write it.
+ *
+ *  That last one is the principle-5 half, and it is about the NAME rather than the data. Every cid
+ *  a brief names is written onto the document that audience reads — `config/public` for a public
+ *  brief, which is `allow read: if true` forever, and the roster's `live:config` for a participant
+ *  one, which every listed participant reads. A collection the duty cannot use is not a dataset it
+ *  could work from; it is one more of the app's internal names on a document that never needed it.
+ *
+ *  Read-OR-write, never read-and-write: the ordinary public brief names a collection it may only
+ *  SUBMIT to (`public.submit`), which the world may never read, and that greeter is what this key
+ *  exists for. */
+function agentCidProblems(app: AuthoredApp, agent: AuthoredAgent, where: string, cid: string, known: ReadonlySet<string>): string[] {
+  if (!known.has(cid)) {
+    return [
+      `${where} names '${cid}', which is not a shared collection in this repository. ` +
+        `Shared collections here: ${known.size > 0 ? [...known].sort().join(", ") : "(none)"}.`,
+    ];
+  }
+  const readable = agentCanRead(app, agent.audience, cid);
+  if (!readable && (agent.watch ?? []).includes(cid)) {
+    return [
+      `${where}.watch names '${cid}', which an agent reading as '${agent.audience}' cannot read: ${unreadableBecause(agent.audience, cid)}` +
+        " A duty cannot be given over data the reader is denied.",
+    ];
+  }
+  if (readable || agentCanAct(app, agent.audience, cid)) return [];
+  return [
+    `${where} names '${cid}', which an agent reading as '${agent.audience}' can neither read nor write. Every cid a brief names is PUBLISHED on the ` +
+      `document that audience reads${agent.audience === "public" ? " — and the public one is world-readable forever" : ""}, so naming a collection the ` +
+      "duty cannot use puts one more of this app's internal names there for nothing. Name the collections the job actually touches.",
+  ];
+}
+
+/** A brief that cannot act on ANY of the collections it names.
+ *
+ *  Not the same question as the one above, which is asked per cid: a brief may read one dataset in
+ *  order to write another, and that is a job. A brief where nothing is writable is not — the agent
+ *  wakes up, reads the rows and is refused. "Look and report" is what the user of the terminal asks
+ *  for; it is not something an app publishes. */
+function agentInertProblems(app: AuthoredApp, agent: AuthoredAgent, where: string, cids: string[], known: ReadonlySet<string>): string[] {
+  if (cids.length === 0 || cids.some((cid) => known.has(cid) && agentCanAct(app, agent.audience, cid))) return [];
+  return [
+    `${where} names ${cids.map((cid) => `'${cid}'`).join(", ")}, and an agent reading as '${agent.audience}' can do nothing to any of them: ` +
+      "no form to submit through, and no transition, assignment or withdrawal this audience carries. A published standing instruction is a JOB — " +
+      "the agent would wake up, read the rows and be refused. If the agent is only meant to look and report, that is what the user of the terminal " +
+      "asks it for; it is not something the app publishes.",
+  ];
+}
+
+/** The collections a brief names: they exist, this audience may read what it watches, every name
+ *  is one that audience already has, and the duty can actually be carried out. */
 function agentCollectionProblems(app: AuthoredApp, agent: AuthoredAgent, where: string, known: ReadonlySet<string>): string[] {
-  const problems: string[] = [];
   const cids = agentCids(agent);
-  for (const cid of cids) {
-    if (!known.has(cid)) {
-      problems.push(
-        `${where} names '${cid}', which is not a shared collection in this repository. ` +
-          `Shared collections here: ${known.size > 0 ? [...known].sort().join(", ") : "(none)"}.`,
-      );
-      continue;
-    }
-    if ((agent.watch ?? []).includes(cid) && !agentCanRead(app, agent.audience, cid)) {
-      problems.push(
-        `${where}.watch names '${cid}', which an agent reading as '${agent.audience}' cannot read: ` +
-          (agent.audience === "public"
-            ? `it is not in public.read, so the rules refuse the read and the subscription would never fire.`
-            : `it is not in participantRead, and public.submit.${cid} declares no emailField, no uidField and no idFrom "auth.uid", so there is no row the rules would call theirs.`) +
-          " A duty cannot be given over data the reader is denied.",
-      );
-      continue;
-    }
-    // NAMING IT IS PUBLISHING IT. Every cid a brief names is written onto the document that
-    // audience reads — `config/public` for a public brief, which is `allow read: if true`
-    // forever, and the roster's `live:config` for a participant one, which every listed
-    // participant reads. So a cid this audience can neither read NOR act on has no business in
-    // the brief: it is not a dataset the duty could use, and it IS one more of the app's internal
-    // names on a document that never needed it (principle 5).
-    //
-    // Read-or-act, not read-and-act: the ordinary public brief names a collection it may only
-    // SUBMIT to (`public.submit`), which the world may never read, and that is the greeter this
-    // key exists for.
-    if (!agentCanRead(app, agent.audience, cid) && !agentCanAct(app, agent.audience, cid)) {
-      problems.push(
-        `${where} names '${cid}', which an agent reading as '${agent.audience}' can neither read nor write. Every cid a brief names is PUBLISHED on the ` +
-          `document that audience reads${agent.audience === "public" ? " — and the public one is world-readable forever" : ""}, so naming a collection the ` +
-          "duty cannot use puts one more of this app's internal names there for nothing. Name the collections the job actually touches.",
-      );
-    }
-  }
-  if (cids.length > 0 && !cids.some((cid) => known.has(cid) && agentCanAct(app, agent.audience, cid))) {
-    problems.push(
-      `${where} names ${cids.map((cid) => `'${cid}'`).join(", ")}, and an agent reading as '${agent.audience}' can do nothing to any of them: ` +
-        "no form to submit through, and no transition, assignment or withdrawal this audience carries. A published standing instruction is a JOB — " +
-        "the agent would wake up, read the rows and be refused. If the agent is only meant to look and report, that is what the user of the terminal " +
-        "asks it for; it is not something the app publishes.",
-    );
-  }
-  return problems;
+  return [...cids.flatMap((cid) => agentCidProblems(app, agent, where, cid, known)), ...agentInertProblems(app, agent, where, cids, known)];
 }
 
 /** What publish refuses about the standing instructions. */
