@@ -36,8 +36,9 @@
 // the same pages, and a role-scoped brief cannot be reconstructed from
 // `apps/{aid}` by a collection-scoped reader anyway. Not an identity: two cells
 // on one host are still one signed-in person. And not a grant: naming a
-// collection under `watch` opens nothing — publish refuses a brief whose
-// audience cannot read what it names.
+// collection opens nothing — publish refuses a `watch` this audience cannot
+// read, and refuses any name it can neither read nor write, because NAMING A
+// COLLECTION PUBLISHES ITS NAME on the document that audience reads.
 import type { AuthoredApp, AuthoredAgent } from "./publishManifest.js";
 import type { ViewAudience } from "./appViews.js";
 

@@ -1255,8 +1255,9 @@ function viewProblems(app: AuthoredApp, collections: readonly PublishableCollect
 // The first is a leak. `config/public` is `allow read: if true` forever, so a
 // public brief is world-readable by construction — and a brief is where an app
 // says when to approve and when to delete. So a public brief may name only what
-// `public.read` already publishes to the world; anything else is the app's
-// internal vocabulary going out with it.
+// that audience ALREADY has: what `public.read` publishes to the world, plus the
+// collections it may submit to or move its own row in. A name outside that is
+// the app's internal vocabulary going out on a document that never needed it.
 //
 // The second is the file's usual fail-closed trap. A brief asking for a move
 // this audience does not carry is not a smaller job — it is an agent that wakes
@@ -1356,10 +1357,25 @@ function agentCollectionProblems(app: AuthoredApp, agent: AuthoredAgent, where: 
             : `it is not in participantRead, and public.submit.${cid} declares no emailField, no uidField and no idFrom "auth.uid", so there is no row the rules would call theirs.`) +
           " A duty cannot be given over data the reader is denied.",
       );
+      continue;
     }
-    // Naming a collection this audience cannot ACT on is fine as long as one of
-    // them can be acted on — a brief may read one dataset in order to write
-    // another. What is refused below is the brief where none of them can.
+    // NAMING IT IS PUBLISHING IT. Every cid a brief names is written onto the document that
+    // audience reads — `config/public` for a public brief, which is `allow read: if true`
+    // forever, and the roster's `live:config` for a participant one, which every listed
+    // participant reads. So a cid this audience can neither read NOR act on has no business in
+    // the brief: it is not a dataset the duty could use, and it IS one more of the app's internal
+    // names on a document that never needed it (principle 5).
+    //
+    // Read-or-act, not read-and-act: the ordinary public brief names a collection it may only
+    // SUBMIT to (`public.submit`), which the world may never read, and that is the greeter this
+    // key exists for.
+    if (!agentCanRead(app, agent.audience, cid) && !agentCanAct(app, agent.audience, cid)) {
+      problems.push(
+        `${where} names '${cid}', which an agent reading as '${agent.audience}' can neither read nor write. Every cid a brief names is PUBLISHED on the ` +
+          `document that audience reads${agent.audience === "public" ? " — and the public one is world-readable forever" : ""}, so naming a collection the ` +
+          "duty cannot use puts one more of this app's internal names there for nothing. Name the collections the job actually touches.",
+      );
+    }
   }
   if (cids.length > 0 && !cids.some((cid) => known.has(cid) && agentCanAct(app, agent.audience, cid))) {
     problems.push(

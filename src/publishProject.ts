@@ -152,8 +152,9 @@ export interface PublishedConfigDoc extends Record<string, unknown> {
    *  member's brief here would publish the app's internal vocabulary (when to
    *  approve, when to delete) to anybody who asks — the same leak as publishing
    *  the staff page here would be. The gate refuses a public brief that names a
-   *  collection outside `public.read`; what remains says no more than the
-   *  `read` list beside it already does. */
+   *  collection this audience can neither read nor write, so the cids that
+   *  remain are `public.read` and `public.submit` — both of which this document
+   *  already carries. */
   agents?: ProjectedAgent[];
   publishedAt: number;
 }
@@ -477,22 +478,22 @@ export interface AppViewTier {
   tier: "member" | "roster";
   audience: Exclude<ViewAudience, "public">;
   /** The projection document, for `{tier}/live:config` — the only prefix there
-   *  is now (`viewDocId`). Meaningless when `views` is empty — the host deletes
-   *  the tier instead. */
+   *  is now (`viewDocId`).
+   *
+   *  WHEN THE HOST WRITES IT: `views.length > 0 || agents.length > 0`. Pages
+   *  were never the question — "does this audience exist" was — and an
+   *  agent-only desk needs the `write` / `submit` this document carries, or its
+   *  brief asks for a move nothing can say is legal. When BOTH are empty the
+   *  document says nothing and the host deletes the tier, which is what stops a
+   *  withdrawn page staying readable by everyone the tier admits. */
   config: AppViewConfigDoc;
   /** The views to publish, in declaration order. The host reads each `path`
    *  and writes it to `{tier}/live:{id}`. */
   views: NormalizedView[];
   /** The standing instructions published for this audience — carried out
    *  separately from `config` because the HOST decides from it whether the tier
-   *  exists at all.
-   *
-   *  A tier used to be kept exactly when it had pages, and that was a proxy for
-   *  "this audience exists" rather than the question. An app with a staff duty
-   *  and no staff page has to publish its `write` projection somewhere, or the
-   *  brief is a job with no table behind it; and the same condition read
-   *  backwards is what stops the sweep deleting a tier whose last page was
-   *  withdrawn while its agent remains. */
+   *  exists at all: a tier is kept when it has pages OR agents, and deleted
+   *  only when it has neither (see {@link AppViewTier.config}). */
   agents: ProjectedAgent[];
 }
 

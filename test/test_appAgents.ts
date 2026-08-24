@@ -146,6 +146,27 @@ test("a duty over collections this audience can do nothing to is refused", () =>
   assert.deepEqual(problemsFor(desk({ agents: [{ ...DESK_BRIEF, watch: ["slots"], collections: ["bookings"] }] })), []);
 });
 
+test("a brief may not name a collection its audience can neither read nor write", () => {
+  // NAMING IT IS PUBLISHING IT: every cid a brief names lands on the document that audience reads,
+  // and the public one is world-readable forever. A staff-only name there is one more of the app's
+  // internal words on a document that never needed it (principle 5), and it is not a dataset the
+  // duty could have used either. (Grok on receptron/sharedapp#49.)
+  const greeter = (collections: string[]): Record<string, unknown> =>
+    desk({ agents: [{ id: "greeter", audience: "public", watch: ["slots"], collections, instruction: "枠を見て案内する。" }] });
+  // The greeter itself: `bookings` is not world-READABLE and the world may submit to it, which is
+  // exactly the pair this key exists for. It must still publish.
+  assert.deepEqual(problemsFor(greeter(["bookings"])), []);
+  refuses(problemsFor(greeter(["bookings", "messages"])), "can neither read nor write");
+  const projected = projectApp(app(greeter(["bookings"])), [], STAMP, null);
+  assert.deepEqual((projected.config.agents ?? [])[0]?.collections, ["bookings"]);
+});
+
+test("a member brief may name any collection the app declares — staff read the whole app", () => {
+  // The pair for the refusal above: a member holds a role, and every read branch a role opens is
+  // unscoped, so nothing a member names is a name they did not already have.
+  assert.deepEqual(problemsFor(desk({ agents: [{ ...DESK_BRIEF, collections: ["slots"] }] })), []);
+});
+
 test("a member brief cannot lean on a form only PARTICIPANTS may send", () => {
   // `publicCreate` pins that branch to the participant ROLE, and the member tier is `staffOf` —
   // owner / editor / viewer / assignee. So a form declared this way is not an action the desk has,
