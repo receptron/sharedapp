@@ -1464,3 +1464,83 @@ test("a writerDelete held by a collection-level editor is accepted", () => {
   // owner scoped down to `viewer` here is refused above while an editor here is not.
   assert.deepEqual(problemsFor({ members: { [OWNER]: { "*": "owner", bookings: "editor" } }, collections: { bookings: { writerDelete: true } } }), []);
 });
+
+// --- refIn: the parent record's state, on every create ----------------------
+
+const ROUNDTABLE_CIDS = [
+  { cid: "topics", primaryKey: "id" },
+  { cid: "messages", primaryKey: "id" },
+];
+
+/** The roundtable, reduced to the declaration under test: a thread whose
+ *  messages may only be added while the topic says `open`, and a topic with no
+ *  way back out of `closed`. */
+const roundtable = (refIn: unknown) => ({
+  collections: {
+    topics: { statusField: "status", transitions: { initial: ["open"], open: ["closed"] } },
+    messages: { statusField: "status", transitions: { initial: ["posted"] }, ...(refIn === undefined ? {} : { refIn }) },
+  },
+});
+
+const roundtableProblems = (refIn: unknown) => problemsFor(roundtable(refIn), ROUNDTABLE_CIDS);
+
+const OPEN_TOPIC = { ref: "topicId", collection: "topics", where: { field: "status", equals: "open" } };
+
+test("accepts a refIn naming a real collection, and the app without one", () => {
+  // The accepted form first: this is the whole declaration an app needs to
+  // stop its own writers posting into a thread the host closed.
+  assert.deepEqual(roundtableProblems(OPEN_TOPIC), []);
+  // Existence alone is a legitimate weaker form — the parent must be there.
+  assert.deepEqual(roundtableProblems({ ref: "topicId", collection: "topics" }), []);
+  // And a collection that never declares it is untouched.
+  assert.deepEqual(roundtableProblems(undefined), []);
+});
+
+test("refuses a refIn pointing at a collection that does not exist", () => {
+  // The silence this catches is total AND self-inflicted: the rules get() a
+  // collection that is not there, which is an evaluation error, so the author
+  // locks their own app out of `messages` and nothing anywhere says why.
+  refuses(roundtableProblems({ ...OPEN_TOPIC, collection: "topicz" }), "collections.messages.refIn.collection names 'topicz'");
+});
+
+test("accepts a refIn naming its own collection", () => {
+  // Unlike `idIn`, whose reference IS the id being written and so can never
+  // exist on a create. Here it is an ordinary field naming another row — a
+  // reply that may only be posted while the message it answers is still there.
+  assert.deepEqual(roundtableProblems({ ref: "replyTo", collection: "messages" }), []);
+});
+
+const roundtableSchemas = (messageFields: Record<string, unknown>, topicFields: Record<string, unknown>) => [
+  schemaWithFields("messages", messageFields),
+  schemaWithFields("topics", topicFields),
+];
+
+const MESSAGE_FIELDS = { topicId: { type: "string" }, body: { type: "text" }, status: { type: "string" } };
+const TOPIC_FIELDS = { title: { type: "string" }, status: { type: "string" } };
+
+test("refuses a refIn whose ref field the schema does not declare", () => {
+  // The half that is judged against the collection being WRITTEN, not the
+  // parent — and the worst failure in the family, because the path is built
+  // out of the missing field: not "some creates are refused" but none at all,
+  // the owner's included.
+  const declared = app(roundtable(OPEN_TOPIC));
+  assert.deepEqual(schemaRefProblems(declared, roundtableSchemas(MESSAGE_FIELDS, TOPIC_FIELDS) as never), []);
+
+  const withoutRef = Object.fromEntries(Object.entries(MESSAGE_FIELDS).filter(([name]) => name !== "topicId"));
+  refuses(schemaRefProblems(declared, roundtableSchemas(withoutRef, TOPIC_FIELDS) as never), "collections.messages.refIn.ref names 'topicId'");
+});
+
+test("refuses a refIn whose where.field the parent's schema does not declare", () => {
+  const declared = app(roundtable(OPEN_TOPIC));
+  const withoutStatus = Object.fromEntries(Object.entries(TOPIC_FIELDS).filter(([name]) => name !== "status"));
+  refuses(schemaRefProblems(declared, roundtableSchemas(MESSAGE_FIELDS, withoutStatus) as never), "collections.messages.refIn.where.field names 'status'");
+});
+
+test("refuses a refIn comparison the rules could never satisfy", () => {
+  // `status` exists and is an enum that does not contain "open": reads as
+  // correct, refuses every message forever.
+  const declared = app(roundtable(OPEN_TOPIC));
+  const enumStatus = (values: string[]) => ({ title: { type: "string" }, status: { type: "enum", values } });
+  assert.deepEqual(schemaRefProblems(declared, roundtableSchemas(MESSAGE_FIELDS, enumStatus(["open", "closed"])) as never), []);
+  refuses(schemaRefProblems(declared, roundtableSchemas(MESSAGE_FIELDS, enumStatus(["live", "closed"])) as never), "not one of the values");
+});

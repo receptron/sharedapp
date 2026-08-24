@@ -557,6 +557,33 @@ function idInTargetProblems(cid: string, submit: AuthoredSubmit, known: Readonly
   return [];
 }
 
+/** Where a `refIn` says the parent record lives.
+ *
+ *  The same typo as `idIn`'s and the same silence: the rules `get()` a
+ *  collection that does not exist, the lookup can never succeed, and every
+ *  create is refused with nothing anywhere to say why. Worse here than there,
+ *  because `refIn` binds the OWNER — an author who mistypes it locks their own
+ *  app and the agents sitting at it out of a collection at the same time, and
+ *  the app still publishes.
+ *
+ *  A collection naming ITSELF is allowed, unlike `idIn`'s. There the reference
+ *  is the document id of the row being written, which on a create does not
+ *  exist yet, so a self-reference can never be satisfied. Here the reference is
+ *  an ordinary field naming some OTHER row — a reply pointing at the message it
+ *  answers, which must still be there — and that is a real declaration. */
+function refInTargetProblems(app: AuthoredApp, collections: readonly PublishableCollection[]): string[] {
+  const known = new Set(collections.map((collection) => collection.cid));
+  const names = known.size > 0 ? [...known].sort().join(", ") : "(none)";
+  return Object.entries(app.collections ?? {}).flatMap(([cid, collection]) => {
+    const target = collection.refIn?.collection;
+    if (target === undefined || known.has(target)) return [];
+    return [
+      `collections.${cid}.refIn.collection names '${target}', which is not a shared collection in this repository. The rules look the parent record up ` +
+        `there on every create — the owner's included — so nothing can be added to '${cid}' at all. Shared collections here: ${names}.`,
+    ];
+  });
+}
+
 /** A gated reveal reads its flag off the PARENT record, so the path to that parent is not
  *  optional decoration — without it the gate never opens.
  *
@@ -671,6 +698,7 @@ export function publishProblems(app: AuthoredApp, collections: readonly Publisha
     ...systemFieldProblems(app),
     ...windowRefProblems(app, collections),
     ...idTargetProblems(app, collections),
+    ...refInTargetProblems(app, collections),
     ...mirrorProblems(app, collections),
     ...viewProblems(app, collections),
     ...agentProblems(app, collections),
@@ -1462,6 +1490,7 @@ export function schemaRefProblems(app: AuthoredApp, schemas: { cid: string; sche
   return [
     ...Object.entries(app.public?.submit ?? {}).flatMap(([cid, submit]) => submitRefProblems(schemaOf, cid, submit)),
     ...Object.entries(app.collections ?? {}).flatMap(([cid, collection]) => mailRefProblems(schemaOf, cid, collection)),
+    ...Object.entries(app.collections ?? {}).flatMap(([cid, collection]) => refInRefProblems(schemaOf, cid, collection)),
   ];
 }
 
@@ -1499,6 +1528,46 @@ function mailRefProblems(schemaOf: ReadonlyMap<string, CollectionSchema>, cid: s
   return problems;
 }
 
+/** `refIn`, against the two schemas it spans.
+ *
+ *  `ref` is read off the record BEING WRITTEN and `where.field` off the parent,
+ *  so the two halves are judged against different collections — and each is a
+ *  different silence when it is wrong. A `ref` the schema does not declare
+ *  means the rules build a path out of a field that is never there, which is an
+ *  evaluation error: the collection accepts nothing, from anybody, and the
+ *  author's own page reports a permission denial it cannot explain.
+ *
+ *  Not refused when the field is merely absent from a submit form's
+ *  `createFields`: a writer creates rows the form never touches, and `refIn` is
+ *  about writers. What must exist is the SCHEMA field. */
+function refInRefProblems(schemaOf: ReadonlyMap<string, CollectionSchema>, cid: string, collection: AuthoredCollectionConfig): string[] {
+  const { refIn } = collection;
+  if (refIn === undefined) return [];
+  const own = schemaOf.get(cid);
+  const refProblem =
+    own === undefined || declaredField(own.fields ?? {}, refIn.ref)
+      ? []
+      : [
+          `collections.${cid}.refIn.ref names '${refIn.ref}', which the schema of '${cid}' does not declare. The rules build the path to the parent out of ` +
+            `that field, so a record without it is an evaluation error and NOTHING can be created in '${cid}' — the owner included. ` +
+            `Fields on '${cid}': ${
+              Object.keys(own.fields ?? {})
+                .sort()
+                .join(", ") || "(none)"
+            }.`,
+        ];
+  const where = refIn.where;
+  return [
+    ...refProblem,
+    ...(where === undefined
+      ? []
+      : [
+          ...refFieldProblem(schemaOf, `collections.${cid}.refIn.where.field`, refIn.collection, where.field),
+          ...comparableProblem(schemaOf, `collections.${cid}.refIn.where`, refIn.collection, where),
+        ]),
+  ];
+}
+
 function submitRefProblems(schemaOf: ReadonlyMap<string, CollectionSchema>, cid: string, submit: AuthoredSubmit): string[] {
   return [
     ...idInRefProblems(schemaOf, cid, submit),
@@ -1511,8 +1580,8 @@ function idInRefProblems(schemaOf: ReadonlyMap<string, CollectionSchema>, cid: s
   const where = submit.idIn?.where;
   if (where === undefined) return [];
   return [
-    ...refFieldProblem(schemaOf, cid, "idIn.where.field", submit.idIn?.collection, where.field),
-    ...comparableProblem(schemaOf, cid, submit.idIn?.collection, where),
+    ...refFieldProblem(schemaOf, `public.submit.${cid}.idIn.where.field`, submit.idIn?.collection, where.field),
+    ...comparableProblem(schemaOf, `public.submit.${cid}.idIn.where`, submit.idIn?.collection, where),
   ];
 }
 
@@ -1523,7 +1592,10 @@ function boundRefProblems(
   ref: { ref: string; collection: string; field: string } | undefined,
 ): string[] {
   if (ref === undefined) return [];
-  return [...refFieldProblem(schemaOf, cid, `window.${key}.field`, ref.collection, ref.field), ...millisProblem(schemaOf, cid, `window.${key}.field`, ref)];
+  return [
+    ...refFieldProblem(schemaOf, `public.submit.${cid}.window.${key}.field`, ref.collection, ref.field),
+    ...millisProblem(schemaOf, cid, `window.${key}.field`, ref),
+  ];
 }
 
 /** The field spec a reference points at, or undefined when there is no schema to judge it against
@@ -1558,13 +1630,7 @@ function enumValues(spec: CollectionFieldSpec): readonly string[] | undefined {
   return spec.type === "enum" ? spec.values : undefined;
 }
 
-function refFieldProblem(
-  schemaOf: ReadonlyMap<string, CollectionSchema>,
-  cid: string,
-  key: string,
-  target: string | undefined,
-  field: string | undefined,
-): string[] {
+function refFieldProblem(schemaOf: ReadonlyMap<string, CollectionSchema>, label: string, target: string | undefined, field: string | undefined): string[] {
   if (target === undefined || field === undefined) return [];
   const schema = schemaOf.get(target);
   if (schema === undefined || referencedField(schemaOf, target, field) !== undefined) return [];
@@ -1572,8 +1638,8 @@ function refFieldProblem(
     .sort()
     .join(", ");
   return [
-    `public.submit.${cid}.${key} names '${field}', which the schema of '${target}' does not declare. ` +
-      `The rules read that field off the record and compare it, so as written every submission is refused with nothing to explain it. ` +
+    `${label} names '${field}', which the schema of '${target}' does not declare. ` +
+      `The rules read that field off the record and compare it, so as written every write it guards is refused with nothing to explain it. ` +
       `Fields on '${target}': ${known.length > 0 ? known : "(none)"}.`,
   ];
 }
@@ -1583,7 +1649,7 @@ function refFieldProblem(
  *  the value, or a boolean field compared with a string. */
 function comparableProblem(
   schemaOf: ReadonlyMap<string, CollectionSchema>,
-  cid: string,
+  label: string,
   target: string | undefined,
   where: { field: string; equals: string | number | boolean },
 ): string[] {
@@ -1598,15 +1664,15 @@ function comparableProblem(
     // there, which is a form that refuses every submission and says nothing.
     if (typeof where.equals === "string" && values.includes(where.equals)) return [];
     return [
-      `public.submit.${cid}.idIn.where.equals is ${said}, which is not one of the values '${where.field}' can hold on '${String(target)}' ` +
-        `(${values.join(", ") || "(none)"}). The comparison can never be true, so every submission is refused.`,
+      `${label}.equals is ${said}, which is not one of the values '${where.field}' can hold on '${String(target)}' ` +
+        `(${values.join(", ") || "(none)"}). The comparison can never be true, so every write it guards is refused.`,
     ];
   }
   const wanted = spec.type === "number" ? "number" : spec.type === "boolean" ? "boolean" : "string";
   if (typeof where.equals === wanted) return [];
   return [
-    `public.submit.${cid}.idIn.where.equals is ${said}, and '${where.field}' on '${String(target)}' is a ${spec.type} field. ` +
-      `The rules compare the stored value with this one and never coerce, so the comparison can never be true and every submission is refused.`,
+    `${label}.equals is ${said}, and '${where.field}' on '${String(target)}' is a ${spec.type} field. ` +
+      `The rules compare the stored value with this one and never coerce, so the comparison can never be true and every write it guards is refused.`,
   ];
 }
 
