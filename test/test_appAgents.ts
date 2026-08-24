@@ -146,6 +146,27 @@ test("a duty over collections this audience can do nothing to is refused", () =>
   assert.deepEqual(problemsFor(desk({ agents: [{ ...DESK_BRIEF, watch: ["slots"], collections: ["bookings"] }] })), []);
 });
 
+test("a member brief cannot lean on a form only PARTICIPANTS may send", () => {
+  // `publicCreate` pins that branch to the participant ROLE, and the member tier is `staffOf` —
+  // owner / editor / viewer / assignee. So a form declared this way is not an action the desk has,
+  // and a duty whose only action is that form would wake up and be refused.
+  const participantOnly = (audience: string): Record<string, unknown> => ({
+    // Nothing this collection declares gives a MEMBER anything: no status field to move, no
+    // assignee field, no writer delete. The form is the only action there is, and it is the
+    // participants'.
+    collections: { messages: { submitOnly: true } },
+    participantRead: ["messages"],
+    public: {
+      enabled: false,
+      submit: { messages: { auth: "verifiedEmail", audience: "participant", emailField: "author", createFields: ["author", "body"] } },
+    },
+    agents: [{ id: "reply", audience, watch: ["messages"], instruction: "返信する。" }],
+  });
+  refuses(problemsFor(participantOnly("member")), "can do nothing to any of them");
+  // The same form, to the audience it was written for: that one publishes.
+  assert.deepEqual(problemsFor(participantOnly("participant")), []);
+});
+
 test("a brief with no watch is a warning, not a refusal", () => {
   const declared = desk({ agents: [{ id: "desk", audience: "member", collections: ["bookings"], instruction: "頼まれたら承認する。" }] });
   assert.deepEqual(problemsFor(declared), []);

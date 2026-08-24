@@ -1275,10 +1275,33 @@ function agentCanRead(app: AuthoredApp, audience: ViewAudience, cid: string): bo
   return true;
 }
 
+/** Can THIS audience actually submit through `public.submit[cid]`?
+ *
+ *  "A submit declaration exists" is not the question, and reading it as one accepts a duty whose
+ *  one action the rules would refuse. `publicCreate` in `firestore.rules` adds two conditions that
+ *  are properties of the DECLARATION rather than of the writer, so they are answerable here:
+ *
+ *    `audience: "participant"` pins the create branch to the participant ROLE
+ *  (`s.get("audience","") != "participant" || r == "participant"`). The member tier is `staffOf`
+ *  — owner / editor / viewer / assignee — and a stranger on the public face holds no role at all,
+ *  so neither of those may lean on such a form. (Sourcery on receptron/sharedapp#49.)
+ *
+ *  `auth: "none"` is NOT tested here although `publicCreate` also gates it on the master switch:
+ *  `authProblems` refuses that value outright, above, so a condition for it could never fire — and
+ *  a refusal nothing can reach is one nobody can trust is right.
+ *
+ *  Everything else about a create is about the WRITER or the record (`authOk`, `inWindow`,
+ *  `idOk`), and none of those is a reason to refuse a declaration. */
+function agentCanSubmit(app: AuthoredApp, audience: ViewAudience, cid: string): boolean {
+  const submit = app.public?.submit?.[cid];
+  if (submit === undefined) return false;
+  return submit.audience !== "participant" || audience === "participant";
+}
+
 /** Can this audience DO anything to `cid` — move it, hand it over, take it
  *  away, or send one in? */
 const agentCanAct = (app: AuthoredApp, audience: ViewAudience, cid: string): boolean =>
-  writeFor(app, audience, cid) !== null || app.public?.submit?.[cid] !== undefined;
+  writeFor(app, audience, cid) !== null || agentCanSubmit(app, audience, cid);
 
 /** One brief's id, held to the grammar it is reported under. */
 function agentIdProblems(id: string, where: string, seen: Map<string, string>): string[] {
