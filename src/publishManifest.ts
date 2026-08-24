@@ -120,11 +120,15 @@ const RefInZ = z
   .object({
     /** The field on the record BEING WRITTEN that names the parent. */
     ref: z.string().trim().min(1),
-    /** Fixed in the declaration, so no path segment ever comes from a value a
-     *  submitter chose. */
+    /** The collection segment of the parent's path, fixed here in the
+     *  declaration. Only that segment is fixed: the DOCUMENT id comes from the
+     *  written record's `ref` field, so the writer chooses which parent it
+     *  points at — deliberately, that being the whole question the check asks.
+     *  What the declaration buys is that no writer can aim the lookup at
+     *  another COLLECTION. */
     collection: NameZ,
     /** Omitted, the check degenerates to "the parent must exist" — which the
-     *  `get()` performs on its own, a missing document being an evaluation
+     *  lookup performs on its own, a missing document being an evaluation
      *  error that denies. */
     where: z
       .object({ field: z.string().trim().min(1), equals: z.union([z.string(), z.number(), z.boolean()]) })
