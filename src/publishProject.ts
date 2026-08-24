@@ -52,6 +52,7 @@ import {
   type ProjectedViewWrite,
   type ViewAudience,
 } from "./appViews.js";
+import { agentsFor, agentTierCids, type ProjectedAgent } from "./appAgents.js";
 import type { AuthoredApp, AuthoredSubmit } from "./publishManifest.js";
 
 /** Defined here rather than imported from `@mulmoclaude/common`: one line is not
@@ -144,6 +145,16 @@ export interface PublishedConfigDoc extends Record<string, unknown> {
    *  dataset list, and `publishedAt` beside it is what pins this declaration
    *  to the HTML published in the same run. */
   view?: { collections: string[]; live?: string[]; limit?: Record<string, { rows: number; field: string }> };
+  /** The publisher's standing instructions for whoever sits at the PUBLIC face
+   *  — see `appAgents.ts`.
+   *
+   *  Only the public ones. This document is `allow read: if true` forever, so a
+   *  member's brief here would publish the app's internal vocabulary (when to
+   *  approve, when to delete) to anybody who asks — the same leak as publishing
+   *  the staff page here would be. The gate refuses a public brief that names a
+   *  collection outside `public.read`; what remains says no more than the
+   *  `read` list beside it already does. */
+  agents?: ProjectedAgent[];
   publishedAt: number;
 }
 
@@ -287,6 +298,7 @@ export function projectApp(
   const normalized = normalizeViews(authored);
   if (!normalized.ok) throw new Error(`publish: views declaration is not publishable (${normalized.problems.join(" ")})`);
   const publicView = normalized.views.find((view) => view.audience === "public");
+  const publicAgents = agentsFor(authored, "public");
   const publicWrite = Object.keys(submit)
     .map((cid) => writeFor(authored, "public", cid))
     .filter((entry): entry is ProjectedViewWrite => entry !== null);
@@ -313,6 +325,10 @@ export function projectApp(
     // the cid NAMES ONLY — the same names `collections` beside it already
     // carries, so the projection tells the world nothing new (principle 5).
     ...(publicView === undefined ? {} : { view: publicViewProjection(authored, publicView) }),
+    // The public briefs and only those (see `PublishedConfigDoc.agents`). Absent
+    // rather than empty, so an app that declares none publishes the document it
+    // published before this key existed.
+    ...(publicAgents.length === 0 ? {} : { agents: publicAgents }),
     publishedAt: stamp.publishedAt,
   };
   if (authored.name !== undefined) config.name = authored.name;
@@ -467,6 +483,17 @@ export interface AppViewTier {
   /** The views to publish, in declaration order. The host reads each `path`
    *  and writes it to `{tier}/live:{id}`. */
   views: NormalizedView[];
+  /** The standing instructions published for this audience — carried out
+   *  separately from `config` because the HOST decides from it whether the tier
+   *  exists at all.
+   *
+   *  A tier used to be kept exactly when it had pages, and that was a proxy for
+   *  "this audience exists" rather than the question. An app with a staff duty
+   *  and no staff page has to publish its `write` projection somewhere, or the
+   *  brief is a job with no table behind it; and the same condition read
+   *  backwards is what stops the sweep deleting a tier whose last page was
+   *  withdrawn while its agent remains. */
+  agents: ProjectedAgent[];
 }
 
 /** What one audience may see of one collection.
@@ -537,7 +564,13 @@ export function tierViews(authored: AuthoredApp, audience: Exclude<ViewAudience,
 
 /** One tier's projection: what this audience may read, and what it may change. */
 function tierConfig(authored: AuthoredApp, audience: Exclude<ViewAudience, "public">, views: NormalizedView[], stamp: PublishStamp): AppViewConfigDoc {
-  const cids = [...new Set(views.flatMap((view) => view.collections))];
+  // THE PAGES' COLLECTIONS AND THE BRIEFS', in one set. An app whose staff have
+  // a duty and no page would otherwise publish a brief beside a `write` that
+  // says nothing — the agent is asked to approve rows against a document that
+  // does not carry the transition table. A page was never what made staff
+  // exist; it was only what happened to be read.
+  const cids = [...new Set([...views.flatMap((view) => view.collections), ...agentTierCids(authored, audience)])];
+  const agents = agentsFor(authored, audience);
   const config: AppViewConfigDoc = {
     // Every tier carries it, for the reason `projectApp` gives beside the public one: one publish
     // writes them all, and a reader that can draw one and not another is a half-drawn app.
@@ -545,6 +578,7 @@ function tierConfig(authored: AuthoredApp, audience: Exclude<ViewAudience, "publ
     write: tierWrites(authored, audience, cids),
     views: tierViews(authored, audience, views, authored.participantRead ?? []),
     submit: tierSubmit(authored, cids),
+    ...(agents.length === 0 ? {} : { agents }),
     publishedAt: stamp.publishedAt,
   };
   if (authored.name !== undefined) config.name = authored.name;
@@ -569,7 +603,7 @@ export function projectAppViews(authored: AuthoredApp, stamp: PublishStamp): App
   const audiences: Exclude<ViewAudience, "public">[] = ["member", "participant"];
   return audiences.map((audience) => {
     const views = normalized.views.filter((view) => view.audience === audience);
-    return { tier: VIEW_TIER[audience], audience, config: tierConfig(authored, audience, views, stamp), views };
+    return { tier: VIEW_TIER[audience], audience, config: tierConfig(authored, audience, views, stamp), views, agents: agentsFor(authored, audience) };
   });
 }
 

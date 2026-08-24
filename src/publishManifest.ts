@@ -413,6 +413,39 @@ const ViewZ = z
   })
   .strict();
 
+/** The STANDING JOB the publisher asks an agent sitting at this app to do.
+ *
+ *  See `appAgents.ts` for what this is and what it deliberately is not. In
+ *  short: `audience` is the same noun as `views[]` — which document the brief
+ *  is published to, and therefore who may read it — and `instruction` is prose
+ *  from the AUTHOR, carried to the reader labelled as a request rather than as
+ *  data a stranger wrote into a record.
+ *
+ *  AN AGENT IS NOT A PAGE and must not borrow `path`: there is no HTML, and
+ *  nothing is read off disk for it. It is also not a permission — `watch`
+ *  naming a collection opens nothing, and publish refuses a brief whose
+ *  audience cannot read what it names.
+ *
+ *  `id` carries a grammar for the same reason a view's does, and it is checked
+ *  at the gate rather than here so the refusal can say what the value is for. */
+const AgentZ = z
+  .object({
+    id: z.string().trim().min(1),
+    audience: z.enum(VIEW_AUDIENCES),
+    /** Plain text. Empty is refused here; oversized is refused at the gate,
+     *  where the refusal can say what the cap is for. */
+    instruction: z.string().trim().min(1),
+    /** Collection ids this duty expects a subscription on. A subset of what
+     *  this audience may READ — publish refuses the rest. */
+    watch: z.array(NameZ).min(1).optional(),
+    /** Collections the duty is about, when that is not what it watches.
+     *  Absent, not empty, for the reason every other optional list here is:
+     *  the document an app that never declared one publishes must be the
+     *  document it published before this key existed. */
+    collections: z.array(NameZ).min(1).optional(),
+  })
+  .strict();
+
 /** The URL name an app is handed out under: `https://<host>/{slug}`.
  *
  *  A SEPARATE name from the `aid`, and that separation is the point (design
@@ -479,6 +512,9 @@ export const AuthoredAppZ = z
     /** The app's pages, per audience. See {@link ViewZ}; `public.view` is the
      *  older spelling of the `public` one and normalizes into this list. */
     views: z.array(ViewZ).optional(),
+    /** The standing jobs this app asks the agents sitting at it to do, per
+     *  audience. See {@link AgentZ} and `appAgents.ts`. */
+    agents: z.array(AgentZ).optional(),
     /** The version of the PUBLISH CONTRACT this app is written against — see
      *  `appProtocol.ts`. Optional, and it does not decide what is published:
      *  the projection always carries the version this compiler EMITS, because
@@ -494,6 +530,7 @@ export const AuthoredAppZ = z
 export type AuthoredApp = z.infer<typeof AuthoredAppZ>;
 export type AuthoredCollectionConfig = z.infer<typeof CollectionConfigZ>;
 export type AuthoredSubmit = z.infer<typeof SubmitZ>;
+export type AuthoredAgent = z.infer<typeof AgentZ>;
 export type AuthoredMail = z.infer<typeof MailZ>;
 
 export type AuthoredAppResult = { ok: true; app: AuthoredApp } | { ok: false; problems: string[] };
