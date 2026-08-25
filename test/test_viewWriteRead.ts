@@ -8,6 +8,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { projectedWriteOf, projectedWritesOf } from "../src/view/writeRead.js";
+import { writeFor, type ProjectedViewWrite } from "../src/appViews.js";
+import { AuthoredAppZ } from "../src/publishManifest.js";
 
 test("a status field with no table grants nothing, and a table with no field has nowhere to write", () => {
   // BOTH HALVES OR NEITHER. A field alone would offer every value; a table alone has no field.
@@ -71,4 +73,86 @@ test("the mirror is carried by whichever half of the withdrawal it arrived with"
   assert.equal(projectedWriteOf({ cid: "bookings", selfDelete: ["pending"], withdrawMirror: "slots" })?.withdrawMirror, "slots");
   // On its own it names a collection nobody may reopen, so it grants nothing and is not kept.
   assert.equal(projectedWriteOf({ cid: "bookings", withdrawMirror: "slots" }), null);
+});
+
+// --- the round trip itself
+//
+// The bug that produced this block was not a wrong read, it was a MISSING one: `withdrawPart`
+// learned to publish `sealed` and nothing here learned to read it, so the deployed JSON silently
+// dropped it and every writer got `withdrawAny: true, sealed: []` — the page approving deletions
+// Firestore then refused, which is the exact disagreement the projection exists to prevent.
+//
+// So the assertion is not about `sealed`. It is that whatever `writeFor` emits survives the trip,
+// checked key by key against the real projector rather than against a fixture — the next key
+// somebody adds is covered without anybody remembering to come back here.
+
+const roundTrip = (write: ProjectedViewWrite): ProjectedViewWrite | null => projectedWriteOf(JSON.parse(JSON.stringify(write)) as unknown);
+
+/** EVERY key `writeFor` can emit, in one collection, so the deepEqual below is a real check on all
+ *  of them rather than on the four this fixture happened to declare. A key added to
+ *  `ProjectedViewWrite` and not to this app is a key the round trip does not cover — which is
+ *  precisely how `sealed` got through. */
+const sealingApp = {
+  aid: "app_seal",
+  members: { "desk@gym.jp": { "*": "owner" }, "coach@gym.jp": { topics: "assignee" } },
+  collections: {
+    topics: {
+      statusField: "status",
+      transitions: { initial: ["open"], open: ["closed"] },
+      writerDelete: true,
+      sealed: ["closed"],
+      assigneeField: "owner",
+      mail: { toField: "who", on: { closing: { from: ["open"], to: "closed" } }, dataFields: ["title"] },
+    },
+  },
+  public: {
+    enabled: true,
+    submit: {
+      topics: {
+        auth: "verifiedEmail",
+        emailField: "who",
+        createFields: ["title", "who", "owner", "status"],
+        initialStatus: "open",
+        selfDelete: ["open"],
+        // Carries `withdrawMirror`, the eleventh and last key. The `slots`
+        // collection it names is not declared here: this test calls `writeFor`,
+        // which projects the declaration, and publish is what checks the pair.
+        mirror: "slots",
+      },
+    },
+  },
+};
+
+test("everything writeFor publishes survives the deployed-JSON round trip", () => {
+  const app = AuthoredAppZ.parse(sealingApp);
+  for (const audience of ["member", "public"] as const) {
+    const written = writeFor(app, audience, "topics");
+    assert.notEqual(written, null, `${audience} must project something`);
+    if (written === null) continue;
+    // deepEqual, not a key spot-check: a half-read key is the failure mode, and
+    // reading it as the wrong VALUE is just as silent as not reading it.
+    assert.deepEqual(roundTrip(written), written, `${audience} projection must survive readback`);
+  }
+});
+
+test("the seal reaches a staff page whose only permission is the role one", () => {
+  // The narrow case the fix turned on. `statusField` rides with `selfDelete`, so a collection
+  // carrying ONLY `writerDelete` reaches the seal with no field attached — and `judgeWithdraw`
+  // needs the field to read the record's status. Carried and never consulted is the worst of the
+  // three outcomes, because the page looks correct.
+  const staffOnly = { cid: "topics", writerDelete: true, statusField: "status", sealed: ["closed"] };
+  const read = projectedWriteOf(staffOnly);
+  assert.deepEqual(read?.sealed, ["closed"]);
+  assert.equal(read?.statusField, "status");
+});
+
+test("a seal with nothing to read the status off is dropped", () => {
+  // Publish refuses this pair, so it is a floor rather than a case: without the field the seal
+  // could never be consulted, and a carried-but-dead list is what this whole file guards against.
+  assert.equal("sealed" in (projectedWriteOf({ cid: "topics", writerDelete: true, sealed: ["closed"] }) ?? {}), false);
+});
+
+test("a seal on a collection nobody may delete from is dropped with the rest", () => {
+  // Nothing to narrow: no permission was carried, so there is no control for the page to draw.
+  assert.equal(projectedWriteOf({ cid: "topics", statusField: "status", sealed: ["closed"] }), null);
 });
