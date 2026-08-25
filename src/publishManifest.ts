@@ -89,6 +89,54 @@ const MailZ = z
   })
   .strict();
 
+/** `idIn` asked of a REF FIELD instead of the document id — and declared on the
+ *  COLLECTION rather than under `public.submit`, which is the whole point.
+ *
+ *  What it says: a row of this collection may be created only while the record
+ *  its `ref` field names is in the given state. A message may be posted only
+ *  while its topic says `open`.
+ *
+ *  Why not `idIn`. That one pins the record through the DOCUMENT ID, so it fits
+ *  a collection whose id IS the thing being claimed (one booking per slot). A
+ *  thread cannot spend its id that way — every message needs its own — so the
+ *  parent is named by an ordinary field, and the rules build the path from
+ *  `request.resource.data[ref]` exactly as a per-record window bound does.
+ *
+ *  Why on the collection. Every other cross-record check lives under
+ *  `public.submit` and therefore binds the VISITOR and says nothing to a
+ *  writer. The apps this exists for are the ones whose writers are the problem:
+ *  an app that seats AI agents hands them the owner's own sign-in, so to
+ *  Firestore every agent is an `owner`, and the create branch asks a writer
+ *  nothing at all. Declared here, the rules hold the owner to it too.
+ *
+ *  CREATE only, deliberately. A closed thread must take no new message; editing
+ *  one already in it is the host's business, and refusing that would leave a
+ *  bad record with no way back. The other half of the guarantee is
+ *  `transitions`, which already binds writers on update: an app that means
+ *  "closed is final" declares no way out of `closed`, and then the state this
+ *  reads cannot be walked back to reopen the thread. Either half alone is
+ *  advice — see the `refIn` note in publishChecks. */
+const RefInZ = z
+  .object({
+    /** The field on the record BEING WRITTEN that names the parent. */
+    ref: z.string().trim().min(1),
+    /** The collection segment of the parent's path, fixed here in the
+     *  declaration. Only that segment is fixed: the DOCUMENT id comes from the
+     *  written record's `ref` field, so the writer chooses which parent it
+     *  points at — deliberately, that being the whole question the check asks.
+     *  What the declaration buys is that no writer can aim the lookup at
+     *  another COLLECTION. */
+    collection: NameZ,
+    /** Omitted, the check degenerates to "the parent must exist" — which the
+     *  lookup performs on its own, a missing document being an evaluation
+     *  error that denies. */
+    where: z
+      .object({ field: z.string().trim().min(1), equals: z.union([z.string(), z.number(), z.boolean()]) })
+      .strict()
+      .optional(),
+  })
+  .strict();
+
 /** What the rules read out of `collections[cid]`. NOT the schema — the schema
  *  is published beside it, untouched, for clients to render from. */
 const CollectionConfigZ = z
@@ -142,6 +190,27 @@ const CollectionConfigZ = z
      *  the authority actually says, so a visitor who was refused a slot can
      *  repair the stale row that offered it to them. */
     mirrorOf: NameZ.optional(),
+    /** The parent record's state, checked on every create — writers included.
+     *  See {@link RefInZ}. */
+    refIn: RefInZ.optional(),
+    /** Statuses a row may not be DELETED from, by anybody — the owner
+     *  included.
+     *
+     *  `deleteWith` asks a writer nothing (`writerDelete` above is read by the
+     *  PAGES; the rules never look at it), so a record whose state is supposed
+     *  to be permanent can be deleted and written again in its initial state.
+     *  Where anything hangs off that record — a `refIn` naming it — the whole
+     *  guarantee comes back with it: delete the closed topic, recreate it
+     *  `open`, and the gate correctly reports an open topic.
+     *
+     *  Per status rather than a flag, exactly like `selfDelete`: "may be taken
+     *  away while it is pending" and "may be taken away once it is history"
+     *  are different promises. A collection where NO state may be removed is
+     *  spelled by declaring every one of them.
+     *
+     *  DELETE only — a sealed record's other fields can still be corrected.
+     *  What it cannot do is stop existing. */
+    sealed: z.array(z.string().trim().min(1)).optional(),
     peerVisibility: z.enum(["public", "hidden"]).optional(),
     revealGated: z.boolean().optional(),
     gatedFrom: NameZ.optional(),

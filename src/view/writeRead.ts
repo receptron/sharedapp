@@ -140,7 +140,36 @@ const addWithdrawal = (write: ProjectedViewWrite, value: Record<string, unknown>
   if (!carried) {
     return;
   }
+  addSeal(write, value);
   addMirror(write, value);
+};
+
+/** The seal, which is not a third half — it OVERRIDES the two above.
+ *
+ *  Read only where one of them was carried, exactly as `withdrawPart` emits it:
+ *  a collection nobody may delete from has no control for the seal to narrow,
+ *  and an entry that carried only this would be a page drawing nothing.
+ *
+ *  It BRINGS THE STATUS FIELD, and that is the half that is easy to lose. The
+ *  field rides with `selfDelete` above, so a collection whose only permission
+ *  is the staff one (`writerDelete`, which the rules answer from the ROLE and
+ *  which therefore needs no status of its own) reaches this line with no field
+ *  attached — and `judgeWithdraw` reads the record's current status before
+ *  consulting the list, so the seal would be carried and never consulted.
+ *
+ *  Requiring the field rather than sealing without one: publish refuses that
+ *  pair (`sealed` with no `statusField` seals nothing), and `sealed` is new
+ *  enough that no already-deployed document can carry it malformed. If one ever
+ *  did, the rules are still the authority — the delete is refused there, and
+ *  the cost is a permission denial the page did not predict rather than a
+ *  record that should not have gone. */
+const addSeal = (write: ProjectedViewWrite, value: Record<string, unknown>): void => {
+  const sealed = stringsOf(value.sealed);
+  if (sealed.length === 0 || typeof value.statusField !== "string" || value.statusField === "") {
+    return;
+  }
+  write.statusField = value.statusField;
+  write.sealed = sealed;
 };
 
 export const projectedWriteOf = (value: unknown): ProjectedViewWrite | null => {

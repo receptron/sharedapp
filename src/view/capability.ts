@@ -100,6 +100,18 @@ export interface ViewCapability {
    *  can carry both declarations and hand its two readers different answers,
    *  which is what the rules do (`isWriter(r) || selfDelete(...)`). */
   withdrawAny: boolean;
+  /** Statuses no delete succeeds from, whichever of the two permissions above
+   *  the reader holds (`collections[cid].sealed`).
+   *
+   *  A LIST beside a boolean, and the asymmetry is the rules': `withdrawAny` is
+   *  answered from the ROLE with no status condition, so it cannot express
+   *  this, and `sealedNow` is a separate refusal that binds the owner as well.
+   *  A page holding `withdrawAny` draws its control on every row it can see —
+   *  which is right — and must not draw it on a row whose status is in here,
+   *  because that button can only ever fail.
+   *
+   *  Empty for a collection that seals nothing, which is nearly all of them. */
+  sealed: string[];
 }
 
 /** Which tier's projection this is — the answer to what ABSENCE means. */
@@ -122,7 +134,15 @@ const namesRoles = (write: ProjectedViewWrite): boolean => write.writers !== und
 
 /** Nothing, said explicitly. The staff tier's answer when the projection
  *  carries no roles: see the header for why it is this way round. */
-const NOTHING = { transitionAny: false, transitionOwn: false, assign: false, assignees: [] as string[], withdrawFrom: [] as string[], withdrawAny: false };
+const NOTHING = {
+  transitionAny: false,
+  transitionOwn: false,
+  assign: false,
+  assignees: [] as string[],
+  withdrawFrom: [] as string[],
+  withdrawAny: false,
+  sealed: [] as string[],
+};
 
 const has = (addresses: string[] | undefined, address: string): boolean => (addresses ?? []).includes(address);
 
@@ -176,6 +196,7 @@ export const capabilityOf = (write: ProjectedViewWrite, address: string, tier: W
         assignees: [],
         withdrawFrom: withdrawable(write, tier, false),
         withdrawAny: false,
+        sealed: write.sealed ?? [],
       };
     }
     return { cid: write.cid, ...NOTHING };
@@ -210,6 +231,7 @@ export const capabilityOf = (write: ProjectedViewWrite, address: string, tier: W
     // whose readers are participants. `withdrawable` asks the same question in
     // the same direction one field above.
     withdrawAny: tier === "member" && write.writerDelete === true && writer,
+    sealed: write.sealed ?? [],
   };
 };
 

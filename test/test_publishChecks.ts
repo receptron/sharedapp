@@ -1464,3 +1464,172 @@ test("a writerDelete held by a collection-level editor is accepted", () => {
   // owner scoped down to `viewer` here is refused above while an editor here is not.
   assert.deepEqual(problemsFor({ members: { [OWNER]: { "*": "owner", bookings: "editor" } }, collections: { bookings: { writerDelete: true } } }), []);
 });
+
+// --- refIn: the parent record's state, on every create ----------------------
+
+const ROUNDTABLE_CIDS = [
+  { cid: "topics", primaryKey: "id" },
+  { cid: "messages", primaryKey: "id" },
+];
+
+/** The roundtable, reduced to the declaration under test: a thread whose
+ *  messages may only be added while the topic says `open`, and a topic with no
+ *  way back out of `closed`. */
+const roundtable = (refIn: unknown) => ({
+  collections: {
+    topics: { statusField: "status", transitions: { initial: ["open"], open: ["closed"] } },
+    messages: { statusField: "status", transitions: { initial: ["posted"] }, ...(refIn === undefined ? {} : { refIn }) },
+  },
+});
+
+const roundtableProblems = (refIn: unknown) => problemsFor(roundtable(refIn), ROUNDTABLE_CIDS);
+
+const OPEN_TOPIC = { ref: "topicId", collection: "topics", where: { field: "status", equals: "open" } };
+
+test("accepts a refIn naming a real collection, and the app without one", () => {
+  // The accepted form first: this is the whole declaration an app needs to
+  // stop its own writers posting into a thread the host closed.
+  assert.deepEqual(roundtableProblems(OPEN_TOPIC), []);
+  // Existence alone is a legitimate weaker form — the parent must be there.
+  assert.deepEqual(roundtableProblems({ ref: "topicId", collection: "topics" }), []);
+  // And a collection that never declares it is untouched.
+  assert.deepEqual(roundtableProblems(undefined), []);
+});
+
+test("refuses a refIn pointing at a collection that does not exist", () => {
+  // The silence this catches is total AND self-inflicted: the rules get() a
+  // collection that is not there, which is an evaluation error, so the author
+  // locks their own app out of `messages` and nothing anywhere says why.
+  refuses(roundtableProblems({ ...OPEN_TOPIC, collection: "topicz" }), "collections.messages.refIn.collection names 'topicz'");
+});
+
+test("refuses a refIn naming its own collection", () => {
+  // It reads like the one shape a ref-keyed check adds over `idIn` — a reply
+  // that may only be posted while the message it answers stands — and it is a
+  // collection nothing can ever be written to: `refIn` makes the ref field
+  // mandatory, so every row needs a row to point at, the FIRST one included.
+  // A rules test found this; publish is where it becomes readable.
+  refuses(roundtableProblems({ ref: "replyTo", collection: "messages" }), "names 'messages' itself");
+});
+
+const roundtableSchemas = (messageFields: Record<string, unknown>, topicFields: Record<string, unknown>) => [
+  schemaWithFields("messages", messageFields),
+  schemaWithFields("topics", topicFields),
+];
+
+const MESSAGE_FIELDS = { topicId: { type: "string" }, body: { type: "text" }, status: { type: "string" } };
+const TOPIC_FIELDS = { title: { type: "string" }, status: { type: "string" } };
+
+test("refuses a refIn whose ref field the schema does not declare", () => {
+  // The half that is judged against the collection being WRITTEN, not the
+  // parent — and the worst failure in the family, because the path is built
+  // out of the missing field: not "some creates are refused" but none at all,
+  // the owner's included.
+  const declared = app(roundtable(OPEN_TOPIC));
+  assert.deepEqual(schemaRefProblems(declared, roundtableSchemas(MESSAGE_FIELDS, TOPIC_FIELDS) as never), []);
+
+  const withoutRef = Object.fromEntries(Object.entries(MESSAGE_FIELDS).filter(([name]) => name !== "topicId"));
+  refuses(schemaRefProblems(declared, roundtableSchemas(withoutRef, TOPIC_FIELDS) as never), "collections.messages.refIn.ref names 'topicId'");
+});
+
+test("refuses a refIn whose where.field the parent's schema does not declare", () => {
+  const declared = app(roundtable(OPEN_TOPIC));
+  const withoutStatus = Object.fromEntries(Object.entries(TOPIC_FIELDS).filter(([name]) => name !== "status"));
+  refuses(schemaRefProblems(declared, roundtableSchemas(MESSAGE_FIELDS, withoutStatus) as never), "collections.messages.refIn.where.field names 'status'");
+});
+
+test("refuses a refIn comparison the rules could never satisfy", () => {
+  // `status` exists and is an enum that does not contain "open": reads as
+  // correct, refuses every message forever.
+  const declared = app(roundtable(OPEN_TOPIC));
+  const enumStatus = (values: string[]) => ({ title: { type: "string" }, status: { type: "enum", values } });
+  assert.deepEqual(schemaRefProblems(declared, roundtableSchemas(MESSAGE_FIELDS, enumStatus(["open", "closed"])) as never), []);
+  refuses(schemaRefProblems(declared, roundtableSchemas(MESSAGE_FIELDS, enumStatus(["live", "closed"])) as never), "not one of the values");
+});
+
+// --- sealed: a status a record cannot be deleted from ----------------------
+
+const sealedProblemsFor = (topics: Record<string, unknown>) =>
+  problemsFor(
+    { collections: { topics: { statusField: "status", transitions: { initial: ["open"], open: ["closed"] }, ...topics }, messages: {} } },
+    ROUNDTABLE_CIDS,
+  );
+
+test("accepts sealing a status records actually reach", () => {
+  // The accepted form: without this, deleting the closed topic and writing it
+  // again as `open` undoes the close in two ordinary writes, and `refIn`
+  // reports a genuinely open topic.
+  assert.deepEqual(sealedProblemsFor({ sealed: ["closed"] }), []);
+  assert.deepEqual(sealedProblemsFor({}), []);
+});
+
+test("refuses a sealed list that seals nothing", () => {
+  refuses(sealedProblemsFor({ sealed: [] }), "collections.topics.sealed is an empty list");
+  refuses(sealedProblemsFor({ sealed: ["archived"] }), 'collections.topics.sealed names "archived"');
+});
+
+test("refuses sealed without a statusField to read", () => {
+  // The quiet one: the rules reach a record's status only through
+  // `statusField`, so without it nothing is ever sealed — the app publishes
+  // and the promise is simply not kept.
+  const problems = problemsFor(
+    { collections: { topics: { transitions: { initial: ["open"], open: ["closed"] }, sealed: ["closed"] }, messages: {} } },
+    ROUNDTABLE_CIDS,
+  );
+  refuses(problems, "declares no statusField");
+});
+
+test("refuses a ref field whose value could never be a document id", () => {
+  // The rules build the parent's path out of this value, and `$(...)` on a
+  // non-string is an evaluation error — so a number field publishes cleanly
+  // and then refuses every create in the collection, the owner's included.
+  const declared = app(roundtable(OPEN_TOPIC));
+  const numeric = { ...MESSAGE_FIELDS, topicId: { type: "number" } };
+  refuses(schemaRefProblems(declared, roundtableSchemas(numeric, TOPIC_FIELDS) as never), "declares as a number field");
+  // A `ref` field is the natural way to name a parent, and it is a string.
+  const asRef = { ...MESSAGE_FIELDS, topicId: { type: "ref", to: "topics" } };
+  assert.deepEqual(schemaRefProblems(declared, roundtableSchemas(asRef, TOPIC_FIELDS) as never), []);
+});
+
+test("refuses a ref field pointing somewhere other than refIn.collection", () => {
+  // Correct-looking twice over: the field says one collection, refIn says
+  // another, and the ids are then searched for where they were never issued.
+  const declared = app(roundtable(OPEN_TOPIC));
+  const elsewhere = { ...MESSAGE_FIELDS, topicId: { type: "ref", to: "messages" } };
+  refuses(schemaRefProblems(declared, roundtableSchemas(elsewhere, TOPIC_FIELDS) as never), "a ref field pointing at 'messages'");
+});
+
+test("sealed reachability is judged against THIS collection's submissions", () => {
+  // Reading every submit block let one collection's initialStatus vouch for
+  // another's statuses — `topics.sealed: ["posted"]` passing because
+  // `messages` happens to post — so the check answered about the wrong
+  // collection and waved through the typo it exists to catch.
+  const problems = problemsFor(
+    {
+      collections: {
+        topics: { statusField: "status", transitions: { initial: ["open"], open: ["closed"] }, sealed: ["posted"] },
+        messages: { statusField: "status", submitOnly: true },
+      },
+      public: { submit: { messages: { auth: "verifiedEmail", createFields: ["body", "status"], emailField: "who", initialStatus: "posted" } } },
+    },
+    ROUNDTABLE_CIDS,
+  );
+  refuses(problems, 'collections.topics.sealed names "posted"');
+});
+
+test("refuses selfDelete and sealed naming the same status", () => {
+  // A flat contradiction the rules settle by refusing, so the form promises a
+  // withdrawal it can never perform.
+  const problems = problemsFor(
+    {
+      collections: { topics: { statusField: "status", transitions: { initial: ["open"], open: ["closed"] }, sealed: ["closed"] }, messages: {} },
+      public: {
+        submit: {
+          topics: { auth: "verifiedEmail", createFields: ["title", "status"], emailField: "who", initialStatus: "open", selfDelete: ["closed"] },
+        },
+      },
+    },
+    ROUNDTABLE_CIDS,
+  );
+  refuses(problems, 'both name "closed"');
+});
