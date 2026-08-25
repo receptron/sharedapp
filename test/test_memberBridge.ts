@@ -23,7 +23,9 @@ const NONCE = "nonce-1";
 
 const viewer: Viewer = {
   me: "desk@gym.jp",
-  can: { bookings: { cid: "bookings", transitionAny: true, transitionOwn: false, assign: false, assignees: [], withdrawFrom: [], withdrawAny: false, sealed: [] } },
+  can: {
+    bookings: { cid: "bookings", transitionAny: true, transitionOwn: false, assign: false, assignees: [], withdrawFrom: [], withdrawAny: false, sealed: [] },
+  },
 };
 
 /** A channel that records what the parent posted and lets a test play the
