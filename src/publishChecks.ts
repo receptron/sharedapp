@@ -582,16 +582,45 @@ function sealedProblems(app: AuthoredApp): string[] {
     }
     const { transitions } = collection;
     if (transitions === undefined) return [];
+    // `app.public.submit[cid]`, NOT every submit block in the app. Reading them
+    // all made one collection's `initialStatus` vouch for another's statuses —
+    // `topics.sealed: ["posted"]` passed because `messages` happens to post —
+    // so the check answered about the wrong collection and let through exactly
+    // the typo it exists to catch.
     const reachable = new Set([
       ...Object.values(transitions).flat(),
       ...Object.keys(transitions).filter((from) => from !== INITIAL_KEY),
-      ...Object.values(app.public?.submit ?? {}).flatMap((submit) => (submit.initialStatus === undefined ? [] : [submit.initialStatus])),
+      ...(app.public?.submit?.[cid]?.initialStatus === undefined ? [] : [app.public.submit[cid].initialStatus]),
     ]);
     const unreachable = states.filter((state) => !reachable.has(state));
     if (unreachable.length === 0) return [];
     return [
       `collections.${cid}.sealed names ${unreachable.map((state) => `"${state}"`).join(", ")}, which no record ever holds: ` +
         `it is neither an initialStatus nor a status collections.${cid}.transitions names, so the declaration seals nothing.`,
+    ];
+  });
+}
+
+/** `selfDelete` and `sealed` naming the same status is a flat contradiction —
+ *  one says the submitter may take their row away from it, the other that
+ *  nobody may — and the rules settle it by refusing: `sealedNow` is a
+ *  conjunct above the branch `selfDelete` sits in.
+ *
+ *  So the declaration reads as a promise the app then breaks, and the page
+ *  draws a control that always fails. Unlike the `writerDelete` pairing, which
+ *  is legitimate — "a writer removes any row, except the ones the record has
+ *  sealed" is a coherent thing to want, and the projection now carries `sealed`
+ *  so the page can honour it — there is no reading of THIS pair that means
+ *  anything, because both halves name the same status explicitly. */
+function sealedSelfDeleteProblems(app: AuthoredApp): string[] {
+  return Object.entries(app.collections ?? {}).flatMap(([cid, collection]) => {
+    const sealed = new Set(collection.sealed ?? []);
+    const clash = (app.public?.submit?.[cid]?.selfDelete ?? []).filter((state) => sealed.has(state));
+    if (clash.length === 0) return [];
+    return [
+      `public.submit.${cid}.selfDelete and collections.${cid}.sealed both name ${clash.map((state) => `"${state}"`).join(", ")}: one says the submitter ` +
+        "may withdraw their row from that status and the other that nobody may delete it at all. The rules refuse the delete, so the form promises a " +
+        "withdrawal it can never perform. Name the status in one of them.",
     ];
   });
 }
@@ -605,17 +634,33 @@ function sealedProblems(app: AuthoredApp): string[] {
  *  app and the agents sitting at it out of a collection at the same time, and
  *  the app still publishes.
  *
- *  A collection naming ITSELF is allowed, unlike `idIn`'s. There the reference
- *  is the document id of the row being written, which on a create does not
- *  exist yet, so a self-reference can never be satisfied. Here the reference is
- *  an ordinary field naming some OTHER row — a reply pointing at the message it
- *  answers, which must still be there — and that is a real declaration. */
+ *  A collection naming ITSELF is refused too, and it took a rules test to see
+ *  why. It reads like the one shape a ref-keyed check adds over `idIn` — a
+ *  reply that may only be posted while the message it answers stands — and it
+ *  cannot work: `refIn` makes the ref field MANDATORY (a create without it
+ *  builds a path out of nothing, which is an evaluation error), so every row
+ *  needs a row to point at, INCLUDING THE FIRST. There is no way to write the
+ *  root, and no batch helps because that batch's own root has the same problem.
+ *  The collection accepts nothing, ever.
+ *
+ *  It is also the one shape `getAfter()` would wave through: a create whose
+ *  `ref` names its own document id is checked against the row being written,
+ *  so the creator supplies the state the gate reads. The rules refuse that
+ *  case separately and fail closed; this is the readable refusal. */
 function refInTargetProblems(app: AuthoredApp, collections: readonly PublishableCollection[]): string[] {
   const known = new Set(collections.map((collection) => collection.cid));
   const names = known.size > 0 ? [...known].sort().join(", ") : "(none)";
   return Object.entries(app.collections ?? {}).flatMap(([cid, collection]) => {
     const target = collection.refIn?.collection;
-    if (target === undefined || known.has(target)) return [];
+    if (target === undefined) return [];
+    if (target === cid) {
+      return [
+        `collections.${cid}.refIn.collection names '${cid}' itself. Every row would need a row of its own collection to point at — including the first, ` +
+          "which has nothing to point at — and `refIn` makes the ref field mandatory, so the collection could never take a single record. " +
+          "Name the collection of the thing being pointed AT (the topic, the shift, the order).",
+      ];
+    }
+    if (known.has(target)) return [];
     return [
       `collections.${cid}.refIn.collection names '${target}', which is not a shared collection in this repository. The rules look the parent record up ` +
         `there on every create — the owner's included — so nothing can be added to '${cid}' at all. Shared collections here: ${names}.`,
@@ -739,6 +784,7 @@ export function publishProblems(app: AuthoredApp, collections: readonly Publisha
     ...idTargetProblems(app, collections),
     ...refInTargetProblems(app, collections),
     ...sealedProblems(app),
+    ...sealedSelfDeleteProblems(app),
     ...mirrorProblems(app, collections),
     ...viewProblems(app, collections),
     ...agentProblems(app, collections),
@@ -1580,6 +1626,46 @@ function mailRefProblems(schemaOf: ReadonlyMap<string, CollectionSchema>, cid: s
  *  Not refused when the field is merely absent from a submit form's
  *  `createFields`: a writer creates rows the form never touches, and `refIn` is
  *  about writers. What must exist is the SCHEMA field. */
+/** Field kinds that reach the rules as a STRING, which is the whole
+ *  requirement: `refIn.ref` becomes a path segment, and `$(...)` on anything
+ *  else is an evaluation error — so a `number` id field publishes cleanly and
+ *  then refuses every create in the collection, the owner's included, with
+ *  nothing anywhere to say why.
+ *
+ *  Deliberately permissive about MEANING and strict about TYPE. A `datetime` is
+ *  a strange thing to name a parent by and it does work, so it is not this
+ *  check's business; a `money` field cannot work at all, and that is. Refusing
+ *  something that would have worked is a loud, readable publish error; letting
+ *  through something that cannot is the silent failure this whole file exists
+ *  to prevent. */
+const STRING_VALUED = new Set(["string", "text", "email", "markdown", "ref", "enum", "date", "datetime"]);
+
+/** The two ways a ref field is the wrong field, both of them silent at publish
+ *  and total at write time. */
+function refKindProblems(own: CollectionSchema | undefined, cid: string, refIn: { ref: string; collection: string }): string[] {
+  const spec = own?.fields?.[refIn.ref];
+  if (spec === undefined || !Object.hasOwn(own?.fields ?? {}, refIn.ref)) return [];
+  if (!STRING_VALUED.has(spec.type)) {
+    return [
+      `collections.${cid}.refIn.ref names '${refIn.ref}', which the schema of '${cid}' declares as a ${spec.type} field. The rules build the parent's ` +
+        "path out of that value, and a path segment that is not a string is an evaluation error — so nothing can be created in " +
+        `'${cid}' at all, the owner included. The field has to hold the parent's document id as a string.`,
+    ];
+  }
+  // A `ref` field already declares where its ids live. When it disagrees with
+  // `refIn.collection` the lookup goes to a collection those ids were never
+  // minted in, so every create is refused — and the declaration reads as
+  // correct twice over, which is why nothing downstream catches it.
+  if (spec.type === "ref" && spec.to !== refIn.collection) {
+    return [
+      `collections.${cid}.refIn.ref names '${refIn.ref}', a ref field pointing at '${spec.to}', but collections.${cid}.refIn.collection says ` +
+        `'${refIn.collection}'. The rules look the parent up in the collection named here, so the ids that field holds are searched for somewhere they ` +
+        "were never issued and every create is refused. Make the two agree.",
+    ];
+  }
+  return [];
+}
+
 function refInRefProblems(schemaOf: ReadonlyMap<string, CollectionSchema>, cid: string, collection: AuthoredCollectionConfig): string[] {
   const { refIn } = collection;
   if (refIn === undefined) return [];
@@ -1599,6 +1685,7 @@ function refInRefProblems(schemaOf: ReadonlyMap<string, CollectionSchema>, cid: 
   const where = refIn.where;
   return [
     ...refProblem,
+    ...refKindProblems(own, cid, refIn),
     ...(where === undefined
       ? []
       : [

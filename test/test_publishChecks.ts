@@ -1503,11 +1503,13 @@ test("refuses a refIn pointing at a collection that does not exist", () => {
   refuses(roundtableProblems({ ...OPEN_TOPIC, collection: "topicz" }), "collections.messages.refIn.collection names 'topicz'");
 });
 
-test("accepts a refIn naming its own collection", () => {
-  // Unlike `idIn`, whose reference IS the id being written and so can never
-  // exist on a create. Here it is an ordinary field naming another row — a
-  // reply that may only be posted while the message it answers is still there.
-  assert.deepEqual(roundtableProblems({ ref: "replyTo", collection: "messages" }), []);
+test("refuses a refIn naming its own collection", () => {
+  // It reads like the one shape a ref-keyed check adds over `idIn` — a reply
+  // that may only be posted while the message it answers stands — and it is a
+  // collection nothing can ever be written to: `refIn` makes the ref field
+  // mandatory, so every row needs a row to point at, the FIRST one included.
+  // A rules test found this; publish is where it becomes readable.
+  refuses(roundtableProblems({ ref: "replyTo", collection: "messages" }), "names 'messages' itself");
 });
 
 const roundtableSchemas = (messageFields: Record<string, unknown>, topicFields: Record<string, unknown>) => [
@@ -1575,4 +1577,59 @@ test("refuses sealed without a statusField to read", () => {
     ROUNDTABLE_CIDS,
   );
   refuses(problems, "declares no statusField");
+});
+
+test("refuses a ref field whose value could never be a document id", () => {
+  // The rules build the parent's path out of this value, and `$(...)` on a
+  // non-string is an evaluation error — so a number field publishes cleanly
+  // and then refuses every create in the collection, the owner's included.
+  const declared = app(roundtable(OPEN_TOPIC));
+  const numeric = { ...MESSAGE_FIELDS, topicId: { type: "number" } };
+  refuses(schemaRefProblems(declared, roundtableSchemas(numeric, TOPIC_FIELDS) as never), "declares as a number field");
+  // A `ref` field is the natural way to name a parent, and it is a string.
+  const asRef = { ...MESSAGE_FIELDS, topicId: { type: "ref", to: "topics" } };
+  assert.deepEqual(schemaRefProblems(declared, roundtableSchemas(asRef, TOPIC_FIELDS) as never), []);
+});
+
+test("refuses a ref field pointing somewhere other than refIn.collection", () => {
+  // Correct-looking twice over: the field says one collection, refIn says
+  // another, and the ids are then searched for where they were never issued.
+  const declared = app(roundtable(OPEN_TOPIC));
+  const elsewhere = { ...MESSAGE_FIELDS, topicId: { type: "ref", to: "messages" } };
+  refuses(schemaRefProblems(declared, roundtableSchemas(elsewhere, TOPIC_FIELDS) as never), "a ref field pointing at 'messages'");
+});
+
+test("sealed reachability is judged against THIS collection's submissions", () => {
+  // Reading every submit block let one collection's initialStatus vouch for
+  // another's statuses — `topics.sealed: ["posted"]` passing because
+  // `messages` happens to post — so the check answered about the wrong
+  // collection and waved through the typo it exists to catch.
+  const problems = problemsFor(
+    {
+      collections: {
+        topics: { statusField: "status", transitions: { initial: ["open"], open: ["closed"] }, sealed: ["posted"] },
+        messages: { statusField: "status", submitOnly: true },
+      },
+      public: { submit: { messages: { auth: "verifiedEmail", createFields: ["body", "status"], emailField: "who", initialStatus: "posted" } } },
+    },
+    ROUNDTABLE_CIDS,
+  );
+  refuses(problems, 'collections.topics.sealed names "posted"');
+});
+
+test("refuses selfDelete and sealed naming the same status", () => {
+  // A flat contradiction the rules settle by refusing, so the form promises a
+  // withdrawal it can never perform.
+  const problems = problemsFor(
+    {
+      collections: { topics: { statusField: "status", transitions: { initial: ["open"], open: ["closed"] }, sealed: ["closed"] }, messages: {} },
+      public: {
+        submit: {
+          topics: { auth: "verifiedEmail", createFields: ["title", "status"], emailField: "who", initialStatus: "open", selfDelete: ["closed"] },
+        },
+      },
+    },
+    ROUNDTABLE_CIDS,
+  );
+  refuses(problems, 'both name "closed"');
 });

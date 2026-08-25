@@ -176,3 +176,43 @@ test("a participant's own withdrawal is judged exactly as before", () => {
   if (refused.ok || refused.reason === "not-an-intent") return;
   assert.equal(refused.reason, "illegal-transition");
 });
+
+// --- the seal, which overrides both halves (`sealed`)
+//
+// `writerDelete` says "any row" and the rules mean "any row the RECORD has not sealed": `sealedNow`
+// is a conjunct above the branch `isWriter` sits in, so it refuses the owner too. Approving here
+// would hand the page a call certain to come back a permission denial — the one thing this layer
+// exists to stop — and the neighbouring test above is exactly why it has to be said explicitly:
+// the staff half is deliberately status-blind, so nothing else in this file would catch it.
+
+const sealedNames: ProjectedViewWrite = {
+  cid: "topics",
+  writerDelete: true,
+  writers: ["desk@gym.jp"],
+  statusField: "status",
+  sealed: ["closed"],
+};
+
+const topicHeld = (cid: string, itemId: string): Record<string, unknown> | null =>
+  cid === "topics" ? { status: itemId === "t-closed" ? "closed" : "open" } : null;
+
+test("a writer cannot take away a row the record has sealed", () => {
+  const read = readIntentMessage(withdraw("topics", "t-closed"), [sealedNames], topicHeld, desk);
+  assert.equal(read.ok, false);
+  if (read.ok) return;
+  // About the STATE the row is in, not about who asked — the same sentence the
+  // status-out-of-range branch says for the submitter's half.
+  assert.equal(read.reason, "illegal-transition");
+});
+
+test("the seal names one status, and leaves the others alone", () => {
+  // The guard on the guard: without this the test above passes just as well
+  // against a projection that refused every delete.
+  const read = readIntentMessage(withdraw("topics", "t-open"), [sealedNames], topicHeld, desk);
+  assert.equal(read.ok, true);
+});
+
+test("a collection that seals nothing is unaffected", () => {
+  const read = readIntentMessage(withdraw("names", "n1"), [names], () => null, desk);
+  assert.equal(read.ok, true);
+});

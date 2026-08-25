@@ -400,6 +400,20 @@ export interface ProjectedViewWrite {
    *  about is real: the row is gone afterwards, and with `mirror` the slot is
    *  back on the grid. */
   selfDelete?: string[];
+  /** The statuses NO ONE may delete a row from (`collections[cid].sealed`).
+   *
+   *  It travels for BOTH halves of a withdrawal and for BOTH tiers, which none
+   *  of the neighbours do, because it is not a permission — it is a property of
+   *  the RECORD. `writerDelete` says a writer may remove any row and the rules
+   *  agree, right up until the row is in a sealed status, where `sealedNow`
+   *  refuses it whoever asked. A projection without this hands the page a
+   *  control that is drawn on every row and fails on some of them, which is
+   *  precisely the declaration-and-enforcement disagreement the projection
+   *  exists to stop.
+   *
+   *  Rides with `statusField` for the same reason `selfDelete` does: the rules
+   *  read the current status off the record before consulting the list. */
+  sealed?: string[];
   /** A writer may delete ANY row here (`collections[cid].writerDelete`).
    *  `member` tier only, and the counterpart of `selfDelete` rather than a
    *  variant of it: that one names the statuses a SUBMITTER may take their own
@@ -556,7 +570,12 @@ function withdrawPart(app: AuthoredApp, audience: ViewAudience, cid: string): Pa
   const selfDelete = app.public?.submit?.[cid]?.selfDelete;
   const own = selfDelete !== undefined && config?.statusField !== undefined ? { selfDelete, statusField: config.statusField } : {};
   if (Object.keys(byRole).length === 0 && Object.keys(own).length === 0) return {};
-  return { ...byRole, ...own, ...withdrawMirrorPart(app, cid) };
+  // The seal is not one of the two halves — it overrides both — so it is added
+  // after the "is there anything to project?" test rather than counting
+  // towards it. A collection that seals every status and grants no delete
+  // still projects nothing, which is correct: there is no control to draw.
+  const sealed = config?.sealed !== undefined && config.statusField !== undefined ? { sealed: config.sealed, statusField: config.statusField } : {};
+  return { ...byRole, ...own, ...sealed, ...withdrawMirrorPart(app, cid) };
 }
 
 function assignPart(app: AuthoredApp, audience: ViewAudience, cid: string): Partial<ProjectedViewWrite> {

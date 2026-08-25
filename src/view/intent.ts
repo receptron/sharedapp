@@ -270,6 +270,22 @@ const withdrawn = (write: ProjectedViewWrite): Judged => {
  *  is `not-writable`. Both used to be `not-writable`, which sent the author of
  *  the page to the declaration when the answer was the roster. */
 const judgeWithdraw = (write: ProjectedViewWrite, record: Record<string, unknown> | null, who: Who): Judged => {
+  // BEFORE either permission, because it overrides both. `sealedNow` in the
+  // rules refuses a delete from these statuses whoever asked — the owner
+  // included — so approving here would hand a page a call that is certain to
+  // come back a permission denial, which is the one thing this layer exists to
+  // stop. `writerDelete` in particular says "any row" and means "any row the
+  // record itself has not sealed".
+  //
+  // `illegal-transition` rather than `not-permitted`: the refusal is about the
+  // state this row is IN, not about who is asking, and that is exactly the
+  // sentence the status-out-of-range branch below already says.
+  if (write.statusField !== undefined && (write.sealed ?? []).length > 0) {
+    const held = statusHeld(record, write.statusField);
+    if (held !== null && (write.sealed ?? []).includes(held)) {
+      return ILLEGAL;
+    }
+  }
   if (capabilityOf(write, who.address, who.tier).withdrawAny) {
     return withdrawn(write);
   }
