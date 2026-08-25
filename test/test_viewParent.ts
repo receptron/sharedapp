@@ -146,7 +146,7 @@ test("the viewer carries both halves, and neither half is invented", () => {
       viewer: () => ({
         me: null,
         can: {
-          bookings: { cid: "bookings", transitionAny: true, transitionOwn: false, assign: false, assignees: [], withdrawFrom: ["pending"], withdrawAny: false },
+          bookings: { cid: "bookings", transitionAny: true, transitionOwn: false, assign: false, assignees: [], withdrawFrom: ["pending"], withdrawAny: false, sealed: [] },
         },
       }),
       mine: () => ({ bookings: [{ id: "b1" }] }),
