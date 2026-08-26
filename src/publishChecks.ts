@@ -413,7 +413,7 @@ function submitCoherenceProblems(app: AuthoredApp, cid: string, submit: Authored
       `public.submit.${cid}.idFrom is "auth.uid+field" but no idField is declared: the rules rebuild the document id from that field and refuse every create.`,
     );
   }
-  problems.push(...fieldIdProblems(cid, submit));
+  problems.push(...fieldIdProblems(cid, submit, collection?.statusField));
   if ((submit.selfUpdate !== undefined || submit.selfTransitions !== undefined || submit.selfDelete !== undefined) && !collection?.statusField) {
     problems.push(
       `public.submit.${cid}.selfUpdate / selfTransitions / selfDelete are declared per CURRENT STATUS, but collections.${cid} declares no statusField: ` +
@@ -503,7 +503,7 @@ const ID_FROM_FIELD_MODES: readonly string[] = ["auth.uid+field", "field", "slug
  *  `idIn` without the mode is refused for the opposite reason: the rules read
  *  it only in that branch, so an author who wrote it believes a check is
  *  running that is not. */
-function fieldIdProblems(cid: string, submit: AuthoredSubmit): string[] {
+function fieldIdProblems(cid: string, submit: AuthoredSubmit, statusField: string | undefined): string[] {
   const problems: string[] = [];
   // `slug` needs the same field and refuses the same way, and needs `idIn` not
   // at all: the id is the record's own name, so there is no other record for a
@@ -516,7 +516,7 @@ function fieldIdProblems(cid: string, submit: AuthoredSubmit): string[] {
         `Name the field the URL name is submitted in — "idField": "slug".`,
     );
   }
-  problems.push(...slugSourceProblems(cid, submit));
+  problems.push(...slugSourceProblems(cid, submit, statusField));
   if (submit.idFrom === "field") {
     if (submit.idField === undefined) {
       problems.push(
@@ -559,24 +559,52 @@ function fieldIdProblems(cid: string, submit: AuthoredSubmit): string[] {
  *
  *  Refused here rather than left to the rules, because the rules can only say no: they see one
  *  submission and cannot know the field was never the visitor's to fill. */
-function slugSourceProblems(cid: string, submit: AuthoredSubmit): string[] {
+function slugSourceProblems(cid: string, submit: AuthoredSubmit, statusField: string | undefined): string[] {
   if (submit.idFrom !== "slug" || submit.idField === undefined) return [];
   const filled: [string | undefined, string, string][] = [
-    [submit.emailField, "emailField", "the rules fill it with the submitter's verified address, and an address contains '@', which a URL name may not"],
-    [submit.stampField, "stampField", "the rules fill it with the server's clock, which is a timestamp rather than a string, so no id can be built from it"],
+    [
+      submit.emailField,
+      `public.submit.${cid}.emailField`,
+      "the rules fill it with the submitter's verified address, and an address contains '@', which a URL name may not",
+    ],
+    [
+      submit.stampField,
+      `public.submit.${cid}.stampField`,
+      "the rules fill it with the server's clock, which is a timestamp rather than a string, so no id can be built from it",
+    ],
     [
       submit.uidField,
-      "uidField",
+      `public.submit.${cid}.uidField`,
       'the rules fill it with the submitter\'s own uid, which nobody chose and no reader can recognise — that is what idFrom "auth.uid" is for',
     ],
+    // The STATUS field, and the one that is easy to miss because it is declared on the COLLECTION
+    // rather than here — which is why it has to be passed in. `recordOf` fills it from
+    // `initialStatus`, so it is no more the visitor's than the three above, and it fails in
+    // whichever of two ways the declaration chooses. The second is the worse one: the app works
+    // exactly once.
+    [statusField, `collections.${cid}.statusField`, statusWhy(submit)],
   ];
   return filled
     .filter(([field]) => field !== undefined && field === submit.idField)
     .map(
       ([, key, why]) =>
-        `public.submit.${cid}.idField is '${submit.idField}', which is also public.submit.${cid}.${key}: ${why}. Every submission would be refused. ` +
-        "Give the URL name a field of its own, one the person writing the article fills in.",
+        `public.submit.${cid}.idField is '${submit.idField}', which is also ${key}: ${why}. Give the URL name a field of its own, ` +
+        "one the person writing the article fills in.",
     );
+}
+
+/** Which way a status-named slug fails, which depends on whether anything fills the field. */
+function statusWhy(submit: AuthoredSubmit): string {
+  if (submit.initialStatus === undefined) {
+    return (
+      "the rules read it from the declaration rather than from the form, and with no initialStatus nothing fills it at all — so every submission is " +
+      "refused for a missing id, naming a box the form never showed"
+    );
+  }
+  return (
+    `every record would be named '${submit.initialStatus}', so the first article takes that id and every article after it is a write to a document ` +
+    "that already exists — which the public submission path never allows. The app would work exactly once"
+  );
 }
 
 /** Every `idIn` target, checked against the collections this repository has.

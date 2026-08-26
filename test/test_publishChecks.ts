@@ -1782,6 +1782,30 @@ test("refuses a slug field that is also the uid field", () => {
   );
 });
 
+test("refuses a slug field that is also the status field, when a status is filled in", () => {
+  // The worse of the two shapes: EVERY article would be named after the initial status, so the
+  // first create takes `articles/published` and every one after it is a write to a document that
+  // exists. The app works exactly once, and nothing about that reads as a declaration problem.
+  refuses(
+    articles((draft) => {
+      draft.idField = "status";
+    }),
+    "would work exactly once",
+  );
+});
+
+test("refuses a slug field that is also the status field, when nothing fills it", () => {
+  // The other shape. With no `initialStatus` nothing writes the field at all, so every submission
+  // is refused for a missing id — naming a box the form never showed.
+  refuses(
+    articles((draft) => {
+      draft.idField = "status";
+      delete draft.initialStatus;
+    }),
+    "nothing fills it at all",
+  );
+});
+
 test("accepts a slug field of its own, beside the fields the host fills", () => {
   // The positive half: an app may bind a record to its submitter and stamp it AND have a URL name,
   // so long as the name is a field of its own. A check that refused the combination outright would
