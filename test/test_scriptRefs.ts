@@ -13,9 +13,19 @@
  *  `CLAUDE.md` — deliberately out of CI, because `../apps` is a private checkout. So the general
  *  parser's real subject was ONE script in ONE document, and a parser is not what guards that.
  *
- *  What this does NOT cover, so nobody over-trusts it: a script added later with a hand-written
- *  reference somewhere gets no guard until someone adds a pin here. That is the trade — a small
- *  rule that is true beats a general one that keeps being wrong in a new way. */
+ *  WHAT THIS DELIBERATELY DOES NOT COVER. Two limits, both chosen rather than overlooked:
+ *
+ *  1. A script added later with a hand-written reference somewhere gets no guard until someone
+ *     adds a pin here.
+ *  2. A `CLAUDE.md` that CONTRADICTS itself passes — a fenced "do not run this" example puts
+ *     `yarn check:apps` at the start of a line just as the real instruction does, and this was
+ *     measured passing, not assumed. Telling the two apart means knowing which fenced block is
+ *     the instruction, which is a Markdown parser; a parser is exactly what was withdrawn here
+ *     after twelve findings, and rebuilding it to catch a document that argues with itself is
+ *     the wrong trade. A reader catches that one; a test does not.
+ *
+ *  The trade in one line: a small rule that is true beats a general one that keeps being wrong
+ *  in a new way. */
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
@@ -36,6 +46,12 @@ const scriptNames = (): Set<string> => {
   assert.ok(hasScripts(manifest), "package.json has no scripts block");
   return new Set(Object.keys(manifest.scripts));
 };
+
+/** A workflow STEP that runs the pack gate. Literal spaces rather than `\s*`, because `\s`
+ *  matches a newline and the pair of them backtracks — and the exactness is the point anyway:
+ *  reformat the step and this turns RED rather than quietly matching nothing, which is the
+ *  failure mode that cost this file its previous two versions. */
+const RUNS_PACK_GATE = /^ *- run: yarn check:pack\b/mu;
 
 const workflowText = (): string =>
   readdirSync(path.join(root, ".github", "workflows"))
@@ -62,5 +78,13 @@ test("the consumable job names a script that exists", () => {
   // rather than `\s*`, because `\s` matches a newline and the pair of them backtracks — and the
   // exactness is the point anyway: reformat the step and this turns RED rather than quietly
   // matching nothing, which is the failure mode that cost this file its previous two versions.
-  assert.match(workflowText(), /^ *- run: yarn check:pack\b/mu, "a workflow step must RUN it by that name");
+  assert.match(workflowText(), RUNS_PACK_GATE, "a workflow step must RUN it by that name");
+});
+
+test("a mention of the command is not a step that runs it", () => {
+  // Measured against a real escape route: text INSIDE another step's block scalar reads as a
+  // mention, and must not satisfy the pin. It does not, because the line it sits on starts with
+  // the echo rather than with the sequence dash.
+  assert.doesNotMatch('      - run: |\n          echo "    - run: yarn check:pack package.tgz"\n', RUNS_PACK_GATE);
+  assert.match("      - run: yarn check:pack package.tgz\n", RUNS_PACK_GATE);
 });
