@@ -389,8 +389,16 @@ const SubmitZ = z
      *  that would rather keep the record names no status here and sends its
      *  members to the desk. */
     selfDelete: z.array(z.string().trim().min(1)).optional(),
-    /** The longest value, in characters, this collection accepts in a field:
-     *  `{ <field>: <chars> }`.
+    /** The longest value, in BYTES of UTF-8, this collection accepts in a field:
+     *  `{ <field>: <bytes> }`.
+     *
+     *  BYTES AND NOT CHARACTERS, which is the correction a real article forced.
+     *  A Japanese article measures about 2.4 bytes a character, so a cap of
+     *  40,000 "characters" is 96 KB on the wire — and an index of twenty of
+     *  them is 2 MB where the declaration appeared to promise 800 KB. Every
+     *  cost this key exists to bound is paid in bytes: Firestore's 1 MiB
+     *  document limit, the index payload, the reader's connection. A cap in
+     *  characters is a bound on none of them, and it reads as if it were.
      *
      *  NOT A RULE, and the one place in this file where that is a design
      *  decision rather than an omission. A length test on `items` create and
@@ -407,8 +415,8 @@ const SubmitZ = z
      *  field away (principle 5), so a page reading the latest N articles
      *  downloads N BODIES — and a cap here is the only number publish can
      *  multiply by `views[].limit` to know what a reader pays on every open.
-     *  See `articleBoundProblems`. */
-    maxLen: z.record(z.string().trim().min(1), z.number().int().positive()).optional(),
+     *  See `articleCostProblems`. */
+    maxBytes: z.record(z.string().trim().min(1), z.number().int().positive()).optional(),
     finalize: z.boolean().optional(),
     audience: z.literal("participant").optional(),
     gateOn: z

@@ -1484,30 +1484,33 @@ function viewLimitProblems(app: AuthoredApp, view: NormalizedView): string[] {
  *  caps ROWS, and rules cannot project a field away (principle 5), so the index downloads whole
  *  documents — BODIES INCLUDED. Twenty rows is a bound on nothing until something bounds the row.
  *
- *  `maxLen` is that something, and it is why this check multiplies. `limit x maxLen` is the
+ *  `maxBytes` is that something, and it is why this check multiplies. `limit x maxBytes` is the
  *  worst-case payload an anonymous reader pulls down on every single open of the index, and it is
  *  a number publish can compute from the declaration alone — the only place in the system where
  *  that cost is visible before somebody pays it.
  *
- *  A single article is capped separately because Firestore is: a document is 1 MiB, and a
- *  Japanese article runs about three bytes a character, so a cap above `MAX_FIELD_CHARS` declares
- *  a length the store cannot hold and the refusal would arrive at the writer instead of here. */
-const MAX_FIELD_CHARS = 300_000;
+ *  IN BYTES, and the first draft of this check was in characters. It was wrong in the direction
+ *  that matters: a Japanese article measures about 2.4 bytes a character, so the same declaration
+ *  that appeared to promise an 800 KB index delivered 2 MB. Every cost here is paid in bytes —
+ *  the document limit, the payload, the reader's connection — so a ceiling in characters bounds
+ *  none of them while reading exactly as though it did. */
+const MAX_FIELD_BYTES = 100_000;
 
-/** The most an index may cost one reader, in characters, on one open. Deliberately generous — it
- *  is a ceiling on the absurd, not an editorial opinion about article length. */
-const MAX_INDEX_CHARS = 1_000_000;
+/** The most an index may cost one reader, in bytes, on one open. A ceiling on the absurd rather
+ *  than an editorial opinion about article length — but a real one now that it is measured in the
+ *  unit the reader's connection is. */
+const MAX_INDEX_BYTES = 1_000_000;
 
 /** An `article` view's two bounds, and the audience that makes them enforceable.
  *
- *  THE AUDIENCE IS THE LOAD-BEARING ONE. `maxLen` is not a rule (see its declaration): publish
+ *  THE AUDIENCE IS THE LOAD-BEARING ONE. `maxBytes` is not a rule (see its declaration): publish
  *  checks it and the host refuses the value before sending it, and neither of those binds somebody
  *  writing straight to Firestore. What makes that acceptable is that the only people who may write
  *  an article are the participants a roster carries — people the owner invited by name. Let a
  *  collection with `type: "article"` be submitted to by the world and the cap becomes a comment. */
 const noLimitProblem = (view: NormalizedView, cid: string): string =>
   `${view.where} publishes '${cid}' as articles and declares no limit for it, so the index reads EVERY article — bodies included, because a rule ` +
-  `cannot hide a field — on every open, forever. Add "limit": { "${cid}": 20 }.`;
+  `cannot hide a field — on every open, forever. Add "limit": { "${cid}": 10 }.`;
 
 function articleCostProblems(app: AuthoredApp, view: NormalizedView): string[] {
   if (view.type !== "article") return [];
@@ -1536,24 +1539,25 @@ function articleCostProblems(app: AuthoredApp, view: NormalizedView): string[] {
     );
   }
   if (rows === undefined) problems.push(noLimitProblem(view, cid));
-  const cap = body === undefined ? undefined : submit?.maxLen?.[body];
+  const cap = body === undefined ? undefined : submit.maxBytes?.[body];
   if (body !== undefined && cap === undefined) {
     problems.push(
-      `${view.where}.article.body names '${body}' and public.submit.${cid}.maxLen says nothing about it, so an article has no length at all short of ` +
-        `Firestore's 1 MiB document. The index downloads bodies, so this is what stops one contributor deciding what every reader pays. Add ` +
-        `"maxLen": { "${body}": 40000 }.`,
+      `${view.where}.article.body names '${body}' and public.submit.${cid}.maxBytes says nothing about it, so an article has no length at all short ` +
+        `of Firestore's 1 MiB document. The index downloads bodies, so this is what stops one contributor deciding what every reader pays. Add ` +
+        `"maxBytes": { "${body}": 100000 }.`,
     );
   }
-  if (cap !== undefined && cap > MAX_FIELD_CHARS) {
+  if (cap !== undefined && cap > MAX_FIELD_BYTES) {
     problems.push(
-      `public.submit.${cid}.maxLen.${body} is ${cap}, above the ${MAX_FIELD_CHARS} a Firestore document can hold — one document is 1 MiB and a ` +
-        "Japanese article runs about three bytes a character, so a longer article is refused by the store and the writer finds out instead of you.",
+      `public.submit.${cid}.maxBytes.${body} is ${cap}, above the ${MAX_FIELD_BYTES} bytes one article may be. Bytes, not characters: Japanese runs ` +
+        "about 2.4 bytes a character, so this is roughly 40,000 characters of Japanese or 100,000 of English — long for one article, and a tenth of " +
+        "what the index may cost in total.",
     );
   }
-  if (rows !== undefined && cap !== undefined && rows * cap > MAX_INDEX_CHARS) {
+  if (rows !== undefined && cap !== undefined && rows * cap > MAX_INDEX_BYTES) {
     problems.push(
-      `${view.where} reads ${rows} articles of up to ${cap} characters, so one open of the index costs a reader up to ${rows * cap} — above ` +
-        `${MAX_INDEX_CHARS}, and paid on every open by everyone. Lower the limit or the cap. The index cannot read less of an article than all of ` +
+      `${view.where} reads ${rows} articles of up to ${cap} bytes, so one open of the index costs a reader up to ${rows * cap} bytes — above ` +
+        `${MAX_INDEX_BYTES}, and paid on every open by everyone. Lower the limit or the cap. The index cannot read less of an article than all of ` +
         "it: a rule cannot project a field away, so the only way to a cheap index is a second collection carrying title and summary alone.",
     );
   }
@@ -1957,7 +1961,7 @@ function refInRefProblems(schemaOf: ReadonlyMap<string, CollectionSchema>, cid: 
 
 function submitRefProblems(schemaOf: ReadonlyMap<string, CollectionSchema>, cid: string, submit: AuthoredSubmit): string[] {
   return [
-    ...maxLenRefProblems(schemaOf, cid, submit),
+    ...maxBytesRefProblems(schemaOf, cid, submit),
     ...idInRefProblems(schemaOf, cid, submit),
     ...boundRefProblems(schemaOf, cid, "fromField", submit.window?.fromField),
     ...boundRefProblems(schemaOf, cid, "untilField", submit.window?.untilField),
@@ -1974,19 +1978,19 @@ function submitRefProblems(schemaOf: ReadonlyMap<string, CollectionSchema>, cid:
  *
  *  Judged only where there IS a schema, so a collection the host could not read is named once by
  *  its own error rather than a second time here. */
-function maxLenRefProblems(schemaOf: ReadonlyMap<string, CollectionSchema>, cid: string, submit: AuthoredSubmit): string[] {
+function maxBytesRefProblems(schemaOf: ReadonlyMap<string, CollectionSchema>, cid: string, submit: AuthoredSubmit): string[] {
   const schema = schemaOf.get(cid);
   if (schema === undefined) return [];
   const fields = schema.fields ?? {};
   const known = Object.keys(fields).sort().join(", ") || "(none)";
-  return Object.keys(submit.maxLen ?? {}).flatMap((field) => {
-    const where = `public.submit.${cid}.maxLen.${field}`;
+  return Object.keys(submit.maxBytes ?? {}).flatMap((field) => {
+    const where = `public.submit.${cid}.maxBytes.${field}`;
     if (!declaredField(fields, field)) {
       return [`${where} caps a field the schema of '${cid}' does not declare, so it bounds nothing and nothing says so. Fields on '${cid}': ${known}.`];
     }
     const spec = fields[field];
     if (spec === undefined || STRING_VALUED.has(spec.type)) return [];
-    return [`${where} caps a ${spec.type} field. A cap is a length, and only a text field has one — use a string, text or markdown field.`];
+    return [`${where} caps a ${spec.type} field. A cap is a byte length, and only a text field has one — use a string, text or markdown field.`];
   });
 }
 

@@ -1671,7 +1671,7 @@ interface ArticleMap {
   summary?: string;
 }
 
-const magazineDraft = (article: ArticleMap, maxLen: Record<string, number>): Record<string, unknown> => ({
+const magazineDraft = (article: ArticleMap, maxBytes: Record<string, number>): Record<string, unknown> => ({
   collections: { articles: { statusField: "status", transitions: { initial: ["published"] } } },
   public: {
     enabled: true,
@@ -1684,7 +1684,7 @@ const magazineDraft = (article: ArticleMap, maxLen: Record<string, number>): Rec
         audience: "participant",
         createFields: ["slug", "title", "lede", "prose", "status"],
         initialStatus: "published",
-        maxLen,
+        maxBytes,
       },
     },
   },
@@ -1693,8 +1693,8 @@ const magazineDraft = (article: ArticleMap, maxLen: Record<string, number>): Rec
 
 /** The magazine's problems, with the field mapping — and the length caps — the caller wants to
  *  try. Sound by default, so a test names ONLY the thing it is provoking. */
-const magazine = (article: Partial<ArticleMap> = {}, maxLen: Record<string, number> = { prose: 40_000 }) =>
-  schemaRefProblems(app(magazineDraft({ title: "title", body: "prose", summary: "lede", ...article }, maxLen)), magazineSchemas as never);
+const magazine = (article: Partial<ArticleMap> = {}, maxBytes: Record<string, number> = { prose: 60_000 }) =>
+  schemaRefProblems(app(magazineDraft({ title: "title", body: "prose", summary: "lede", ...article }, maxBytes)), magazineSchemas as never);
 
 // --- an article view's field mapping, against the schema that holds the articles ---------------
 //
@@ -1747,15 +1747,17 @@ const magazinePage = (edit: (draft: { submit: Record<string, unknown>; view: Rec
     stampField: "publishedAt",
     createFields: ["slug", "title", "prose", "status", "publishedAt"],
     initialStatus: "published",
-    maxLen: { prose: 40_000 },
+    maxBytes: { prose: 60_000 },
   };
   const view: Record<string, unknown> = {
     id: "public",
     audience: "public",
     type: "article",
     collections: ["articles"],
+    // 15 x 60,000 = 900,000 bytes, just inside the ceiling — and a realistic pair: a Japanese
+    // magazine article of ordinary length measures about 60 KB.
     article: { title: "title", body: "prose" },
-    limit: { articles: 20 },
+    limit: { articles: 15 },
   };
   edit({ submit, view });
   return publishProblems(
@@ -1788,34 +1790,34 @@ test("refuses an article body with no length at all", () => {
   // article rather than by the app — and paid by every reader of the index.
   refuses(
     magazinePage(({ submit }) => {
-      delete submit.maxLen;
+      delete submit.maxBytes;
     }),
     "no length at all",
   );
 });
 
-test("refuses a cap no Firestore document could hold", () => {
+test("refuses a cap above what one article may be", () => {
   refuses(
     magazinePage(({ submit }) => {
-      submit.maxLen = { prose: 400_000 };
+      submit.maxBytes = { prose: 200_000 };
     }),
-    "a Firestore document can hold",
+    "bytes one article may be",
   );
 });
 
 test("refuses an index whose rows TIMES its cap is what a reader pays", () => {
-  // Both halves legal on their own — 50 rows is unremarkable and 40,000 characters is an article.
-  // The product is 2,000,000 characters down the wire on every open, and only publish sees it.
+  // Both halves legal on their own — 20 rows is unremarkable and 60 KB is one article. The
+  // product is 1.2 MB down the wire on every open, and only publish sees it.
   refuses(
     magazinePage(({ view }) => {
-      view.limit = { articles: 50 };
+      view.limit = { articles: 20 };
     }),
-    "costs a reader up to 2000000",
+    "costs a reader up to 1200000 bytes",
   );
 });
 
 test("refuses articles the world may submit, because nothing would bound them", () => {
-  // THE LOAD-BEARING ONE. `maxLen` is not a rule: publish checks it and the host refuses the value
+  // THE LOAD-BEARING ONE. `maxBytes` is not a rule: publish checks it and the host refuses the value
   // before sending. Neither binds a stranger writing straight to Firestore, and what makes that
   // acceptable is that an article's writers are people the roster names.
   refuses(
@@ -1852,7 +1854,7 @@ test("refuses a length cap on a field the schema does not declare, which bounds 
 });
 
 test("refuses a length cap on a field that holds no text", () => {
-  refuses(magazine({}, { readCount: 100 }), "A cap is a length");
+  refuses(magazine({}, { readCount: 100 }), "A cap is a byte length");
 });
 
 /** A magazine's SUBMIT declaration, on its own — the collection half of `magazineDraft` is not
