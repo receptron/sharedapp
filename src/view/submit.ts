@@ -40,8 +40,9 @@ export interface Submitter {
 
 /** One collection's `public.submit` declaration, as `config/public` publishes it.
  *
- *  Every key here is one the deployed rules read. Widening it is a change to what a host must
- *  honour, not a convenience. */
+ *  Every key here but one is read by the deployed rules; `maxBytes` is the exception and says so
+ *  at its own declaration. Widening this is a change to what a host must honour, not a
+ *  convenience. */
 export interface SubmitSpec {
   auth?: string | undefined;
   createFields: string[];
@@ -66,6 +67,23 @@ export interface SubmitSpec {
    *  fill it in writes a record the rules refuse, with nothing on the page to say which field it
    *  was. `recordOf` is the one place it is filled in, for that reason. */
   stampField?: string | undefined;
+  /** The longest a field's value may be, in BYTES of UTF-8: `{ <field>: <bytes> }`.
+   *
+   *  THE ONE KEY HERE THAT IS THE HOST'S OBLIGATION RATHER THAN THE RULES'. Everything above is
+   *  read by `firestore.rules` and refused there if a host gets it wrong; this one is refused by
+   *  nothing. Publish checks the declaration and the host must check the value, so a host that
+   *  drops it does not fail — it accepts an article of any length and pays for it on every open of
+   *  the index (see `articleCostProblems`).
+   *
+   *  AND BEING ON THIS TYPE DOES NOT PROTECT IT. An optional key is one a host copying a closed
+   *  list of fields simply omits, and that compiles — so the `writableFields` argument (a host
+   *  that has not been updated should fail to COMPILE, not to submit) does not reach this far.
+   *  Making it required would only move the omission into a `{}` nobody consults.
+   *
+   *  What protects it is that the CHECK ships here too, as `overLongFields` below. A host calls
+   *  one function rather than re-deriving the rule from the declaration, so there is no closed
+   *  list to forget and no second reading of what a cap means. */
+  maxBytes?: Record<string, number> | undefined;
 }
 
 /** One collection's published form: what a page may draw, and the field publish pinned meaning to. */
@@ -102,6 +120,41 @@ export const writableFields = (drawn: DrawnForm, submit: SubmitSpec): WritableFi
     const spec = drawn.fields[name];
     if (spec === undefined) return [];
     return [{ name, label: spec.label ?? name, required: spec.required === true }];
+  });
+};
+
+/** A value that is longer than its declared cap, and by how much. */
+export interface OverLongField {
+  name: string;
+  bytes: number;
+  cap: number;
+}
+
+/** The values a host is about to write that exceed `maxBytes`, so it can refuse them BEFORE the
+ *  write and name the field and the cap.
+ *
+ *  IT SHIPS HERE BECAUSE NOTHING ELSE ENFORCES IT. Every other decision in this file is checked
+ *  again by the deployed rules, so a host that gets one wrong collects a permission error; this
+ *  one is checked by nobody, and a host that skips it simply accepts the write. A rule is not an
+ *  option — a length test on `items` create and update is paid by every app in the deployment
+ *  (principle 10), against a bound whose writers the owner invited by name — so the enforcement is
+ *  the declaration, the publish gate, and this function, and there is no fourth place.
+ *
+ *  BYTES OF UTF-8, measured, not `String.length`: Japanese runs about 2.4 bytes a character, so a
+ *  host counting characters would let through nearly two and a half times the declared cap.
+ *
+ *  `Object.hasOwn` before the lookup for `limitFor`'s reason: a field name has no grammar, so
+ *  `toString` is a legal one, and a plain index into a map that does not mention it hands back a
+ *  FUNCTION — which is not a cap and must not be compared to one. */
+export const overLongFields = (values: Record<string, string>, submit: SubmitSpec): OverLongField[] => {
+  const caps = submit.maxBytes;
+  if (caps === undefined) return [];
+  return Object.entries(values).flatMap(([name, value]) => {
+    if (!Object.hasOwn(caps, name)) return [];
+    const cap = caps[name];
+    if (typeof cap !== "number") return [];
+    const bytes = new TextEncoder().encode(value).length;
+    return bytes > cap ? [{ name, bytes, cap }] : [];
   });
 };
 

@@ -1671,7 +1671,7 @@ interface ArticleMap {
   summary?: string;
 }
 
-const magazineDraft = (article: ArticleMap): Record<string, unknown> => ({
+const magazineDraft = (article: ArticleMap, maxBytes: Record<string, number>): Record<string, unknown> => ({
   collections: { articles: { statusField: "status", transitions: { initial: ["published"] } } },
   public: {
     enabled: true,
@@ -1684,16 +1684,17 @@ const magazineDraft = (article: ArticleMap): Record<string, unknown> => ({
         audience: "participant",
         createFields: ["slug", "title", "lede", "prose", "status"],
         initialStatus: "published",
+        maxBytes,
       },
     },
   },
   views: [{ id: "public", audience: "public", type: "article", collections: ["articles"], article }],
 });
 
-/** The magazine's problems, with the field mapping the caller wants to try. Sound by default, so a
- *  test names ONLY the thing it is provoking. */
-const magazine = (article: Partial<ArticleMap> = {}) =>
-  schemaRefProblems(app(magazineDraft({ title: "title", body: "prose", summary: "lede", ...article })), magazineSchemas as never);
+/** The magazine's problems, with the field mapping — and the length caps — the caller wants to
+ *  try. Sound by default, so a test names ONLY the thing it is provoking. */
+const magazine = (article: Partial<ArticleMap> = {}, maxBytes: Record<string, number> = { prose: 60_000 }) =>
+  schemaRefProblems(app(magazineDraft({ title: "title", body: "prose", summary: "lede", ...article }, maxBytes)), magazineSchemas as never);
 
 // --- an article view's field mapping, against the schema that holds the articles ---------------
 //
@@ -1721,6 +1722,247 @@ test("refuses a title that is not text — a number is read as a string that is 
 test("accepts a markdown body, which is what an article body ought to be", () => {
   // The positive half. A check that refused every type would satisfy all four tests above.
   assert.deepEqual(magazine(), []);
+});
+
+// --- what an index costs, and what bounds it ---------------------------------------------------
+//
+// Codex on the architecture as a whole: content size and index cost are not bounded. Two holes,
+// and they are the same hole seen from either end. `limit` caps ROWS and a rule cannot project a
+// field away, so an index of twenty articles downloads twenty BODIES — and nothing capped a body.
+// The product of the two is what a reader pays on every open, and publish is the only place it can
+// be computed before somebody pays it.
+
+/** A whole magazine, through the real gate — `articleCostProblems` runs in `viewProblems`, which
+ *  neither `magazine()` (schema refs only) nor `articles()` (no views at all) reaches.
+ *
+ *  Sound by default, so each test names only what it is provoking. */
+const magazinePage = (edit: (draft: { submit: Record<string, unknown>; view: Record<string, unknown> }) => void = () => {}) => {
+  const submit: Record<string, unknown> = {
+    auth: "verifiedEmail",
+    idFrom: "slug",
+    idField: "slug",
+    audience: "participant",
+    // The cap is ordered by the one field the rules put on every record themselves, and a magazine
+    // wants that anyway: an article's date is its publication time, not a value the writer types.
+    stampField: "publishedAt",
+    createFields: ["slug", "title", "prose", "status", "publishedAt"],
+    initialStatus: "published",
+    // EVERY drawn text field, not only the body — an uncapped `title` is where the long text goes
+    // the moment the body is capped. 15 x (60,000 + 200) = 903,000, just inside the ceiling.
+    maxBytes: { prose: 60_000, title: 200 },
+  };
+  const view: Record<string, unknown> = {
+    id: "public",
+    audience: "public",
+    type: "article",
+    collections: ["articles"],
+    // 15 x 60,000 = 900,000 bytes, just inside the ceiling — and a realistic pair: a Japanese
+    // magazine article of ordinary length measures about 60 KB.
+    article: { title: "title", body: "prose" },
+    limit: { articles: 15 },
+  };
+  edit({ submit, view });
+  return publishProblems(
+    app({
+      collections: { articles: { submitOnly: true, statusField: "status", transitions: { initial: ["published"] } } },
+      public: { enabled: true, read: ["articles"], submit: { articles: submit } },
+      views: [view],
+    }),
+    [{ cid: "articles", primaryKey: "id" }],
+    OWNER,
+  );
+};
+
+test("a bounded magazine publishes", () => {
+  // The positive half. A gate that refused every article view would satisfy all five below.
+  assert.deepEqual(magazinePage(), []);
+});
+
+test("refuses an article index with no limit, which reads every article ever written", () => {
+  refuses(
+    magazinePage(({ view }) => {
+      delete view.limit;
+    }),
+    "on every open, forever",
+  );
+});
+
+test("refuses an article body with no length at all", () => {
+  // Without it the only ceiling is Firestore's 1 MiB document, chosen by whoever writes the
+  // article rather than by the app — and paid by every reader of the index.
+  refuses(
+    magazinePage(({ submit }) => {
+      delete submit.maxBytes;
+    }),
+    "no length at all",
+  );
+});
+
+test("refuses a drawn title with no cap of its own, even when the BODY is capped", () => {
+  // The hole capping the body alone leaves: the long text moves to `title`, publish reports a
+  // cheap index, and the row is still whatever Firestore will hold. Deleting the whole map (above)
+  // would not pin this — that test passes on a check that only ever looks at the body.
+  refuses(
+    magazinePage(({ submit }) => {
+      submit.maxBytes = { prose: 60_000 };
+    }),
+    "draws 'title' and public.submit.articles.maxBytes says nothing about it",
+  );
+});
+
+test("refuses a drawn SUMMARY with no cap, which is the same hole one field over", () => {
+  refuses(
+    magazinePage(({ submit, view }) => {
+      submit.maxBytes = { prose: 60_000, title: 200 };
+      view.article = { title: "title", body: "prose", summary: "lede" };
+    }),
+    "draws 'lede'",
+  );
+});
+
+test("names the COLLECTION when it is called after an Object prototype key and has no submit block", () => {
+  // Grok on #53, second pass. `app.public?.submit?.["constructor"]` hands back Object's own
+  // constructor, which is not undefined — so the "no submit block" refusal was skipped and the
+  // checks below judged a FUNCTION. It still refused, with the wrong reason.
+  const problems = publishProblems(
+    app({
+      collections: { constructor: { statusField: "status", transitions: { initial: ["published"] } } },
+      public: { enabled: true, read: ["constructor"] },
+      views: [
+        {
+          id: "public",
+          audience: "public",
+          type: "article",
+          collections: ["constructor"],
+          article: { title: "title", body: "prose" },
+          limit: { constructor: 10 },
+        },
+      ],
+    }),
+    [{ cid: "constructor", primaryKey: "id" }],
+    OWNER,
+  );
+  refuses(problems, "cannot be indexed at all");
+});
+
+test("refuses a cap above what one field may be, and accepts the ceiling itself", () => {
+  // BOTH SIDES, the way `viewLimitProblems` pins its own. A `>=` slip would satisfy the refusal
+  // on its own, and the accepting half is what catches it.
+  const at = (bytes: number) =>
+    magazinePage(({ submit, view }) => {
+      submit.maxBytes = { prose: bytes, title: 200 };
+      view.limit = { articles: 1 };
+    });
+  refuses(at(100_001), "bytes one field may be");
+  assert.deepEqual(at(100_000), []);
+});
+
+test("refuses an index one byte over its ceiling, and accepts the ceiling itself", () => {
+  const at = (prose: number) =>
+    magazinePage(({ submit, view }) => {
+      submit.maxBytes = { prose, title: 100 };
+      view.limit = { articles: 10 };
+    });
+  // 10 x (99,900 + 100) is exactly 1,000,000.
+  assert.deepEqual(at(99_900), []);
+  refuses(at(99_901), "above 1000000");
+});
+
+test("counts a drawn field named after an Object prototype key, rather than reaching the prototype", () => {
+  // Grok on #53. An article field name has no grammar, so `toString` is a legal body field — and
+  // a plain index into a map that does not mention it hands back a FUNCTION. Then the cap is not
+  // undefined, `rows * cap` is NaN, and every comparison against NaN is false: the missing-cap
+  // and over-budget refusals both go quiet and an unbounded index publishes.
+  refuses(
+    magazinePage(({ view }) => {
+      view.article = { title: "title", body: "toString" };
+    }),
+    "maxBytes says nothing about it",
+  );
+});
+
+test("refuses an index whose COLLECTION is named after an Object prototype key", () => {
+  // The same hole on the other map, and it needs a collection actually named one: `constructor`
+  // passes `isValidCollectionName`, and `view.limit?.["constructor"]` on a map that does not
+  // mention it hands back Object's own constructor. A test using 'articles' would pass either way.
+  const problems = publishProblems(
+    app({
+      collections: { constructor: { submitOnly: true, statusField: "status", transitions: { initial: ["published"] } } },
+      public: {
+        enabled: true,
+        read: ["constructor"],
+        submit: {
+          constructor: {
+            auth: "verifiedEmail",
+            idFrom: "slug",
+            idField: "slug",
+            audience: "participant",
+            stampField: "publishedAt",
+            createFields: ["slug", "title", "prose", "status", "publishedAt"],
+            initialStatus: "published",
+            maxBytes: { prose: 60_000, title: 200 },
+          },
+        },
+      },
+      views: [{ id: "public", audience: "public", type: "article", collections: ["constructor"], article: { title: "title", body: "prose" }, limit: {} }],
+    }),
+    [{ cid: "constructor", primaryKey: "id" }],
+    OWNER,
+  );
+  refuses(problems, "on every open, forever");
+});
+
+test("refuses an index whose rows TIMES its cap is what a reader pays", () => {
+  // Both halves legal on their own — 20 rows is unremarkable and 60 KB is one article. The
+  // product is 1.2 MB down the wire on every open, and only publish sees it. AT LEAST that: the
+  // index downloads whole records, so the slug, the status and the stamp ride along uncounted.
+  refuses(
+    magazinePage(({ view }) => {
+      view.limit = { articles: 20 };
+    }),
+    "costs a reader at least 1204000 bytes",
+  );
+});
+
+test("refuses articles the world may submit, because nothing would bound them", () => {
+  // THE LOAD-BEARING ONE. `maxBytes` is not a rule: publish checks it and the host refuses the value
+  // before sending. Neither binds a stranger writing straight to Firestore, and what makes that
+  // acceptable is that an article's writers are people the roster names.
+  refuses(
+    magazinePage(({ submit }) => {
+      delete submit.audience;
+    }),
+    '"audience": "participant"',
+  );
+});
+
+test("names the collection when a magazine has no submit block, rather than the keys it is missing", () => {
+  // A DEAD END that was already there, and this is what makes it legible. The index needs a
+  // `limit`; a `limit` needs a `stampField` to order by; `stampField` lives in `public.submit`.
+  // So an article collection nobody may submit to is refused whichever way it is written, and
+  // neither of the two lines it used to collect said the collection was the problem.
+  const problems = publishProblems(
+    app({
+      collections: { articles: { statusField: "status", transitions: { initial: ["published"] } } },
+      public: { enabled: true, read: ["articles"] },
+      views: [{ id: "public", audience: "public", type: "article", collections: ["articles"], article: { title: "title", body: "prose" } }],
+    }),
+    [{ cid: "articles", primaryKey: "id" }],
+    OWNER,
+  );
+  refuses(problems, "cannot be indexed at all");
+});
+
+// --- a cap on a field that is not there, or is not text ----------------------------------------
+
+test("refuses a length cap on a field the schema does not declare, which bounds nothing", () => {
+  // The quiet one: the host looks the value up by the name it was SENT, finds no cap, and lets it
+  // through. The app reads as bounded and publish agreed.
+  refuses(magazine({}, { headline: 100 }), "bounds nothing");
+});
+
+test("refuses a length cap on a field that holds no text", () => {
+  refuses(magazine({}, { readCount: 100 }), "A cap is a byte length");
 });
 
 /** A magazine's SUBMIT declaration, on its own — the collection half of `magazineDraft` is not

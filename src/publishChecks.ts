@@ -267,7 +267,26 @@ function templateMailProblems(cid: string, collection: AuthoredCollectionConfig,
 /** INVARIANTS 6 and 7 — the window is a real interval, and `keyFields` fits
  *  the unrolled check in the rules. */
 function submitShapeProblems(app: AuthoredApp): string[] {
-  return Object.entries(app.public?.submit ?? {}).flatMap(([cid, submit]) => [...windowProblems(cid, submit), ...keyFieldCountProblems(cid, submit)]);
+  return Object.entries(app.public?.submit ?? {}).flatMap(([cid, submit]) => [
+    ...windowProblems(cid, submit),
+    ...keyFieldCountProblems(cid, submit),
+    ...capCeilingProblems(cid, submit),
+  ]);
+}
+
+/** EVERY declared cap against the per-field ceiling, not merely the one an article view draws its
+ *  body from. A cap above it is a number that cannot be honoured — the host would accept a value
+ *  the store then refuses — and it is just as wrong on a field no page reads. */
+function capCeilingProblems(cid: string, submit: AuthoredSubmit): string[] {
+  return Object.entries(submit.maxBytes ?? {}).flatMap(([field, cap]) =>
+    cap > MAX_FIELD_BYTES
+      ? [
+          `public.submit.${cid}.maxBytes.${field} is ${cap}, above the ${MAX_FIELD_BYTES} bytes one field may be. Bytes, not characters: Japanese ` +
+            "runs about 2.4 bytes a character, so this is roughly 40,000 characters of Japanese or 100,000 of English — long for one article, and a " +
+            "tenth of what a whole index may cost.",
+        ]
+      : [],
+  );
 }
 
 function windowProblems(cid: string, submit: AuthoredSubmit): string[] {
@@ -1476,6 +1495,129 @@ function viewLimitProblems(app: AuthoredApp, view: NormalizedView): string[] {
   return problems;
 }
 
+/** The longest one field may be, and the most an index may cost — the two halves of the same
+ *  number.
+ *
+ *  A COLLECTION THAT GROWS FOREVER is what `limit` was written for, and an articles collection is
+ *  the purest example there is: it only ever gets longer, and every reader reads it. But `limit`
+ *  caps ROWS, and rules cannot project a field away (principle 5), so the index downloads whole
+ *  documents — BODIES INCLUDED. Twenty rows is a bound on nothing until something bounds the row.
+ *
+ *  `maxBytes` is that something, and it is why this check multiplies. `limit x maxBytes` is the
+ *  worst-case payload an anonymous reader pulls down on every single open of the index, and it is
+ *  a number publish can compute from the declaration alone — the only place in the system where
+ *  that cost is visible before somebody pays it.
+ *
+ *  IN BYTES, and the first draft of this check was in characters. It was wrong in the direction
+ *  that matters: a Japanese article measures about 2.4 bytes a character, so the same declaration
+ *  that appeared to promise an 800 KB index delivered 2 MB. Every cost here is paid in bytes —
+ *  the document limit, the payload, the reader's connection — so a ceiling in characters bounds
+ *  none of them while reading exactly as though it did. */
+const MAX_FIELD_BYTES = 100_000;
+
+/** The most an index may cost one reader, in bytes, on one open. A ceiling on the absurd rather
+ *  than an editorial opinion about article length — but a real one now that it is measured in the
+ *  unit the reader's connection is. */
+const MAX_INDEX_BYTES = 1_000_000;
+
+/** A map entry, read the way `limitFor` reads one and for the reason written there: `constructor`,
+ *  `toString` and `hasOwnProperty` are all legal collection names, and an article field name has no
+ *  grammar at all. A plain index into a map that does not mention the key reaches Object.prototype
+ *  and hands back a FUNCTION — so `rows === undefined` is false, `rows * cap` is NaN, and every
+ *  comparison against NaN is false. The check would not fire, and an unbounded index would publish.
+ *
+ *  The non-number guard is the second half of the same thought: nothing but a number is a cap. */
+const capIn = (map: Record<string, number> | undefined, key: string): number | undefined => {
+  if (map === undefined || !Object.hasOwn(map, key)) return undefined;
+  const held = map[key];
+  return typeof held === "number" ? held : undefined;
+};
+
+/** An `article` view's bounds, and the audience that makes them enforceable.
+ *
+ *  THE AUDIENCE IS THE LOAD-BEARING ONE. `maxBytes` is not a rule (see its declaration): publish
+ *  checks it and the host refuses the value before sending it, and neither of those binds somebody
+ *  writing straight to Firestore. What makes that acceptable is that the only people who may write
+ *  an article are the participants a roster carries — people the owner invited by name. Let a
+ *  collection with `type: "article"` be submitted to by the world and the cap becomes a comment.
+ *
+ *  EVERY TEXT FIELD THE PAGE DRAWS is capped, not only the body. Capping the body alone left the
+ *  long text one rename away: a contributor — or a `useSharedApp` agent that will not stop — puts
+ *  it in `title` or `summary`, publish reports a cheap index, and the row is still whatever
+ *  Firestore will hold. */
+const noLimitProblem = (view: NormalizedView, cid: string): string =>
+  `${view.where} publishes '${cid}' as articles and declares no limit for it, so the index reads EVERY article — bodies included, because a rule ` +
+  `cannot hide a field — on every open, forever. Add "limit": { "${cid}": 10 }.`;
+
+/** The text fields an article view draws, deduplicated — an author may legitimately point two of
+ *  the three at one field, and a cap named twice is not two costs. */
+function drawnTextFields(view: NormalizedView): string[] {
+  const { article } = view;
+  if (article === undefined) return [];
+  return [...new Set([article.title, article.body, article.summary].filter((field): field is string => field !== undefined))];
+}
+
+/** One collection's submit declaration, read the way `capIn` reads a cap and for the same reason:
+ *  `constructor` is a legal collection name, and a plain index into a map that does not mention it
+ *  hands back Object's own constructor. That is not undefined, so the "no submit block" refusal is
+ *  skipped and the checks below judge a FUNCTION — refusing, but naming the wrong thing.
+ *
+ *  The older `app.public?.submit?.[cid]` call sites in this file predate the lookup and are not
+ *  touched here; each one refuses on a different key and needs its own reading. */
+function submitFor(app: AuthoredApp, cid: string): AuthoredSubmit | undefined {
+  const declared = app.public?.submit;
+  if (declared === undefined || !Object.hasOwn(declared, cid)) return undefined;
+  return declared[cid];
+}
+
+function articleCostProblems(app: AuthoredApp, view: NormalizedView): string[] {
+  if (view.type !== "article") return [];
+  const cid = view.collections[0];
+  if (cid === undefined) return [];
+  const submit = submitFor(app, cid);
+  const rows = capIn(view.limit, cid);
+  const problems: string[] = [];
+  // A MAGAZINE NOBODY MAY SUBMIT TO is a dead end rather than a shape to allow through, and the
+  // dead end is already there: the index needs a `limit`, a `limit` needs a `stampField` to order
+  // by, and `stampField` lives in `public.submit[cid]`. Without the block, publish refuses the
+  // limit and this check refuses its absence, and neither line says the collection is the problem.
+  if (submit === undefined) {
+    return [
+      `${view.where} publishes '${cid}' as articles and there is no public.submit.${cid} to publish them through. Everything the index needs is ` +
+        "declared there — the stampField it is ordered by, the length an article may be, and the audience allowed to write one — so an article " +
+        "collection nobody may submit to cannot be indexed at all. Declare the submit block, or draw this page from HTML of your own.",
+    ];
+  }
+  if (submit.audience !== "participant") {
+    problems.push(
+      `${view.where} publishes '${cid}' as articles, and public.submit.${cid} does not say "audience": "participant". An article's length is bounded ` +
+        "by the declaration and by the host, never by the rules, so the bound holds only over people the roster names. Add the audience, or publish " +
+        "this collection through a page of your own instead.",
+    );
+  }
+  if (rows === undefined) problems.push(noLimitProblem(view, cid));
+  const drawn = drawnTextFields(view).map((field) => ({ field, cap: capIn(submit.maxBytes, field) }));
+  for (const { field, cap } of drawn) {
+    if (cap !== undefined) continue;
+    problems.push(
+      `${view.where} draws '${field}' and public.submit.${cid}.maxBytes says nothing about it, so that field has no length at all short of ` +
+        `Firestore's 1 MiB document. The index downloads whole records, so an uncapped text field is where the long text goes the moment the body ` +
+        `is capped. Add "maxBytes": { "${field}": 100000 }.`,
+    );
+  }
+  const declared = drawn.map(({ cap }) => cap);
+  const total = declared.every((cap) => cap !== undefined) ? declared.reduce<number>((sum, cap) => sum + cap, 0) : undefined;
+  if (rows !== undefined && total !== undefined && rows * total > MAX_INDEX_BYTES) {
+    problems.push(
+      `${view.where} reads ${rows} articles whose drawn text may total ${total} bytes each, so one open of the index costs a reader at least ` +
+        `${rows * total} bytes — above ${MAX_INDEX_BYTES}, and paid on every open by everyone. AT LEAST, not exactly: a rule cannot project a field ` +
+        "away, so the index downloads the whole record — the slug, the status, the stamp and every other field ride along uncounted. Lower the " +
+        "limit or the caps; the only way to a cheap index is a second collection carrying title and summary alone.",
+    );
+  }
+  return problems;
+}
+
 function viewProblems(app: AuthoredApp, collections: readonly PublishableCollection[]): string[] {
   const normalized = normalizeViews(app);
   if (!normalized.ok) return normalized.problems;
@@ -1485,6 +1627,7 @@ function viewProblems(app: AuthoredApp, collections: readonly PublishableCollect
     ...view.collections.flatMap((cid) => viewCollectionProblems(app, view, cid, known)),
     ...viewLiveProblems(app, view),
     ...viewLimitProblems(app, view),
+    ...articleCostProblems(app, view),
   ]);
 }
 
@@ -1872,10 +2015,37 @@ function refInRefProblems(schemaOf: ReadonlyMap<string, CollectionSchema>, cid: 
 
 function submitRefProblems(schemaOf: ReadonlyMap<string, CollectionSchema>, cid: string, submit: AuthoredSubmit): string[] {
   return [
+    ...maxBytesRefProblems(schemaOf, cid, submit),
     ...idInRefProblems(schemaOf, cid, submit),
     ...boundRefProblems(schemaOf, cid, "fromField", submit.window?.fromField),
     ...boundRefProblems(schemaOf, cid, "untilField", submit.window?.untilField),
   ];
+}
+
+/** A length cap on a field that is not there, or is not text.
+ *
+ *  Both are silent, and silent in the direction that matters: a cap keyed by a misspelt field name
+ *  bounds NOTHING — the host looks the value up by the name it was sent, finds no cap, and lets it
+ *  through. So the app reads as bounded, publish agreed, and the first over-long article is the
+ *  first anyone hears of it. A cap on a `number` or a `table` is the same failure with a clearer
+ *  cause: the host measures a string's length and that field never holds one.
+ *
+ *  Judged only where there IS a schema, so a collection the host could not read is named once by
+ *  its own error rather than a second time here. */
+function maxBytesRefProblems(schemaOf: ReadonlyMap<string, CollectionSchema>, cid: string, submit: AuthoredSubmit): string[] {
+  const schema = schemaOf.get(cid);
+  if (schema === undefined) return [];
+  const fields = schema.fields ?? {};
+  const known = Object.keys(fields).sort().join(", ") || "(none)";
+  return Object.keys(submit.maxBytes ?? {}).flatMap((field) => {
+    const where = `public.submit.${cid}.maxBytes.${field}`;
+    if (!declaredField(fields, field)) {
+      return [`${where} caps a field the schema of '${cid}' does not declare, so it bounds nothing and nothing says so. Fields on '${cid}': ${known}.`];
+    }
+    const spec = fields[field];
+    if (spec === undefined || STRING_VALUED.has(spec.type)) return [];
+    return [`${where} caps a ${spec.type} field. A cap is a byte length, and only a text field has one — use a string, text or markdown field.`];
+  });
 }
 
 function idInRefProblems(schemaOf: ReadonlyMap<string, CollectionSchema>, cid: string, submit: AuthoredSubmit): string[] {
