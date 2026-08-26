@@ -1924,6 +1924,35 @@ test("refuses an index whose rows TIMES its cap is what a reader pays", () => {
   );
 });
 
+test("accepts a magazine whose window has CLOSED, where the roster's writers are the only writers", () => {
+  // Found by running the gate against a real blog. `inWindow` is reached only through
+  // `publicCreate`; the writer branch never consults it, so a window shut in the past refuses the
+  // public and leaves the roster writing. That is the same guarantee `audience: "participant"`
+  // gives, and refusing it cost that blog its own desk: participant forces `submitOnly`, which
+  // closes the writer branch, so the owner had to hold `participant` on their own collection and
+  // lose `writerDelete` over the articles they publish.
+  assert.deepEqual(
+    magazinePage(({ submit }) => {
+      delete submit.audience;
+      submit.window = { until: "2000-01-01T00:00:00Z" };
+    }),
+    [],
+  );
+});
+
+test("refuses a window that has NOT closed yet, where a stranger genuinely can write", () => {
+  // The other side of the clock, and the reason using one here is sound rather than flaky: the
+  // question is about the instant of publishing, and right now this app accepts an article from
+  // anybody with an account.
+  refuses(
+    magazinePage(({ submit }) => {
+      delete submit.audience;
+      submit.window = { until: "2999-01-01T00:00:00Z" };
+    }),
+    "anybody with an account can create one",
+  );
+});
+
 test("refuses articles the world may submit, because nothing would bound them", () => {
   // THE LOAD-BEARING ONE. `maxBytes` is not a rule: publish checks it and the host refuses the value
   // before sending. Neither binds a stranger writing straight to Firestore, and what makes that
@@ -1932,7 +1961,7 @@ test("refuses articles the world may submit, because nothing would bound them", 
     magazinePage(({ submit }) => {
       delete submit.audience;
     }),
-    '"audience": "participant"',
+    "anybody with an account can create one",
   );
 });
 
