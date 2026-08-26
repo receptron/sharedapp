@@ -1716,3 +1716,75 @@ test("accepts a markdown body, which is what an article body ought to be", () =>
   // The positive half. A check that refused every type would satisfy all four tests above.
   assert.deepEqual(magazine(), []);
 });
+
+/** A magazine's SUBMIT declaration, on its own — the collection half of `magazineDraft` is not
+ *  what these vary, and `publishProblems` is the gate that reads them. */
+const articles = (edit: (submit: Record<string, unknown>) => void = () => {}) => {
+  const submit: Record<string, unknown> = {
+    auth: "verifiedEmail",
+    idFrom: "slug",
+    idField: "slug",
+    emailField: "authorEmail",
+    stampField: "publishedAt",
+    createFields: ["slug", "title", "prose", "authorEmail", "uid", "publishedAt", "status"],
+    initialStatus: "published",
+  };
+  edit(submit);
+  return publishProblems(
+    app({
+      // `submitOnly` because the declaration binds each record to its submitter (`emailField`), and
+      // this repository already refuses that pair without it — a record created any other way would
+      // carry that meaning without having earned it. Worth knowing for a magazine: an app that
+      // stamps articles with their author's address is one the DESK cannot enter an article into.
+      collections: { articles: { submitOnly: true, statusField: "status", transitions: { initial: ["published"] } } },
+      public: { enabled: true, read: ["articles"], submit: { articles: submit } },
+    }),
+    [{ cid: "articles", primaryKey: "id" }],
+    OWNER,
+  );
+};
+
+// --- a slug taken from a field the HOST fills in -----------------------------------------------
+//
+// Codex found this on #51. Each one publishes cleanly and then refuses every submission, in a way
+// that reads like a rules problem rather than a declaration one.
+
+test("refuses a slug field that is also the email field", () => {
+  // An address always contains '@', which the slug grammar refuses — so the create fails on a
+  // value the visitor never typed and cannot correct.
+  refuses(
+    articles((draft) => {
+      draft.idField = "authorEmail";
+      draft.emailField = "authorEmail";
+    }),
+    "which a URL name may not",
+  );
+});
+
+test("refuses a slug field that is also the stamp field", () => {
+  // Not a string at all: the rules pin it to the server's clock, so no id can be built from it.
+  refuses(
+    articles((draft) => {
+      draft.idField = "publishedAt";
+      draft.stampField = "publishedAt";
+    }),
+    "timestamp rather than a string",
+  );
+});
+
+test("refuses a slug field that is also the uid field", () => {
+  refuses(
+    articles((draft) => {
+      draft.idField = "uid";
+      draft.uidField = "uid";
+    }),
+    'idFrom "auth.uid" is for',
+  );
+});
+
+test("accepts a slug field of its own, beside the fields the host fills", () => {
+  // The positive half: an app may bind a record to its submitter and stamp it AND have a URL name,
+  // so long as the name is a field of its own. A check that refused the combination outright would
+  // satisfy the three tests above.
+  assert.deepEqual(articles(), []);
+});

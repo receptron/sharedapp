@@ -481,9 +481,17 @@ const ViewZ = z
      *  order can be typed is not one. */
     article: z
       .object({
-        title: NameZ,
-        body: NameZ,
-        summary: NameZ.optional(),
+        // FIELD NAMES, and so the same shape every other field-name key here has
+        // (`emailField`, `uidField`, `stampField`, `statusField`) rather than `NameZ`.
+        //
+        // `NameZ` is the COLLECTION-ID grammar — letters, digits, `-` and `_` — and a schema's
+        // fields are under no such rule: `headline.text`, `Article Title` and a Japanese name are
+        // all legal fields that an author may reasonably want to draw an article from. Narrowing
+        // them here would refuse declarations the rules and the runtime both handle, and the
+        // refusal would be about a grammar that governs something else entirely.
+        title: z.string().trim().min(1),
+        body: z.string().trim().min(1),
+        summary: z.string().trim().min(1).optional(),
       })
       .strict()
       .optional(),

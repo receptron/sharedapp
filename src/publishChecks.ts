@@ -516,6 +516,7 @@ function fieldIdProblems(cid: string, submit: AuthoredSubmit): string[] {
         `Name the field the URL name is submitted in — "idField": "slug".`,
     );
   }
+  problems.push(...slugSourceProblems(cid, submit));
   if (submit.idFrom === "field") {
     if (submit.idField === undefined) {
       problems.push(
@@ -541,6 +542,41 @@ function fieldIdProblems(cid: string, submit: AuthoredSubmit): string[] {
     );
   }
   return problems;
+}
+
+/** A slug taken from a field the HOST fills in, which is a name no visitor can ever choose.
+ *
+ *  `recordOf` writes three fields itself, whatever the form showed: the verified address, the
+ *  uid, and the server stamp. Naming one of them as the slug source publishes cleanly and then
+ *  refuses every single submission, in a way that reads like a rules problem:
+ *
+ *    - `emailField` always holds an address, and an address always contains `@`, which the slug
+ *      grammar refuses — so the create fails on a value the visitor never typed;
+ *    - `stampField` is not a string at all. It is a server timestamp, so the id cannot be built
+ *      from it and `recordId` reads it as empty;
+ *    - `uidField` is an opaque id nobody chose, which would work and is certainly not a URL name —
+ *      and it is already what `idFrom: "auth.uid"` exists for.
+ *
+ *  Refused here rather than left to the rules, because the rules can only say no: they see one
+ *  submission and cannot know the field was never the visitor's to fill. */
+function slugSourceProblems(cid: string, submit: AuthoredSubmit): string[] {
+  if (submit.idFrom !== "slug" || submit.idField === undefined) return [];
+  const filled: [string | undefined, string, string][] = [
+    [submit.emailField, "emailField", "the rules fill it with the submitter's verified address, and an address contains '@', which a URL name may not"],
+    [submit.stampField, "stampField", "the rules fill it with the server's clock, which is a timestamp rather than a string, so no id can be built from it"],
+    [
+      submit.uidField,
+      "uidField",
+      'the rules fill it with the submitter\'s own uid, which nobody chose and no reader can recognise — that is what idFrom "auth.uid" is for',
+    ],
+  ];
+  return filled
+    .filter(([field]) => field !== undefined && field === submit.idField)
+    .map(
+      ([, key, why]) =>
+        `public.submit.${cid}.idField is '${submit.idField}', which is also public.submit.${cid}.${key}: ${why}. Every submission would be refused. ` +
+        "Give the URL name a field of its own, one the person writing the article fills in.",
+    );
 }
 
 /** Every `idIn` target, checked against the collections this repository has.

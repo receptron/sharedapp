@@ -602,3 +602,21 @@ test("no statusField means no selfUpdate is projected", () => {
   });
   assert.equal(writeFor(declaration, "participant", "articles")?.selfUpdate, undefined);
 });
+
+test("an article may be drawn from any field name a schema can declare", () => {
+  // Codex on #51. These were held to `NameZ`, which is the COLLECTION-ID grammar — letters,
+  // digits, `-` and `_`. A schema's fields are under no such rule, so a perfectly ordinary
+  // `headline.text`, `Article Title` or Japanese field could not be named as an article's title,
+  // and the refusal would have been about a grammar that governs something else.
+  for (const title of ["headline.text", "Article Title", "見出し", "title_2"]) {
+    const result = normalizeViews(app({ views: [{ ...ARTICLE, article: { title, body: "body" } }] }));
+    assert.ok(result.ok, `expected ${title} to be a legal field name`);
+    assert.equal(result.views[0]?.article?.title, title);
+  }
+});
+
+test("but an article field name is still not nothing", () => {
+  // The floor that stays: a blank names no field, and the page would read `undefined` and draw the
+  // document id as the heading.
+  assert.throws(() => app({ views: [{ ...ARTICLE, article: { title: "  ", body: "body" } }] }));
+});
