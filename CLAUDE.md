@@ -42,7 +42,11 @@ Single test file: `npx tsx --test test/test_publishChecks.ts`
 Single test case: `npx tsx --test --test-name-pattern "submitOnly" test/test_publishChecks.ts`
 
 CI runs `format:check`, `lint`, `typecheck`, `test` on Node 22 and 24, plus a `consumable`
-job that `yarn pack`s and asserts `dist/index.js` and `dist/index.d.ts` are in the tarball.
+job that `yarn pack`s and asserts every entry point the package DECLARES is in the tarball —
+derived from `exports` plus `main` and `types`, not a hand-written list. A list written out by
+hand reopens the hole the day a third subpath is added: the check named `dist/index.js` and
+`dist/index.d.ts` literally once, and `./view` — which MulmoTerminal's headless preview and
+MulmoServer's `AppViewFrame.vue` both import — could have vanished and still passed.
 Consumers never build this — they get `dist/` from the published tarball — so a `files` or
 `prepublishOnly` regression would ship an empty package and break on `npx mulmoterminal`
 rather than here.
