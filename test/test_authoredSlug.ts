@@ -16,10 +16,7 @@ import assert from "node:assert/strict";
 
 import { parseAuthoredApp } from "../src/publishManifest.js";
 import { appSlugDoc, APP_SLUGS_COLLECTION } from "../src/publishProject.js";
-
-/** `.sort()`'s own order, spelled out: the rule that asks for a comparator cannot tell a string
- *  array from a number one, where the default really is wrong. */
-const byText = (a: string, b: string): number => Number(a > b) - Number(a < b);
+import { byText } from "./helpers.js";
 
 const withSlug = (slug: unknown): ReturnType<typeof parseAuthoredApp> =>
   parseAuthoredApp(JSON.stringify({ aid: "3f2b8c1a", name: "Sakura Hair", slug, members: { "owner@example.com": { "*": "owner" } } }));

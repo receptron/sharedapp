@@ -11,10 +11,7 @@ import assert from "node:assert/strict";
 import { normalizeViews, participantScope, viewDocId, writeFor, PUBLIC_VIEW_ID } from "../src/appViews.js";
 import { projectAppViews } from "../src/publishProject.js";
 import { AuthoredAppZ } from "../src/publishManifest.js";
-
-/** `.sort()`'s own order, spelled out: the rule that asks for a comparator cannot tell a string
- *  array from a number one, where the default really is wrong. */
-const byText = (a: string, b: string): number => Number(a > b) - Number(a < b);
+import { byText } from "./helpers.js";
 
 const OWNER = "owner@salon.jp";
 const STAMP = { publishedAt: 1_700_000_000_000, email: OWNER, uid: "u-owner" };
