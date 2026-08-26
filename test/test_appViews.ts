@@ -566,14 +566,31 @@ test("a submitter's own tiers carry the fields they may correct, per status", ()
   }
 });
 
-test("the staff tier does not carry it, because staff are not narrowed by it", () => {
-  // `isWriter` answers for them, so publishing the list there would describe a restriction the
-  // rules do not apply — a page drawing three editable fields on a row its reader may rewrite.
+test("the STAFF tier carries it too, because ownRow does not ask which tier you are on", () => {
+  // The correction that Codex found on #51, and the same answer `selfDelete` has always given.
+  // `ownRow` + `selfWriteOk` compare the caller's address against the RECORD, so a `viewer`, an
+  // `assignee`, or a member of a collection no role writes may correct a row they submitted —
+  // exactly as they may withdraw one. Narrowing it by TIER took that away from precisely the
+  // people who had no other permission.
   const declaration = app({
     collections: { articles: { statusField: "status" } },
     public: { enabled: true, submit: { articles: { auth: "verifiedEmail", createFields: ["title"], selfUpdate: { published: ["title"] } } } },
   });
-  assert.equal(writeFor(declaration, "member", "articles")?.selfUpdate, undefined);
+  assert.deepEqual(writeFor(declaration, "member", "articles")?.selfUpdate, { published: ["title"] });
+});
+
+test("a collection whose ONLY writable thing is a correction still reaches the projection", () => {
+  // The sharp edge of the same bug: `writeFor` returns null when nothing is writable, so dropping
+  // `selfUpdate` on this tier did not merely hide a control — the collection left the document
+  // entirely, and the page was answered `unknown-collection` about one the rules would have let
+  // its reader edit.
+  const declaration = app({
+    collections: { notes: { statusField: "status" } },
+    public: { enabled: true, submit: { notes: { auth: "verifiedEmail", createFields: ["text"], selfUpdate: { open: ["text"] } } } },
+  });
+  for (const audience of ["public", "participant", "member"] as const) {
+    assert.notEqual(writeFor(declaration, audience, "notes"), null, `${audience} lost the collection`);
+  }
 });
 
 test("no statusField means no selfUpdate is projected", () => {

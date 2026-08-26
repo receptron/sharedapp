@@ -76,8 +76,24 @@ export const APP_PROTOCOL_BASE = "1.0.0";
  *  The consequence for an author is stated plainly by publish: declare an article view and readers
  *  older than this contract refuse the app — they show "this build cannot draw what it published"
  *  rather than half of it. That is the intended outcome, and it is why the READER SHIPS FIRST. */
-export function protocolFor(app: { views?: readonly { type?: string | undefined }[] | undefined }): string {
-  return (app.views ?? []).some((view) => view.type !== undefined) ? APP_PROTOCOL : APP_PROTOCOL_BASE;
+export function protocolFor(app: {
+  views?: readonly { type?: string | undefined }[] | undefined;
+  public?: { submit?: Record<string, { idFrom?: string | undefined } | undefined> | undefined } | undefined;
+}): string {
+  // A page the reader must know how to DRAW.
+  const drawnHere = (app.views ?? []).some((view) => view.type !== undefined);
+  // And an id the reader must know how to BUILD, which is the half that is easy to miss because it
+  // is nowhere near a view. `recordId` in an older reader has no `slug` branch, so it falls through
+  // to the random uuid it uses for `idFrom: "auto"` — while the deployed rules now require the
+  // document id to EQUAL the submitted field. Every submission is then refused with a bare
+  // permission error, on a page that drew itself perfectly.
+  //
+  // The two are independent: an app may name its records by slug and still publish its own HTML,
+  // or publish an article index over records with generated ids. So this asks both rather than
+  // making one imply the other — and publish does NOT require an article view beside a slug id,
+  // which would couple two features that have no reason to travel together.
+  const namedBySlug = Object.values(app.public?.submit ?? {}).some((submit) => submit?.idFrom === "slug");
+  return drawnHere || namedBySlug ? APP_PROTOCOL : APP_PROTOCOL_BASE;
 }
 
 const SHAPE = /^(?<major>\d+)\.(?<minor>\d+)\.(?<patch>\d+)$/u;

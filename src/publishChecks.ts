@@ -32,7 +32,7 @@ import { normalizeViews, participantScope, writeFor, type NormalizedView, type V
 import { agentCids, AGENT_ID_PATTERN, AGENT_INSTRUCTION_MAX, RESERVED_AGENT_IDS } from "./appAgents.js";
 import { APP_PROTOCOL, protocolOf, protocolWithin } from "./appProtocol.js";
 import { writersOf } from "./appViews.js";
-import type { AuthoredAgent, AuthoredApp, AuthoredCollectionConfig, AuthoredSubmit } from "./publishManifest.js";
+import type { AuthoredAgent, AuthoredApp, AuthoredCollectionConfig, AuthoredSubmit, AuthoredView } from "./publishManifest.js";
 
 /** What publish knows about a shared collection in this repository, as far as
  *  these checks are concerned: its cid and the schema key its records are
@@ -1605,7 +1605,53 @@ export function schemaRefProblems(app: AuthoredApp, schemas: { cid: string; sche
     ...Object.entries(app.public?.submit ?? {}).flatMap(([cid, submit]) => submitRefProblems(schemaOf, cid, submit)),
     ...Object.entries(app.collections ?? {}).flatMap(([cid, collection]) => mailRefProblems(schemaOf, cid, collection)),
     ...Object.entries(app.collections ?? {}).flatMap(([cid, collection]) => refInRefProblems(schemaOf, cid, collection)),
+    ...(app.views ?? []).flatMap((view, index) => articleRefProblems(schemaOf, view, `views[${index}]`)),
   ];
+}
+
+/** WHICH FIELD IS THE TITLE, checked against the collection that holds the articles.
+ *
+ *  The same kind of check as `mailRefProblems` above and for the same reason: this is a field NAME
+ *  in `app.json` and whether it exists is a fact about the SCHEMA, so neither gate can see it
+ *  alone. What makes it worth having is that every way of getting it wrong is quiet — the runtime
+ *  reads a key that is not there, gets `undefined`, and draws something rather than failing:
+ *
+ *    - a missing `title` falls back to the DOCUMENT ID, so the index reads as a list of slugs;
+ *    - a missing `body` renders an empty article, indistinguishable from one nobody has written;
+ *    - a missing `summary` silently uses the article's opening instead, so the author's declaration
+ *      does nothing and nothing says so.
+ *
+ *  And the TYPE matters as much as the name, exactly as it does for `refIn.ref`: a `number` or
+ *  `boolean` title is read as a string that is never there. `STRING_VALUED` is the same set, so a
+ *  `markdown` body — which is what an article body ought to be — passes, and so does a plain
+ *  `string` or `text`.
+ *
+ *  Judged only where there IS a schema, so a collection the host could not read is named once by
+ *  its own error rather than a second time here. */
+function articleRefProblems(schemaOf: ReadonlyMap<string, CollectionSchema>, view: AuthoredView, where: string): string[] {
+  const { article } = view;
+  const cid = view.collections[0];
+  const schema = cid === undefined ? undefined : schemaOf.get(cid);
+  if (view.type !== "article" || article === undefined || schema === undefined) return [];
+  const fields = schema.fields ?? {};
+  const known = Object.keys(fields).sort().join(", ") || "(none)";
+  const drawn: { key: "title" | "body" | "summary"; field: string | undefined; missing: string }[] = [
+    { key: "title", field: article.title, missing: "the page falls back to the document id, so the index reads as a list of URL names" },
+    { key: "body", field: article.body, missing: "every article renders EMPTY, which looks exactly like one nobody has written yet" },
+    { key: "summary", field: article.summary, missing: "the index quietly shows the article's opening instead, and this declaration does nothing" },
+  ];
+  return drawn.flatMap(({ key, field, missing }) => {
+    if (field === undefined) return [];
+    if (!declaredField(fields, field)) {
+      return [`${where}.article.${key} names '${field}', which the schema of '${cid}' does not declare — ${missing}. Fields on '${cid}': ${known}.`];
+    }
+    const spec = fields[field];
+    if (spec === undefined || STRING_VALUED.has(spec.type)) return [];
+    return [
+      `${where}.article.${key} names '${field}', which the schema of '${cid}' declares as a ${spec.type} field. The page reads it as text, so ` +
+        `${missing}. Use a string, text or markdown field.`,
+    ];
+  });
 }
 
 /** The mail queue's field names, against the collection's own schema.

@@ -656,6 +656,9 @@ export type AuthoredCollectionConfig = z.infer<typeof CollectionConfigZ>;
 export type AuthoredSubmit = z.infer<typeof SubmitZ>;
 export type AuthoredAgent = z.infer<typeof AgentZ>;
 export type AuthoredMail = z.infer<typeof MailZ>;
+/** One entry of `views[]` as the author wrote it. Named because the checks reach into it — the
+ *  `article` block is a set of field names, and whether they exist is a fact about the SCHEMA. */
+export type AuthoredView = z.infer<typeof ViewZ>;
 
 export type AuthoredAppResult = { ok: true; app: AuthoredApp } | { ok: false; problems: string[] };
 

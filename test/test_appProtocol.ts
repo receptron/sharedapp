@@ -77,3 +77,18 @@ test("an authored floor is within what this compiler emits only if it is not new
   assert.equal(within("1.5.0"), false);
   assert.equal(within("2.0.0"), false);
 });
+
+test("a slug id moves the major on its own, with no article view anywhere", () => {
+  // Codex found this on #51, and it is the worse half of the two: the reader BUILDS the id. An
+  // older `recordId` has no `slug` branch, so it falls through to the random uuid it uses for
+  // `auto` — while the deployed rules require the document id to EQUAL the submitted field. Every
+  // submission is then refused with a bare permission error, on a page that drew itself perfectly.
+  //
+  // Stamped 1.0.0, that older reader would have gone ahead and done it.
+  assert.equal(protocolFor({ public: { submit: { articles: { idFrom: "slug" } } } }), APP_PROTOCOL);
+  // And the two are INDEPENDENT: neither implies the other, so both are asked. An app may name its
+  // records by slug and publish its own HTML, or draw an article index over generated ids.
+  assert.equal(protocolFor({ views: [{ type: "article" }], public: { submit: { notes: { idFrom: "auto" } } } }), APP_PROTOCOL);
+  assert.equal(protocolFor({ public: { submit: { bookings: { idFrom: "field" }, notes: {} } } }), APP_PROTOCOL_BASE);
+  assert.equal(protocolFor({ public: { submit: {} } }), APP_PROTOCOL_BASE);
+});

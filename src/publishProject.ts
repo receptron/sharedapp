@@ -145,7 +145,18 @@ export interface PublishedConfigDoc extends Record<string, unknown> {
    *  be handed on a world-readable document; what the page needs is the
    *  dataset list, and `publishedAt` beside it is what pins this declaration
    *  to the HTML published in the same run. */
-  view?: { collections: string[]; live?: string[]; limit?: Record<string, { rows: number; field: string }> };
+  view?: {
+    collections: string[];
+    live?: string[];
+    limit?: Record<string, { rows: number; field: string }>;
+    /** A page the RUNTIME draws from the declaration, instead of the HTML this document is paired
+     *  with — `views[].type`. Declared here as well as emitted, because a consumer that has to cast
+     *  to reach a key is a consumer that will read it wrong: this is the type the published
+     *  document actually has. */
+    type?: "article" | undefined;
+    /** Which field of an article is which, for `type: "article"`. */
+    article?: ArticleFields | undefined;
+  };
   /** The publisher's standing instructions for whoever sits at the PUBLIC face
    *  — see `appAgents.ts`.
    *

@@ -1637,3 +1637,84 @@ test("refuses selfDelete and sealed naming the same status", () => {
   );
   refuses(problems, 'both name "closed"');
 });
+
+/** A magazine: one collection of articles, and a view declaring which field of one is which.
+ *
+ *  Its schema names a `readCount` nobody maps, so the TYPE half can be provoked without inventing
+ *  a second fixture — and `summary` is optional in the declaration and present here, so dropping
+ *  it from the schema is a real refusal rather than an absent key. */
+const magazineSchemas = [
+  schemaWithFields("articles", {
+    slug: { type: "string" },
+    title: { type: "string" },
+    lede: { type: "text" },
+    prose: { type: "markdown" },
+    status: { type: "string" },
+    readCount: { type: "number" },
+  }),
+];
+
+const magazineDraft = (): Record<string, unknown> => ({
+  collections: { articles: { statusField: "status", transitions: { initial: ["published"] } } },
+  public: {
+    enabled: true,
+    read: ["articles"],
+    submit: {
+      articles: {
+        auth: "verifiedEmail",
+        idFrom: "slug",
+        idField: "slug",
+        audience: "participant",
+        createFields: ["slug", "title", "lede", "prose", "status"],
+        initialStatus: "published",
+      },
+    },
+  },
+  views: [{ id: "public", audience: "public", type: "article", collections: ["articles"], article: { title: "title", body: "prose", summary: "lede" } }],
+});
+
+const magazine = (edit: (draft: Record<string, unknown>) => void = () => {}) => {
+  const draft = magazineDraft();
+  edit(draft);
+  return schemaRefProblems(app(draft), magazineSchemas as never);
+};
+
+// --- an article view's field mapping, against the schema that holds the articles ---------------
+//
+// Codex found this on #51. Every way of getting it wrong is QUIET: the runtime reads a key that is
+// not there, gets undefined, and draws something rather than failing.
+
+test("refuses an article title the schema does not declare", () => {
+  refuses(
+    magazine((draft) => ((draft.views as { article: Record<string, string> }[])[0]!.article.title = "headline")),
+    "does not declare",
+  );
+});
+
+test("refuses an article body the schema does not declare", () => {
+  refuses(
+    magazine((draft) => ((draft.views as { article: Record<string, string> }[])[0]!.article.body = "text")),
+    "renders EMPTY",
+  );
+});
+
+test("refuses a summary the schema does not declare, though the page would still draw", () => {
+  // The mildest of the three and still a refusal: the index falls back to the article's opening,
+  // so the author's declaration does nothing and nothing anywhere says so.
+  refuses(
+    magazine((draft) => ((draft.views as { article: Record<string, string> }[])[0]!.article.summary = "excerpt")),
+    "does nothing",
+  );
+});
+
+test("refuses a title that is not text — a number is read as a string that is never there", () => {
+  refuses(
+    magazine((draft) => ((draft.views as { article: Record<string, string> }[])[0]!.article.title = "readCount")),
+    "number field",
+  );
+});
+
+test("accepts a markdown body, which is what an article body ought to be", () => {
+  // The positive half. A check that refused every type would satisfy all four tests above.
+  assert.deepEqual(magazine(), []);
+});

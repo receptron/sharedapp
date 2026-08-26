@@ -486,9 +486,19 @@ export interface ProjectedViewWrite {
   /** `{ <current status>: [<field>...] }` — the fields a SUBMITTER may edit in
    *  their own row while it holds that status (`public.submit[cid].selfUpdate`).
    *
-   *  Not on the `member` tier: staff write by role, and the rules answer them
-   *  from `isWriter` rather than from this list, so publishing it there would
-   *  describe a narrowing that does not exist.
+   *  ON EVERY TIER, including `member`, and that is the same answer `selfDelete`
+   *  gives one field above. `ownRow` + `selfWriteOk` in the rules compare the
+   *  caller's address against the record and never ask which tier the reader was
+   *  standing on — so a `viewer`, an `assignee`, or a member of a collection no
+   *  role writes may correct a row they submitted, exactly as they may withdraw
+   *  one. Dropping it here took that away from precisely the people who had no
+   *  other permission, and where nothing else was writable it made `writeFor`
+   *  return null and the collection vanish from the projection entirely.
+   *
+   *  The reader who does NOT get it is the WRITER, and that narrowing belongs
+   *  one layer down (`correctable` in `view/capability.ts`): `isWriter` carries
+   *  no status condition and no field list, so a map handed to them would
+   *  describe a restriction the rules do not apply. Per READER, not per tier.
    *
    *  It is a MAP and not a list for the reason `transitions` is: "may edit
    *  while pending" and "may edit after the desk approved it" are different
@@ -680,18 +690,26 @@ function withdrawPart(app: AuthoredApp, audience: ViewAudience, cid: string): Pa
 
 /** The fields a submitter may correct in their own row, per status.
  *
- *  The counterpart of `withdrawPart`'s `selfDelete` half and projected on the same terms — the
- *  submitter's own tiers only, beside the status field the rules consult first.
+ *  The counterpart of `withdrawPart`'s `selfDelete` half, and projected on exactly the same terms
+ *  — which is to say WITHOUT ASKING THE AUDIENCE. That half does not either, and for the reason
+ *  the rules give: `ownRow` compares the caller's address against the record, so it answers the
+ *  same for a participant and for a `viewer` who happens to hold a role elsewhere in the app.
+ *  Narrowing it here by tier took the correction away from every member who submitted something,
+ *  and where the collection had nothing else writable it made `writeFor` return null — so the
+ *  collection left the projection altogether and the page could draw no control at all.
+ *
+ *  The narrowing that IS right is per reader and lives in `correctable` (`view/capability.ts`): a
+ *  writer gets an empty map, because `isWriter` carries no status condition and no field list.
  *
  *  WHY IT IS PROJECTED AT ALL, when nothing drew a control from it before: `useSharedApp update`
  *  in MulmoTerminal is an agent correcting a record as the person who submitted it, and without
  *  this it has no way to know which fields that is — so it would either send everything and be
  *  refused with a bare permission error, or send nothing. The rules already carry the branch
  *  (`selfWriteOk`); this only says what it is. */
-function correctPart(app: AuthoredApp, audience: ViewAudience, cid: string): Partial<ProjectedViewWrite> {
+function correctPart(app: AuthoredApp, cid: string): Partial<ProjectedViewWrite> {
   const selfUpdate = app.public?.submit?.[cid]?.selfUpdate;
   const statusField = app.collections?.[cid]?.statusField;
-  if (audience === "member" || selfUpdate === undefined || statusField === undefined) return {};
+  if (selfUpdate === undefined || statusField === undefined) return {};
   return { selfUpdate, statusField };
 }
 
@@ -724,7 +742,7 @@ export function writeFor(app: AuthoredApp, audience: ViewAudience, cid: string):
     ...transitionPart(app, audience, cid),
     ...assignPart(app, audience, cid),
     ...withdrawPart(app, audience, cid),
-    ...correctPart(app, audience, cid),
+    ...correctPart(app, cid),
   };
   if (Object.keys(write).length === 1) return null;
   // Only the staff tier: a participant writes their own row, which the rules
