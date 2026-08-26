@@ -47,12 +47,19 @@ test("the documented pre-release gate names a script that exists — the one pai
   // `check:apps` is the whole reason this file exists. It is not in CI by design, so a rename
   // that misses `CLAUDE.md` leaves a documented command nobody can run, and nothing else notices.
   assert.ok(scriptNames().has("check:apps"), "package.json must define check:apps");
-  assert.match(read("CLAUDE.md"), /\byarn check:apps\b/u, "CLAUDE.md must tell a human to run it by that name");
+  // Anchored at the start of a line, which is where the fenced command block puts it. A literal
+  // search anywhere in the file would also pass for a sentence SAYING the command — "do not run
+  // `yarn check:apps`" reads as coverage and instructs the opposite.
+  assert.match(read("CLAUDE.md"), /^yarn check:apps\b/mu, "CLAUDE.md's command block must tell a human to run it by that name");
 });
 
 test("the consumable job names a script that exists", () => {
   // CI proves this one too, by failing. Pinned anyway because the pairing is the point, and a
   // red test here says WHICH half broke where a `command not found` in a release job does not.
   assert.ok(scriptNames().has("check:pack"), "package.json must define check:pack");
-  assert.match(workflowText(), /\byarn check:pack\b/u, "the consumable job must run it by that name");
+  // Anchored to a `run:` value, not to the file: a workflow could name the command in a `name:`
+  // or a comment while the step that executes runs something else entirely. Positive and exact,
+  // so changing the step to a block scalar turns this RED rather than quietly matching nothing —
+  // which is the failure mode that cost this file its previous two versions.
+  assert.match(workflowText(), /^\s*-\s*run:\s*yarn check:pack\b/mu, "a workflow step must RUN it by that name");
 });
