@@ -56,4 +56,4 @@ jobs:
           node-version: "22.x"
       - run: yarn install --frozen-lockfile
       - run: yarn pack --filename package.tgz
-      - run: node scripts/check-pack.mjs package.tgz
+      - run: yarn check:pack package.tgz

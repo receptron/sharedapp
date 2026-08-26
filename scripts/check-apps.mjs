@@ -8,7 +8,7 @@
 // real ten, on the machine of whoever is about to release.
 //
 // Usage, from this package's root:
-//   npx tsx scripts/check-apps.mjs [path-to-apps-checkout]   (default: ../apps)
+//   yarn check:apps [path-to-apps-checkout]   (default: ../apps)
 //
 // Not in CI, and not fixable there: `../apps` is a private working checkout, so a CI job depending
 // on it would be red for reasons nobody in this repository could act on.

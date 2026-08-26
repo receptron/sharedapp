@@ -18,8 +18,14 @@ Before a release, against a real apps checkout (NOT in CI — `../apps` is a pri
 checkout, so a job depending on it would be red for reasons nobody here could act on):
 
 ```
-npx tsx scripts/check-apps.mjs [path-to-apps-checkout]   # default ../apps
+yarn check:apps [path-to-apps-checkout]                  # default ../apps
 ```
+
+It needs a full `yarn install`, devDependencies included — it imports `src/`, which imports
+`@mulmoclaude/core` for values (`isValidCollectionName`, `parseAppManifest`,
+`isSafeCustomViewPath`), and that package is a peer dependency carried here only as a dev one.
+That was already true when the command was spelled `npx tsx`; `npx` could fetch the runner but
+never the peer, so the failure just arrived one import later.
 
 It runs `publishProblems` + `schemaRefProblems` over the ten apps that already publish, reading
 each app's real collections from `<app>/.claude/skills/<cid>/schema.json` (an app IS a
@@ -36,7 +42,11 @@ Single test file: `npx tsx --test test/test_publishChecks.ts`
 Single test case: `npx tsx --test --test-name-pattern "submitOnly" test/test_publishChecks.ts`
 
 CI runs `format:check`, `lint`, `typecheck`, `test` on Node 22 and 24, plus a `consumable`
-job that `yarn pack`s and asserts `dist/index.js` and `dist/index.d.ts` are in the tarball.
+job that `yarn pack`s and asserts every entry point the package DECLARES is in the tarball —
+derived from `exports` plus `main` and `types`, not a hand-written list. A list written out by
+hand reopens the hole the day a third subpath is added: the check named `dist/index.js` and
+`dist/index.d.ts` literally once, and `./view` — which MulmoTerminal's headless preview and
+MulmoServer's `AppViewFrame.vue` both import — could have vanished and still passed.
 Consumers never build this — they get `dist/` from the published tarball — so a `files` or
 `prepublishOnly` regression would ship an empty package and break on `npx mulmoterminal`
 rather than here.
