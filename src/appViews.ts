@@ -544,6 +544,34 @@ export interface ProjectedViewWrite {
    *  refusal. Absent when the app declares no mirror, which is the ordinary
    *  case for anything that is not a contested slot. */
   withdrawMirror?: string;
+  /** The fields NO ONE may write once the record exists — the values the rules
+   *  DERIVED an identity from and froze for the life of the row: the stamp
+   *  (`stampHeld`), the field an id was built out of (`idHeld`) and the uid
+   *  (`uidHeld`).
+   *
+   *  It rides with the correction for the reason `sealed` rides with the
+   *  withdrawal: it is not a permission and narrows BOTH halves. A writer may
+   *  rewrite any field their role reaches — and `publishedAt` is not one of
+   *  them, whoever asks. A page that sends it gets a bare permission denial
+   *  naming no field, which is the one outcome this layer exists to prevent.
+   *
+   *  Absent where the declaration froze nothing, which is one `includes` never
+   *  reached rather than a special case. */
+  frozen?: string[];
+  /** The per-field byte caps the app declared (`public.submit[cid].maxBytes`).
+   *
+   *  THE RULES DO NOT CARRY THIS ONE, and that is what makes projecting it
+   *  necessary rather than convenient. `maxBytes` appears nowhere in
+   *  `firestore.rules` — the cap is charged at publish, where `limit x total`
+   *  can be computed from the declaration alone, and held afterwards by
+   *  whoever writes. The public submit path holds it because `SubmitSpec`
+   *  carries it; a correction is the OTHER write of the same field, and a cap
+   *  a second write escapes is not a cap.
+   *
+   *  So this is the only key here that is not a description of something the
+   *  rules already enforce. Every other entry narrows a page to what the rules
+   *  would allow; this one is the enforcement. */
+  maxBytes?: Record<string, number>;
 }
 
 /** The role a member holds on one collection, by the rules' own resolution:
@@ -713,6 +741,52 @@ function correctPart(app: AuthoredApp, cid: string): Partial<ProjectedViewWrite>
   return { selfUpdate, statusField };
 }
 
+/** The submit block this collection's corrections are judged by, or undefined.
+ *
+ *  `Object.hasOwn` before the lookup, for the reason `limitFor` gives above: a collection name is
+ *  something an AUTHOR wrote, and `constructor` is a legal one. */
+function submitOf(app: AuthoredApp, cid: string): AuthoredSubmit | undefined {
+  const submit = app.public?.submit;
+  if (submit === undefined || !Object.hasOwn(submit, cid)) return undefined;
+  return submit[cid];
+}
+
+/** The fields the rules freeze for the life of the record.
+ *
+ *  Three, and each of them is a value a rule DERIVED a decision from on create: the server clock
+ *  a queue is ranked by (`stampHeld`), the field the document id was built out of (`idHeld` —
+ *  and only under the two id modes that read a field), and the uid that says whose row it is
+ *  (`uidHeld`). Frozen means frozen: the owner is refused too.
+ *
+ *  Read off the SUBMIT block rather than the collection, because that is where the rules read
+ *  them — `sub(a, cid)` — and a projection derived from somewhere else would be describing a
+ *  different document than the one being enforced. */
+function frozenFields(submit: AuthoredSubmit): string[] {
+  const built = submit.idFrom === "field" || submit.idFrom === "slug" ? submit.idField : undefined;
+  return [submit.stampField, built, submit.uidField].filter((field): field is string => typeof field === "string" && field !== "");
+}
+
+/** What a correction may NOT touch, and how long its values may be.
+ *
+ *  Both halves narrow a correction without granting one, and neither is about who is asking —
+ *  which is why they are attached in `writeFor` AFTER the "is anything writable here?" test rather
+ *  than counting towards it. A collection whose only declared key were a byte cap has no control
+ *  to draw; letting these decide the question would put it into the projection, and a page asking
+ *  about it would stop getting `unknown-collection` and start getting a refusal that implies there
+ *  was something there to refuse.
+ *
+ *  `maxBytes` is the one key in the whole projection that the rules do NOT also enforce — see
+ *  {@link ProjectedViewWrite.maxBytes}. */
+function correctCapsPart(app: AuthoredApp, cid: string): Partial<ProjectedViewWrite> {
+  const submit = submitOf(app, cid);
+  if (submit === undefined) return {};
+  const frozen = frozenFields(submit);
+  return {
+    ...(frozen.length === 0 ? {} : { frozen }),
+    ...(submit.maxBytes === undefined ? {} : { maxBytes: submit.maxBytes }),
+  };
+}
+
 function assignPart(app: AuthoredApp, audience: ViewAudience, cid: string): Partial<ProjectedViewWrite> {
   const assigneeField = app.collections?.[cid]?.assigneeField;
   if (audience !== "member" || assigneeField === undefined) return {};
@@ -745,6 +819,7 @@ export function writeFor(app: AuthoredApp, audience: ViewAudience, cid: string):
     ...correctPart(app, cid),
   };
   if (Object.keys(write).length === 1) return null;
+  Object.assign(write, correctCapsPart(app, cid));
   // Only the staff tier: a participant writes their own row, which the rules
   // answer from the record rather than from a role, and publishing the roster's
   // writers to them would be an address list for nothing.

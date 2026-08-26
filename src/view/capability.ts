@@ -126,6 +126,21 @@ export interface ViewCapability {
    *  Nothing here GRANTS the edit — `selfWriteOk` in the rules does, and answers last. What it
    *  buys is a refusal that can name the field and the status. */
   correctFrom: Record<string, string[]>;
+  /** This reader may correct ANY field of ANY row here, because their ROLE says so
+   *  (`isWriter` in `updateWith`).
+   *
+   *  A boolean beside the map, and the pair is `withdrawAny` / `withdrawFrom` again — the same
+   *  asymmetry, from the same place. The rules answer a writer's update from the role alone: no
+   *  status condition, no field list, nothing about the record. So there is nothing to enumerate,
+   *  and enumerating anyway would hide edits the rules allow.
+   *
+   *  It is what makes the OWNER's edit expressible at all. `correctFrom` is `selfUpdate`, which an
+   *  ordinary blog never declares — nobody but the author writes there — so a page reading only
+   *  that map would conclude the author may change nothing about their own article, while the
+   *  rules let them rewrite every field but the frozen ones.
+   *
+   *  What it does NOT reach: `ProjectedViewWrite.frozen`. Frozen means frozen, owner included. */
+  correctAny: boolean;
 }
 
 /** Which tier's projection this is — the answer to what ABSENCE means. */
@@ -157,6 +172,7 @@ const NOTHING = {
   withdrawAny: false,
   sealed: [] as string[],
   correctFrom: {} as Record<string, string[]>,
+  correctAny: false,
 };
 
 const has = (addresses: string[] | undefined, address: string): boolean => (addresses ?? []).includes(address);
@@ -227,6 +243,9 @@ export const capabilityOf = (write: ProjectedViewWrite, address: string, tier: W
         withdrawAny: false,
         sealed: write.sealed ?? [],
         correctFrom: correctable(write, tier, false),
+        // No roles are named here at all, so nobody is a writer on this
+        // projection — see the branch above.
+        correctAny: false,
       };
     }
     return { cid: write.cid, ...NOTHING };
@@ -248,6 +267,17 @@ export const capabilityOf = (write: ProjectedViewWrite, address: string, tier: W
     assignees: [...(write.writers ?? []), ...(write.rowWriters ?? [])].sort((left, right) => left.localeCompare(right)),
     withdrawFrom: withdrawable(write, tier, writer),
     correctFrom: correctable(write, tier, writer),
+    // The role, and ONLY the role — as the rules have it. No `movable`
+    // companion the way `transitionAny` has one: a transition needs a table to
+    // read a destination out of, and a correction needs nothing but the field
+    // names the caller sends.
+    //
+    // THE TIER IS ASKED for `withdrawAny`'s reason, spelled out below it: the
+    // staff roles are compiled into the staff document only, and a `writers`
+    // list appearing in a roster document — hand-written, or left by a build
+    // that is not this one — must not hand a participant's page an edit-any
+    // control.
+    correctAny: tier === "member" && writer,
     // The role, and only the role, and only on the tier the role belongs to.
     //
     // A projection that names no writers never reaches here (see `namesRoles`

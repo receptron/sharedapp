@@ -621,3 +621,53 @@ test("but an article field name is still not nothing", () => {
   // document id as the heading.
   assert.throws(() => app({ views: [{ ...ARTICLE, article: { title: "  ", body: "body" } }] }));
 });
+
+// --- what a correction is bounded by, and why neither half keeps an entry alive
+
+const BLOG = {
+  aid: "app_blog",
+  members: { [OWNER]: { "*": "owner" } },
+  collections: { posts: { statusField: "status", transitions: { published: ["archived"] } } },
+  views: [{ id: "desk", audience: "member", path: "views/desk.html", collections: ["posts"] }],
+  public: {
+    enabled: true,
+    read: ["posts"],
+    submit: {
+      posts: {
+        auth: "verifiedEmail",
+        createFields: ["slug", "title", "body", "status", "publishedAt"],
+        initialStatus: "published",
+        idFrom: "slug",
+        idField: "slug",
+        stampField: "publishedAt",
+        maxBytes: { title: 200, body: 60000 },
+      },
+    },
+  },
+};
+
+test("the fields the rules froze on create travel with the write, and the caps with them", () => {
+  const write = writeFor(AuthoredAppZ.parse(BLOG), "member", "posts");
+  // `stampField` and the field the id was built from. Frozen means frozen: the owner is refused
+  // too, so this is not a permission and does not depend on the audience.
+  assert.deepEqual([...(write?.frozen ?? [])].sort(byText), ["publishedAt", "slug"]);
+  assert.deepEqual(write?.maxBytes, { title: 200, body: 60000 });
+});
+
+test('`idFrom: "auto"` freezes no field, so nothing about the id is carried', () => {
+  const auto = structuredClone(BLOG);
+  auto.public.submit.posts.idFrom = "auto";
+  const write = writeFor(AuthoredAppZ.parse(auto), "member", "posts");
+  // Only the stamp. `idHeld` in the rules asks nothing of an id nobody built out of a field, so a
+  // page told `slug` was frozen would be refusing an edit the rules allow.
+  assert.deepEqual(write?.frozen, ["publishedAt"]);
+});
+
+test("caps alone do not put a collection into the projection", () => {
+  // Neither half is a control, so neither may be what keeps an entry alive: an entry is what a
+  // page draws a button from, and a collection reachable only because it declares a byte cap would
+  // answer a page's ask with a refusal that implies there was something there to refuse.
+  const unwritable = structuredClone(BLOG);
+  unwritable.collections = { posts: {} } as never;
+  assert.equal(writeFor(AuthoredAppZ.parse(unwritable), "member", "posts"), null);
+});

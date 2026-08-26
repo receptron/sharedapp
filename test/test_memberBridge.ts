@@ -36,6 +36,7 @@ const viewer: Viewer = {
       // Nothing correctable: this reader is the DESK, and a writer is not narrowed per status —
       // `isWriter` in the rules carries no field list at all.
       correctFrom: {},
+      correctAny: false,
     },
   },
 };

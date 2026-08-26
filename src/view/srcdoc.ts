@@ -368,6 +368,14 @@ ${gestureScript()}
     withdraw(cid, itemId) {
       return request({ type: ${JSON.stringify(VIEW_MESSAGE.intent)}, kind: "withdraw", cid, itemId });
     },
+    /** Rewrite fields of a record that already exists. \`values\` is an object of
+     *  field name to STRING -- a number sent here is not coerced, the whole
+     *  message is refused, because half-understanding an edit is worse than
+     *  declining one. What may be sent is \`can[cid].correctAny\` (any field, by
+     *  role) or \`can[cid].correctFrom[status]\` (the submitter's own row). */
+    correct(cid, itemId, values) {
+      return request({ type: ${JSON.stringify(VIEW_MESSAGE.intent)}, kind: "correct", cid, itemId, values });
+    },
   };
   // TWO names for ONE object, for one release. The contract is not the public
   // page's any more -- a member view uses the same bridge -- but a page already

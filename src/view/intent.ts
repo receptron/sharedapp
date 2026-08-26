@@ -1,6 +1,7 @@
 import { isRecord } from "./message.js";
 import { VIEW_MESSAGE } from "./protocol.js";
 import { capabilityOf, mayTransition, type WriteTier } from "./capability.js";
+import { overLongFields } from "./submit.js";
 import type { ProjectedViewWrite } from "../appViews.js";
 import { mailFor, type QueuedMail } from "./intentMail.js";
 
@@ -36,8 +37,18 @@ import { mailFor, type QueuedMail } from "./intentMail.js";
  *  `withdraw` names no `to`, because it moves nothing: with `idFrom: "field"`
  *  the record's id IS the exclusivity, so a cancelled booking goes on holding
  *  the slot. It is the only ask that gives it back, by deleting the row and
- *  reopening the mirror in one batch. */
-export type IntentKind = "transition" | "assign" | "withdraw";
+ *  reopening the mirror in one batch.
+ *
+ *  `correct` is the one that carries VALUES, and it is worth saying why that
+ *  does not reopen the general patch the header rules out. The other three name
+ *  a field the DECLARATION chose — `statusField`, `assigneeField`, none — and
+ *  the page supplies only a destination. A correction is the write where the
+ *  field names are the ask, so what bounds it is not the vocabulary but the
+ *  judgement below: `correctFrom` for the person who submitted the row,
+ *  `correctAny` for the role that may rewrite any of them, `frozen` for the
+ *  fields nobody may touch afterwards, and `maxBytes` for how long a value may
+ *  be. Take those away and this IS the general patch. */
+export type IntentKind = "transition" | "assign" | "withdraw" | "correct";
 
 /** What the view asked, once it has survived judgement: one field, one value,
  *  and the record they belong to. */
@@ -57,6 +68,10 @@ export interface JudgedIntent {
   /** The mail this transition queues, if the declaration names one for it. In
    *  the SAME batch as the record: see {@link mailFor}. */
   mail?: QueuedMail;
+  /** `correct` only: exactly the fields judged writable here, and their values.
+   *  What the host writes — nothing is added to it downstream, so a field that
+   *  is not in this map cannot be written by this intent. */
+  values?: Record<string, string>;
 }
 
 /** Why an intent was not performed. Returned rather than thrown: the view is
@@ -76,6 +91,17 @@ export type IntentRefusal =
   /** An address nobody on the roster holds an assignable role at. Writing it
    *  produces a row NOBODY may touch afterwards. */
   | "unknown-assignee"
+  /** A correction naming no fields. Answered rather than ignored: the page is
+   *  holding a promise, and a button that resolves nothing looks broken in
+   *  exactly the way a refused one does not. */
+  | "nothing-to-correct"
+  /** A field the rules froze when the record was created — the stamp, the value
+   *  an id was built from, the uid. Refused for EVERYBODY, the owner included,
+   *  which is why it is not `not-permitted`: no role makes it writable. */
+  | "frozen-field"
+  /** A value longer than `maxBytes` allows. The one refusal here that the rules
+   *  do not also make — see {@link ProjectedViewWrite.maxBytes}. */
+  | "too-long"
   /** The collection allows it and THIS reader may not: a `viewer`, or an
    *  assignee reaching for a colleague's row. The tier admits everybody
    *  holding a role anywhere, so being handed the page is not permission —
@@ -91,8 +117,12 @@ export interface AskedIntent {
   kind: IntentKind;
   cid: string;
   itemId: string;
-  /** Absent on a withdrawal. */
+  /** Absent on a withdrawal and on a correction. */
   to?: string;
+  /** `correct` only: the fields to change and what to change them to. Strings,
+   *  because a form produces strings and because `maxBytes` is measured in
+   *  bytes of UTF-8 — there is nothing to measure on a number. */
+  values?: Record<string, string>;
 }
 
 /** What the parent sends back on the channel. `error` carries a refusal name
@@ -125,7 +155,31 @@ const ILLEGAL = { ok: false, reason: "illegal-transition" } as const;
  *  assignee field, no declared withdrawal. */
 const NOT_WRITABLE = { ok: false, reason: "not-writable" } as const;
 
-const isKind = (value: unknown): value is IntentKind => value === "transition" || value === "assign" || value === "withdraw";
+const KINDS: readonly IntentKind[] = ["transition", "assign", "withdraw", "correct"];
+
+const isKind = (value: unknown): value is IntentKind => KINDS.some((kind) => kind === value);
+
+/** The values a correction carries, or null when the message does not describe
+ *  a set of them.
+ *
+ *  STRINGS ONLY, and rejected wholesale rather than filtered: a page sending
+ *  `{ title: "…", views: 12 }` has been half understood by a filter, and the
+ *  write that follows would silently be a different write from the one the
+ *  author's code asked for. Refusing the message says so.
+ *
+ *  Rebuilt with `Object.fromEntries` rather than passed through, so what the
+ *  judgement and the host see is a plain object with own properties — the field
+ *  names come from an author's HTML and `constructor` is a legal one. */
+const valuesOf = (value: unknown): Record<string, string> | null => {
+  if (!isRecord(value)) {
+    return null;
+  }
+  const entries = Object.entries(value);
+  if (!entries.every((entry): entry is [string, string] => typeof entry[1] === "string")) {
+    return null;
+  }
+  return Object.fromEntries(entries);
+};
 
 /** Is this an intent at all? Separate from judging one, because a message that
  *  is not gets NO answer — replying would be answering something nobody
@@ -143,6 +197,22 @@ const askedOf = (data: Record<string, unknown>, kind: IntentKind, requestId: str
       return null;
     }
     return asked;
+  }
+  // A correction names no destination either, and carries values instead.
+  //
+  // AN EMPTY MAP IS STILL AN INTENT, which is the one place this differs from
+  // its neighbours. Nothing above returns null because the ask is empty — it
+  // returns null because the message is not describable, and those get no
+  // answer at all. A correction with no fields IS describable; it is a page bug,
+  // and the page is holding a promise while it happens. So it travels on and is
+  // refused by name (`nothing-to-correct`) rather than leaving a button that
+  // never comes back.
+  if (kind === "correct") {
+    const values = valuesOf(data.values);
+    if (data.to !== undefined || values === null) {
+      return null;
+    }
+    return { ...asked, values };
   }
   if (typeof data.to !== "string") {
     return null;
@@ -307,12 +377,75 @@ const judgeWithdraw = (write: ProjectedViewWrite, record: Record<string, unknown
   return withdrawn(write);
 };
 
+/** The correction half, and the only ask judged in two passes.
+ *
+ *  FIRST WHAT THE RECORD ALLOWS, THEN WHO IS ASKING — the same order
+ *  `judgeWithdraw` puts `sealedNow` in, and for the same reason. `frozen` and
+ *  `maxBytes` bind every role there is, so asking about the role first would
+ *  approve an owner's edit of `publishedAt` and hand the page a call that can
+ *  only come back as a permission denial naming no field.
+ *
+ *  The two halves of "who" are the rules' two branches, in the rules' order:
+ *
+ *    `isWriter(r)` — no status condition, no field list. `correctAny`, and it
+ *    ends the judgement: there is nothing left to compare the ask against.
+ *
+ *    `ownRow(...) && selfWriteOk(...)` — the fields `selfUpdate` names for the
+ *    status the row is IN. Whether the row is actually theirs is NOT asked
+ *    here: `ownRow` compares an address the projection deliberately does not
+ *    carry, exactly as `judgeWithdraw` says of its own half. That one is the
+ *    rules' to answer, and they answer last either way.
+ *
+ *  A page holding no such record claims nothing about the status, as everywhere
+ *  else here: the button was drawn from a dataset that may be a second stale,
+ *  and the race belongs to the rules. */
+const judgeCorrect = (write: ProjectedViewWrite, asked: { values?: Record<string, string> }, record: Record<string, unknown> | null, who: Who): Judged => {
+  const values = asked.values ?? {};
+  const fields = Object.keys(values);
+  if (fields.length === 0) {
+    return { ok: false, reason: "nothing-to-correct" };
+  }
+  if (fields.some((field) => (write.frozen ?? []).includes(field))) {
+    return { ok: false, reason: "frozen-field" };
+  }
+  if (overLongFields(values, write).length > 0) {
+    return { ok: false, reason: "too-long" };
+  }
+  const capability = capabilityOf(write, who.address, who.tier);
+  if (capability.correctAny) {
+    return { ok: true };
+  }
+  if (write.statusField === undefined || Object.keys(capability.correctFrom).length === 0) {
+    return NOT_WRITABLE;
+  }
+  const current = statusHeld(record, write.statusField);
+  if (current === null) {
+    return { ok: true };
+  }
+  // `Object.hasOwn`: the key is a status an author wrote, and `toString` is a
+  // legal one — a plain index into a map that does not name it hands back a
+  // function, which `includes` would then be asked for.
+  const allowed = Object.hasOwn(capability.correctFrom, current) ? capability.correctFrom[current] : undefined;
+  if (allowed === undefined) {
+    // The row is somewhere the declaration grants no correction from. The same
+    // sentence `judgeWithdraw` says about a status outside `selfDelete`.
+    return ILLEGAL;
+  }
+  if (fields.some((field) => !allowed.includes(field))) {
+    return { ok: false, reason: "not-permitted" };
+  }
+  return { ok: true };
+};
+
 const judge = (declared: ProjectedViewWrite, asked: AskedIntent, record: RecordLookup, who: Who): Judged => {
   if (asked.kind === "assign") {
     return judgeAssign(declared, asked, who);
   }
   if (asked.kind === "withdraw") {
     return judgeWithdraw(declared, record(asked.cid, asked.itemId), who);
+  }
+  if (asked.kind === "correct") {
+    return judgeCorrect(declared, asked, record(asked.cid, asked.itemId), who);
   }
   return judgeTransition(declared, asked, record(asked.cid, asked.itemId), who);
 };
