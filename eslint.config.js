@@ -78,8 +78,10 @@ export default tseslint.config(
       // The only fs in this repository is in `scripts/` and one test, and every path is one they
       // compute from a checkout root that was handed to them.
       "security/detect-non-literal-fs-filename": "off",
-      // One finding: `check-pack.mjs` builds a regexp from the package's own name to find its
-      // entry points in the tarball.
+      // One finding, `scripts/check-pack.ts:82`: a declared subpath pattern (`"./view/*"`) is
+      // turned into a regexp so a tarball can be checked against the SET of files it names. The
+      // literal halves go through `escapeRegExp` first; the only thing not escaped is the `*` the
+      // author wrote, which is the whole point of the pattern.
       "security/detect-non-literal-regexp": "off",
       // A quantifier inside a quantifier is a shape rather than a judgement call, so this one stays
       // at error where `recommended` ships it at warn.
@@ -101,8 +103,8 @@ export default tseslint.config(
     rules: {
       // These scripts are release gates run by a human or by CI, and what they print IS the result.
       "no-console": "off",
-      // `check-pack.mjs` runs `npm`/`yarn` the way every package script does — from PATH, because
-      // there is no portable absolute path for them.
+      // One finding, `scripts/check-pack.ts:65`: it runs `tar` to list the tarball, from PATH,
+      // because there is no portable absolute path for it.
       "sonarjs/no-os-command-from-path": "off",
     },
   },
