@@ -1545,6 +1545,36 @@ const capIn = (map: Record<string, number> | undefined, key: string): number | u
  *  long text one rename away: a contributor — or a `useSharedApp` agent that will not stop — puts
  *  it in `title` or `summary`, publish reports a cheap index, and the row is still whatever
  *  Firestore will hold. */
+/** Is every writer of this collection somebody the roster names?
+ *
+ *  THE QUESTION THE CAP DEPENDS ON, and it took a real app to state it correctly. `maxBytes` is
+ *  enforced by publish and by the host, never by a rule, so it binds only people who go through a
+ *  host — which is fine for people the owner invited and worthless against a stranger.
+ *
+ *  There are two ways to be roster-only and the first draft accepted just one:
+ *
+ *  - `audience: "participant"`, which the rules read directly (`r == "participant"`), and
+ *  - a submission window that has CLOSED. `inWindow` is reached only through `publicCreate`; the
+ *    writer branch (`isWriter(r) && !submitOnly`) never consults it. So an app whose window shut in
+ *    the past is one where the public path refuses everyone and the roster's writers go on writing.
+ *
+ *  Refusing the second cost a real blog its own desk: `audience: "participant"` forces
+ *  `submitOnly` (see `submitOnlyProblems`), `submitOnly` closes the writer branch, and the owner
+ *  then has to hold `participant` on their own collection — where `role()` prefers the
+ *  per-collection entry over `*`, so they lose `writerDelete` and every other writer power on the
+ *  articles they publish. That is a large change of model to buy a guarantee the app already had.
+ *
+ *  THE CLOCK IS DELIBERATE and it is not flaky. Publishing happens at an instant, and the question
+ *  is about that instant: can a stranger create here now? A window whose `until` has passed can
+ *  never reopen — `inWindow` conjoins it with every per-record bound, so a false there is final —
+ *  and a window that has NOT yet closed is one where a stranger genuinely can write, which is the
+ *  refusal above, correctly given. */
+function rosterOnly(submit: AuthoredSubmit): boolean {
+  if (submit.audience === "participant") return true;
+  const until = submit.window?.until;
+  return until !== undefined && Date.parse(until) <= Date.now();
+}
+
 const noLimitProblem = (view: NormalizedView, cid: string): string =>
   `${view.where} publishes '${cid}' as articles and declares no limit for it, so the index reads EVERY article — bodies included, because a rule ` +
   `cannot hide a field — on every open, forever. Add "limit": { "${cid}": 10 }.`;
@@ -1588,11 +1618,12 @@ function articleCostProblems(app: AuthoredApp, view: NormalizedView): string[] {
         "collection nobody may submit to cannot be indexed at all. Declare the submit block, or draw this page from HTML of your own.",
     ];
   }
-  if (submit.audience !== "participant") {
+  if (!rosterOnly(submit)) {
     problems.push(
-      `${view.where} publishes '${cid}' as articles, and public.submit.${cid} does not say "audience": "participant". An article's length is bounded ` +
-        "by the declaration and by the host, never by the rules, so the bound holds only over people the roster names. Add the audience, or publish " +
-        "this collection through a page of your own instead.",
+      `${view.where} publishes '${cid}' as articles, and anybody with an account can create one: public.submit.${cid} neither says ` +
+        '"audience": "participant" nor closes its window. An article\'s length is bounded by the declaration and by the host, never by the rules, so ' +
+        "the bound holds only over people the roster names. Restrict the audience, close the submission window, or publish this collection through a " +
+        "page of your own instead.",
     );
   }
   if (rows === undefined) problems.push(noLimitProblem(view, cid));
