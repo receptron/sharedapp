@@ -320,6 +320,38 @@ test("an app with an article view is stamped the newer contract, and it alone", 
   assert.equal(projectApp(authored(), [], STAMP, null).config.protocol, APP_PROTOCOL_BASE);
 });
 
+test("the app's hue reaches the drawn page, and leaves the protocol alone", () => {
+  // ON THE VIEW, because what reads it is the runtime drawing that page — a colour parked at the
+  // top of the document would be one more place every reader has to look.
+  const withHue = AuthoredAppZ.parse({
+    ...authored(),
+    theme: { hue: 200 },
+    public: { enabled: true, read: ["articles"], submit: {} },
+    views: [{ id: "public", audience: "public", type: "article", collections: ["articles"], article: { title: "title", body: "body" } }],
+  });
+  const config = projectApp(withHue, [], STAMP, null).config;
+  assert.equal(config.view?.hue, 200);
+  // NOT a protocol move, and the asymmetry is the point: a reader too old to know `hue` draws the
+  // page in its own colours, which is still the page. One too old to know `type` draws the
+  // generated form in a magazine's place, which is not — so that one moves the major and this
+  // does not. Pinned here because the two keys arrive on the same document.
+  assert.equal(config.protocol, APP_PROTOCOL);
+});
+
+test("an app that declares no hue publishes the document it published before the key existed", () => {
+  const config = projectApp(
+    AuthoredAppZ.parse({
+      ...authored(),
+      public: { enabled: true, read: ["articles"], submit: {} },
+      views: [{ id: "public", audience: "public", type: "article", collections: ["articles"], article: { title: "title", body: "body" } }],
+    }),
+    [],
+    STAMP,
+    null,
+  ).config;
+  assert.equal("hue" in (config.view ?? {}), false);
+});
+
 test("what is published is the contract this compiler emits, not the author's declaration", () => {
   // The authored `protocol` is a FLOOR (see `protocolProblems`), and the documents keep whatever
   // produced them. Publishing the author's number instead would let an app claim a contract its
