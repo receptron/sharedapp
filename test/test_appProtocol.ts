@@ -51,10 +51,12 @@ test("a floor above what this build emits is not within it", () => {
   // The ceiling is APP_PROTOCOL — the newest contract this build IMPLEMENTS — and not the one a
   // given app is stamped with: a floor is a statement about the publisher, not about the app.
   const emitted = protocolOf(APP_PROTOCOL);
-  assert.notEqual(emitted, null);
-  assert.ok(emitted !== null && !protocolWithin({ major: 2, minor: 1, patch: 0 }, emitted));
-  assert.ok(emitted !== null && protocolWithin({ major: 2, minor: 0, patch: 0 }, emitted));
-  assert.ok(emitted !== null && protocolWithin({ major: 1, minor: 0, patch: 0 }, emitted));
+  // One narrowing assert, then three live ones. Repeating `emitted !== null` in each conjunct was
+  // dead after the first `assert.ok`, which narrows the whole expression it was given.
+  assert.ok(emitted !== null, "the build's own protocol must read as a version");
+  assert.ok(!protocolWithin({ major: 2, minor: 1, patch: 0 }, emitted));
+  assert.ok(protocolWithin({ major: 2, minor: 0, patch: 0 }, emitted));
+  assert.ok(protocolWithin({ major: 1, minor: 0, patch: 0 }, emitted));
 });
 
 test("a version is three numbers, and anything else is not one", () => {

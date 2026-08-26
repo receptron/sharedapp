@@ -17,19 +17,23 @@ import assert from "node:assert/strict";
 import { parseAuthoredApp } from "../src/publishManifest.js";
 import { appSlugDoc, APP_SLUGS_COLLECTION } from "../src/publishProject.js";
 
+/** `.sort()`'s own order, spelled out: the rule that asks for a comparator cannot tell a string
+ *  array from a number one, where the default really is wrong. */
+const byText = (a: string, b: string): number => Number(a > b) - Number(a < b);
+
 const withSlug = (slug: unknown): ReturnType<typeof parseAuthoredApp> =>
   parseAuthoredApp(JSON.stringify({ aid: "3f2b8c1a", name: "Sakura Hair", slug, members: { "owner@example.com": { "*": "owner" } } }));
 
 test("a declaration may carry the wanted URL name", () => {
   const parsed = withSlug("sakura-hair");
   assert.equal(parsed.ok, true);
-  assert.equal(parsed.ok ? parsed.app.slug : null, "sakura-hair");
+  assert.equal(parsed.app.slug, "sakura-hair");
 });
 
 test("the key is optional — an app reachable only at /staging/{aid} never needs one", () => {
   const parsed = parseAuthoredApp(JSON.stringify({ aid: "3f2b8c1a", members: { "owner@example.com": { "*": "owner" } } }));
   assert.equal(parsed.ok, true);
-  assert.equal(parsed.ok ? parsed.app.slug : "unset", undefined);
+  assert.equal(parsed.app.slug, undefined);
 });
 
 test("a host may write back the slug it actually reserved", () => {
@@ -54,7 +58,7 @@ test("it says what a rejected slug should look like", () => {
   assert.equal(parsed.ok, false);
   // The author is holding the file open; a reason without an example is a
   // second round trip.
-  assert.match(parsed.ok ? "" : parsed.problems.join("\n"), /sakura-hair/);
+  assert.match(parsed.problems.join("\n"), /sakura-hair/);
 });
 
 // --- the reservation document -----------------------------------------------
@@ -85,7 +89,7 @@ test("the reservation carries the aid and the flag, and NOTHING else", () => {
   // Once published this document is world-readable, so every key added to it
   // later is published to the world by default. Pinned as an exact key list so
   // that adding one is a decision someone had to make here first.
-  assert.deepEqual(Object.keys(appSlugDoc("3f2b8c1a", true)).sort(), ["aid", "published"]);
+  assert.deepEqual(Object.keys(appSlugDoc("3f2b8c1a", true)).sort(byText), ["aid", "published"]);
 });
 
 test("the reservations live in a collection of their own, above any app", () => {

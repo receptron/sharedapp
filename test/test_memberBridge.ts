@@ -77,7 +77,7 @@ test("the data waits for an answer ON the port, and then carries the viewer", ()
   far.send({ nonce: NONCE });
   assert.equal(far.posted.length, 1);
   assert.equal(far.posted[0]?.type, VIEW_MESSAGE.state);
-  assert.deepEqual(far.posted[0]?.viewer, viewer);
+  assert.deepEqual(far.posted[0].viewer, viewer);
 });
 
 test("a document that only INHERITED the frame never gets the records", () => {
@@ -144,8 +144,8 @@ test("a read-only page REFUSES rather than going quiet", async () => {
   await Promise.resolve();
   const last = far.posted.at(-1);
   assert.equal(last?.type, VIEW_MESSAGE.result);
-  assert.equal(last?.ok, false);
-  assert.equal(last?.error, "read-only");
+  assert.equal(last.ok, false);
+  assert.equal(last.error, "read-only");
 });
 
 test("something nobody asked about is not answered", async () => {
@@ -302,15 +302,15 @@ test("a perform that REJECTS still answers, in one fixed word", async () => {
   await Promise.resolve();
   const last = far.posted.at(-1);
   assert.equal(last?.type, VIEW_MESSAGE.result);
-  assert.equal(last?.requestId, "r3");
-  assert.equal(last?.ok, false);
+  assert.equal(last.requestId, "r3");
+  assert.equal(last.ok, false);
   // The page is the author's; why the host broke is not.
-  assert.equal(last?.error, HOST_ERROR);
+  assert.equal(last.error, HOST_ERROR);
   assert.equal(JSON.stringify(last).includes("PERMISSION_DENIED"), false);
   // And the reason went to the host, which is where somebody can act on it.
   assert.equal(defects.length, 1);
   assert.equal(defects[0]?.requestId, "r3");
-  assert.match(String((defects[0]?.error as Error).message), /PERMISSION_DENIED/);
+  assert.match(String((defects[0].error as Error).message), /PERMISSION_DENIED/);
 });
 
 test("a perform that THROWS before returning a promise is the same case", async () => {
@@ -334,7 +334,7 @@ test("a perform that THROWS before returning a promise is the same case", async 
   await Promise.resolve();
   const last = far.posted.at(-1);
   assert.equal(last?.requestId, "r4");
-  assert.equal(last?.error, HOST_ERROR);
+  assert.equal(last.error, HOST_ERROR);
 });
 
 test("a rejection about something nobody asked is still not answered", async () => {

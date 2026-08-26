@@ -178,7 +178,6 @@ for (const shape of SHAPES) {
     // two disagree about `aid` (which is read through core).
     const parsed = parseAuthoredApp(JSON.stringify(shape.declaration));
     assert.equal(parsed.ok, true, parsed.ok ? "" : parsed.problems.join("\n"));
-    if (!parsed.ok) return;
     assert.deepEqual(publishProblems(parsed.app, shape.cids, OWNER), []);
     assert.deepEqual(schemaRefProblems(parsed.app, shape.schemas as never), []);
   });
@@ -193,7 +192,6 @@ test("the three shapes still compile to the same documents", () => {
   const projected = SHAPES.map((shape) => {
     const parsed = parseAuthoredApp(JSON.stringify(shape.declaration));
     assert.equal(parsed.ok, true);
-    if (!parsed.ok) throw new Error(shape.name);
     return projectApp(parsed.app, [], STAMP, null);
   });
   const [live, gym, tennis] = projected as [PublishedApp, PublishedApp, PublishedApp];

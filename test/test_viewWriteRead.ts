@@ -25,7 +25,7 @@ test("an absent rowWriters stays absent, because `[]` means something else entir
   // before the rules ever get to apply `ownRow`.
   const write = projectedWriteOf({ cid: "bookings", assigneeField: "coach" });
   assert.equal(write?.assigneeField, "coach");
-  assert.equal("rowWriters" in (write ?? {}), false);
+  assert.equal("rowWriters" in write, false);
   assert.deepEqual(projectedWriteOf({ cid: "bookings", assigneeField: "coach", rowWriters: [] })?.rowWriters, []);
 });
 
@@ -33,7 +33,7 @@ test("an empty selfDelete is dropped, because it reads as permission and means t
   assert.equal("selfDelete" in (projectedWriteOf({ cid: "b", statusField: "s", transitions: { a: ["b"] }, selfDelete: [] }) ?? {}), false);
   const kept = projectedWriteOf({ cid: "b", selfDelete: ["requested"], withdrawMirror: "slots" });
   assert.deepEqual(kept?.selfDelete, ["requested"]);
-  assert.equal(kept?.withdrawMirror, "slots");
+  assert.equal(kept.withdrawMirror, "slots");
 });
 
 test("a collection with nothing writable is dropped rather than kept empty", () => {
@@ -143,7 +143,7 @@ test("the seal reaches a staff page whose only permission is the role one", () =
   const staffOnly = { cid: "topics", writerDelete: true, statusField: "status", sealed: ["closed"] };
   const read = projectedWriteOf(staffOnly);
   assert.deepEqual(read?.sealed, ["closed"]);
-  assert.equal(read?.statusField, "status");
+  assert.equal(read.statusField, "status");
 });
 
 test("a seal with nothing to read the status off is dropped", () => {

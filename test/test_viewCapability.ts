@@ -94,10 +94,12 @@ test("a member with no role that deletes still gets the submitter's own half", (
   // group chat), where there is no role-based write to project at all.
   const own: ProjectedViewWrite = { ...staff, selfDelete: ["requested"] };
   const desk = capabilityOf(own, "desk@gym.jp", "member");
-  assert.equal(desk.withdrawAny, false);
-  assert.deepEqual(desk.withdrawFrom, ["requested"]);
-  // Still never both — that is `writerDelete`'s doing, not the tier's.
-  assert.equal(desk.withdrawAny && desk.withdrawFrom.length > 0, false);
+  // Both halves in ONE assertion, and taken before anything narrows them. "Still never both — that
+  // is `writerDelete`'s doing, not the tier's" used to be restated as
+  // `withdrawAny && withdrawFrom.length > 0`, but the assert above had already narrowed
+  // `withdrawAny` to the literal `false`, so that expression folded to `false` and the line could
+  // not fail whatever `capabilityOf` returned.
+  assert.deepEqual({ withdrawAny: desk.withdrawAny, withdrawFrom: desk.withdrawFrom }, { withdrawAny: false, withdrawFrom: ["requested"] });
 });
 
 test("a withdrawal needs a status field, whichever tier is asking", () => {
@@ -164,4 +166,23 @@ test("the roster's tier never carries it, whatever the document says", () => {
   // is a different one from the staff's, and this package is not the only thing that can write it.
   assert.equal(capabilityOf(removable, "desk@gym.jp", "roster").withdrawAny, false);
   assert.equal(capabilityOf(removable, "guest@x.jp", "roster").withdrawAny, false);
+});
+
+test("a projection that names no roles grants the staff tier nothing, and every field says so", () => {
+  // The `member` half of a collection that names no roles at all. There is nothing for a role to
+  // grant, so the answer is the "grants nothing" document — and it is pinned WHOLE rather than one
+  // field at a time, because what matters is that every one of them is empty. Flipping any single
+  // field of it to `true` used to leave the entire suite green, and a page reading such an answer
+  // draws a control the rules will refuse, which arrives at the visitor as a bare permission error.
+  assert.deepEqual(capabilityOf({ cid: "names" }, "desk@gym.jp", "member"), {
+    cid: "names",
+    transitionAny: false,
+    transitionOwn: false,
+    assign: false,
+    assignees: [],
+    withdrawFrom: [],
+    withdrawAny: false,
+    sealed: [],
+    correctFrom: {},
+  });
 });

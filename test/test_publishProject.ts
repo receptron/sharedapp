@@ -18,6 +18,10 @@ import { projectApp, projectAppViews, type PublishStamp } from "../src/publishPr
 import { APP_PROTOCOL, APP_PROTOCOL_BASE } from "../src/appProtocol.js";
 import type { CollectionSchema } from "@mulmoclaude/core/collection";
 
+/** `.sort()`'s own order, spelled out: the rule that asks for a comparator cannot tell a string
+ *  array from a number one, where the default really is wrong. */
+const byText = (a: string, b: string): number => Number(a > b) - Number(a < b);
+
 const STAMP: PublishStamp = { uid: "uid_owner", email: "owner@salon.jp", publishedAt: 1_760_000_000_000, commit: "abc123def456" };
 
 const SCHEMA = { title: "Bookings", icon: "event", primaryKey: "id", fields: { id: { type: "string", primary: true } } } as unknown as CollectionSchema;
@@ -76,7 +80,7 @@ test("the submit window is lowered to epoch millis", () => {
   const { app } = projectApp(authored(), [], STAMP, null);
   const submit = publishedSubmit(app, "bookings");
   assert.deepEqual(submit.window, { fromMs: Date.parse("2026-09-01T00:00:00Z"), untilMs: Date.parse("2026-09-30T23:59:59Z") });
-  assert.deepEqual(Object.keys(submit.window as object).sort(), ["fromMs", "untilMs"], "the ISO form must not survive alongside the millis");
+  assert.deepEqual(Object.keys(submit.window as object).sort(byText), ["fromMs", "untilMs"], "the ISO form must not survive alongside the millis");
 });
 
 test("a one-sided window publishes only the bound that was declared", () => {
@@ -175,7 +179,7 @@ test("memberEmails is derived from members, and a hand-written one is overwritte
   // authored value could only ever turn publish into a bare permission error.
   const { app } = projectApp(authored(), [], STAMP, null);
   assert.deepEqual(app.memberEmails, ["owner@salon.jp", "stylist-a@salon.jp"]);
-  assert.deepEqual(Object.keys(app.members as object).sort(), app.memberEmails);
+  assert.deepEqual(Object.keys(app.members as object).sort(byText), app.memberEmails);
 });
 
 test("public.read stays a list — the shape the rules were tested against", () => {
