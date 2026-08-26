@@ -421,6 +421,7 @@ function submitCoherenceProblems(app: AuthoredApp, cid: string, submit: Authored
     );
   }
   problems.push(...selfDeleteProblems(cid, submit, collection));
+  problems.push(...selfWriteOwnerProblems(cid, submit));
   if (submit.audience === "participant" && Object.keys(app.members).length === 0) {
     problems.push(
       `public.submit.${cid}.audience is "participant" but the roster is empty: the rules resolve the submitter's role from members, so every submission is refused.`,
@@ -432,6 +433,42 @@ function submitCoherenceProblems(app: AuthoredApp, cid: string, submit: Authored
 /** The transition table's word for "no record yet" — the left-hand side that is
  *  not a status any record holds. */
 const INITIAL_KEY = "initial";
+
+/** WHICH ROW IS WHOSE, without which every self-write is refused.
+ *
+ *  `selfUpdate`, `selfTransitions` and `selfDelete` all reach the rules through `ownRow`, and
+ *  `ownRow` recognises exactly four bindings: `idFrom: "auth.uid"`, `idFrom: "auth.uid+field"`,
+ *  `emailField` (against a verified address) and `uidField`. Declare a self-write with none of
+ *  them and the app publishes cleanly, the projection advertises the control, `describe` reports
+ *  the fields — and every attempt is refused by the rules, with the one sentence they have.
+ *
+ *  `audience: "participant"` IS NOT ONE OF THEM, and it is the trap worth naming in the message.
+ *  It reads like ownership and `bindsSubmitterIdentity` above even counts it, but the two are
+ *  different questions: audience decides WHO MAY CREATE a row, and `ownRow` asks WHOSE A ROW IS.
+ *  A roster of twenty contributors satisfies the first and tells the rules nothing about the
+ *  second.
+ *
+ *  It bites hardest on exactly the app this key was added for. An article is named by its slug, so
+ *  `idFrom` is spent on the URL and cannot carry the author — which leaves `emailField` or
+ *  `uidField` as the only way to say who wrote it. */
+function selfWriteOwnerProblems(cid: string, submit: AuthoredSubmit): string[] {
+  const declared = [
+    submit.selfUpdate === undefined ? null : "selfUpdate",
+    submit.selfTransitions === undefined ? null : "selfTransitions",
+    submit.selfDelete === undefined ? null : "selfDelete",
+  ].filter((key): key is string => key !== null);
+  if (declared.length === 0) return [];
+  if (submit.idFrom === "auth.uid" || submit.idFrom === "auth.uid+field" || submit.emailField !== undefined || submit.uidField !== undefined) {
+    return [];
+  }
+  const named = declared.map((key) => `public.submit.${cid}.${key}`).join(", ");
+  return [
+    `${named} let a SUBMITTER write their own row, but ${cid} declares nothing that says which row is theirs. The rules answer that with ownRow, which ` +
+      `reads emailField, uidField, idFrom "auth.uid" or idFrom "auth.uid+field" — and none of those is declared here, so every one of these writes would be ` +
+      `refused. Add "emailField" (the submitter's verified address) or "uidField" (their opaque id, for a board that must not publish addresses).` +
+      (submit.audience === "participant" ? ' Note that audience "participant" is not enough: it decides who may CREATE a row, not whose a row is.' : ""),
+  ];
+}
 
 /** `selfDelete` names statuses, and a status nothing can reach grants nothing.
  *

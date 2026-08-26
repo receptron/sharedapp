@@ -363,7 +363,7 @@ test("selfUpdate without a statusField denies every self-edit", () => {
   refuses(
     problemsFor({
       collections: { bookings: {} },
-      public: { submit: { bookings: { auth: "verifiedEmail", createFields: ["a"], selfUpdate: { pending: ["a"] } } } },
+      public: { submit: { bookings: { auth: "verifiedEmail", emailField: "who", createFields: ["a"], selfUpdate: { pending: ["a"] } } } },
     }),
     "declares no statusField",
   );
@@ -373,8 +373,8 @@ test("selfDelete without a statusField denies every withdrawal", () => {
   // Same shape as selfUpdate above: the rules read the CURRENT status first.
   refuses(
     problemsFor({
-      collections: { bookings: {} },
-      public: { submit: { bookings: { auth: "verifiedEmail", createFields: ["a"], selfDelete: ["pending"] } } },
+      collections: { bookings: { submitOnly: true } },
+      public: { submit: { bookings: { auth: "verifiedEmail", emailField: "who", createFields: ["a", "who"], selfDelete: ["pending"] } } },
     }),
     "declares no statusField",
   );
@@ -385,8 +385,8 @@ test("selfDelete naming a status nothing reaches allows nothing", () => {
   // a refused write — and the author is never the person holding the phone.
   refuses(
     problemsFor({
-      collections: { bookings: { statusField: "status", transitions: { initial: ["pending"], pending: ["cancelled"] } } },
-      public: { submit: { bookings: { auth: "verifiedEmail", createFields: ["status"], selfDelete: ["withdrawn"] } } },
+      collections: { bookings: { submitOnly: true, statusField: "status", transitions: { initial: ["pending"], pending: ["cancelled"] } } },
+      public: { submit: { bookings: { auth: "verifiedEmail", emailField: "who", createFields: ["status", "who"], selfDelete: ["withdrawn"] } } },
     }),
     "which no record ever holds",
   );
@@ -399,9 +399,9 @@ test("selfDelete from the status a submission STARTS in is allowed", () => {
   // and the refusal is not a warning, it is a publish that does not happen.
   assert.deepEqual(
     problemsFor({
-      collections: { bookings: { statusField: "status", transitions: { initial: ["pending"], pending: ["approved"] } } },
+      collections: { bookings: { submitOnly: true, statusField: "status", transitions: { initial: ["pending"], pending: ["approved"] } } },
       public: {
-        submit: { bookings: { auth: "verifiedEmail", createFields: ["status"], initialStatus: "pending", selfDelete: ["pending"] } },
+        submit: { bookings: { auth: "verifiedEmail", emailField: "who", createFields: ["status", "who"], initialStatus: "pending", selfDelete: ["pending"] } },
       },
     }),
     [],
@@ -413,15 +413,15 @@ test("selfDelete from a status the table only moves records OUT of is allowed", 
   // the table's word for "no record yet", so a selfDelete naming it still allows nothing.
   assert.deepEqual(
     problemsFor({
-      collections: { bookings: { statusField: "status", transitions: { held: ["approved"] } } },
-      public: { submit: { bookings: { auth: "verifiedEmail", createFields: ["status"], selfDelete: ["held"] } } },
+      collections: { bookings: { submitOnly: true, statusField: "status", transitions: { held: ["approved"] } } },
+      public: { submit: { bookings: { auth: "verifiedEmail", emailField: "who", createFields: ["status", "who"], selfDelete: ["held"] } } },
     }),
     [],
   );
   refuses(
     problemsFor({
-      collections: { bookings: { statusField: "status", transitions: { initial: ["pending"], pending: ["approved"] } } },
-      public: { submit: { bookings: { auth: "verifiedEmail", createFields: ["status"], selfDelete: ["initial"] } } },
+      collections: { bookings: { submitOnly: true, statusField: "status", transitions: { initial: ["pending"], pending: ["approved"] } } },
+      public: { submit: { bookings: { auth: "verifiedEmail", emailField: "who", createFields: ["status", "who"], selfDelete: ["initial"] } } },
     }),
     "which no record ever holds",
   );
@@ -430,8 +430,8 @@ test("selfDelete from a status the table only moves records OUT of is allowed", 
 test("selfDelete with no statuses at all is refused rather than read as yes", () => {
   refuses(
     problemsFor({
-      collections: { bookings: { statusField: "status", transitions: { initial: ["pending"] } } },
-      public: { submit: { bookings: { auth: "verifiedEmail", createFields: ["status"], selfDelete: [] } } },
+      collections: { bookings: { submitOnly: true, statusField: "status", transitions: { initial: ["pending"] } } },
+      public: { submit: { bookings: { auth: "verifiedEmail", emailField: "who", createFields: ["status", "who"], selfDelete: [] } } },
     }),
     "allows nothing",
   );
@@ -443,10 +443,16 @@ test("selfDelete from a status only the STAFF can reach is allowed", () => {
   // and judging it against selfTransitions would refuse exactly that.
   assert.deepEqual(
     problemsFor({
-      collections: { bookings: { statusField: "status", transitions: { initial: ["pending"], pending: ["approved"] } } },
+      collections: { bookings: { submitOnly: true, statusField: "status", transitions: { initial: ["pending"], pending: ["approved"] } } },
       public: {
         submit: {
-          bookings: { auth: "verifiedEmail", createFields: ["status"], selfTransitions: { pending: ["cancelled"] }, selfDelete: ["approved"] },
+          bookings: {
+            auth: "verifiedEmail",
+            emailField: "who",
+            createFields: ["status", "who"],
+            selfTransitions: { pending: ["cancelled"] },
+            selfDelete: ["approved"],
+          },
         },
       },
     }),
@@ -1811,4 +1817,41 @@ test("accepts a slug field of its own, beside the fields the host fills", () => 
   // so long as the name is a field of its own. A check that refused the combination outright would
   // satisfy the three tests above.
   assert.deepEqual(articles(), []);
+});
+
+// --- a self-write with nothing saying whose the row is -----------------------------------------
+//
+// From the architecture review. `selfUpdate`, `selfTransitions` and `selfDelete` all reach the
+// rules through `ownRow`, which recognises four bindings and no others. Declared without one, the
+// app publishes cleanly, the projection advertises the control, `describe` reports the fields —
+// and every attempt is refused by the rules with the one sentence they have.
+
+/** A magazine-shaped declaration on a collection this gate knows about: the id is spent on the
+ *  URL name, so identity has nowhere to live but a field. */
+const authored = (submit: Record<string, unknown>) => ({
+  collections: { bookings: { submitOnly: true, statusField: "status", transitions: { initial: ["published"] } } },
+  public: {
+    submit: {
+      bookings: { auth: "verifiedEmail", idFrom: "slug", idField: "slug", initialStatus: "published", selfUpdate: { published: ["title"] }, ...submit },
+    },
+  },
+});
+
+test("refuses a self-write when nothing says which row is the submitter's", () => {
+  refuses(problemsFor(authored({ createFields: ["slug", "title", "status"] })), "nothing that says which row is theirs");
+});
+
+test('names audience "participant" as the trap it is', () => {
+  // It reads like ownership and `bindsSubmitterIdentity` even counts it — but the two are different
+  // questions. Audience decides who may CREATE a row; ownRow asks whose a row is. A roster of
+  // twenty contributors satisfies the first and tells the rules nothing about the second.
+  refuses(problemsFor(authored({ audience: "participant", createFields: ["slug", "title", "status"] })), 'audience "participant" is not enough');
+});
+
+test("accepts a self-write bound by an address, and by a uid", () => {
+  // The positive half, and both shapes: a magazine that stamps its author's address, and a board
+  // that must not publish one. A check that refused every declaration would satisfy both tests
+  // above.
+  assert.deepEqual(problemsFor(authored({ emailField: "authorEmail", createFields: ["slug", "title", "status", "authorEmail"] })), []);
+  assert.deepEqual(problemsFor(authored({ uidField: "authorUid", createFields: ["slug", "title", "status", "authorUid"] })), []);
 });
