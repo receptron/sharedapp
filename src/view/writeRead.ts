@@ -172,6 +172,35 @@ const addSeal = (write: ProjectedViewWrite, value: Record<string, unknown>): voi
   write.sealed = sealed;
 };
 
+/** The fields a submitter may CORRECT in their own row, per status.
+ *
+ *  A half of its own rather than part of `addWithdrawal`, because it is a different ask about the
+ *  same row: one takes the row away, the other changes what is inside it while it stands where it
+ *  is. An app may declare either without the other.
+ *
+ *  It brings the status field for the reason `selfDelete` does — the rules read the record's
+ *  CURRENT status before consulting the map — and here the field is REQUIRED rather than lenient,
+ *  which is the difference from that one: `selfDelete` predates the field riding along, so a
+ *  document deployed before that change can carry the list without it and must still be read.
+ *  Nothing has ever published this key without the field, and a map keyed by statuses that can
+ *  never be matched is a set of controls that can only fail.
+ *
+ *  Entries whose value is an empty list are dropped: "you may edit, and the fields you may edit are
+ *  none" reads as a permission and means the opposite. */
+const addCorrection = (write: ProjectedViewWrite, value: Record<string, unknown>): void => {
+  if (!isRecord(value.selfUpdate) || typeof value.statusField !== "string" || value.statusField === "") {
+    return;
+  }
+  const byStatus = Object.entries(value.selfUpdate)
+    .map(([status, fields]) => [status, stringsOf(fields)] as const)
+    .filter(([, fields]) => fields.length > 0);
+  if (byStatus.length === 0) {
+    return;
+  }
+  write.statusField = value.statusField;
+  write.selfUpdate = Object.fromEntries(byStatus);
+};
+
 export const projectedWriteOf = (value: unknown): ProjectedViewWrite | null => {
   if (!isRecord(value) || typeof value.cid !== "string" || value.cid === "") {
     return null;
@@ -180,7 +209,7 @@ export const projectedWriteOf = (value: unknown): ProjectedViewWrite | null => {
   // Each half attaches itself or does not, in one pass — a new one is a line
   // in this list rather than another statement in a function that is already
   // at its limit.
-  for (const add of [addTransitions, addAssignment, addWithdrawal]) {
+  for (const add of [addTransitions, addAssignment, addWithdrawal, addCorrection]) {
     add(write, value);
   }
   if (Array.isArray(value.writers)) {

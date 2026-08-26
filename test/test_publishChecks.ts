@@ -1316,11 +1316,15 @@ test("declaring uidField needs no protocol floor, because a build that lacks the
   assert.deepEqual(board(), []);
   // And the floor mechanism is still there for the change a schema cannot see — a key whose
   // MEANING moves. Naming a contract this build does not implement is refused, floor or no floor.
+  //
+  // The example moved from 1.1.0 to 2.1.0 when article views made this build emit 2.0.0: a floor is
+  // a statement about the PUBLISHER, so 1.1.0 is now a contract this build can honour and refusing
+  // it would be wrong. What must still be refused is one above the newest it implements.
   refuses(
     board((draft) => {
-      draft.protocol = "1.1.0";
+      draft.protocol = "2.1.0";
     }),
-    "this publisher writes 1.0.0",
+    "this publisher writes 2.0.0",
   );
 });
 
@@ -1632,4 +1636,179 @@ test("refuses selfDelete and sealed naming the same status", () => {
     ROUNDTABLE_CIDS,
   );
   refuses(problems, 'both name "closed"');
+});
+
+/** A magazine: one collection of articles, and a view declaring which field of one is which.
+ *
+ *  Its schema names a `readCount` nobody maps, so the TYPE half can be provoked without inventing
+ *  a second fixture — and `summary` is optional in the declaration and present here, so dropping
+ *  it from the schema is a real refusal rather than an absent key. */
+const magazineSchemas = [
+  schemaWithFields("articles", {
+    slug: { type: "string" },
+    title: { type: "string" },
+    lede: { type: "text" },
+    prose: { type: "markdown" },
+    status: { type: "string" },
+    readCount: { type: "number" },
+  }),
+];
+
+/** Which field of an article is which — the only part of the declaration these tests vary.
+ *
+ *  A TYPED parameter rather than a mutation of an untyped draft, and not only for tidiness: this
+ *  repository holds `test/tsconfig.json` to a type-coverage floor, and reaching into a
+ *  `Record<string, unknown>` through a cast to change one key spends that budget for nothing. */
+interface ArticleMap {
+  title: string;
+  body: string;
+  summary?: string;
+}
+
+const magazineDraft = (article: ArticleMap): Record<string, unknown> => ({
+  collections: { articles: { statusField: "status", transitions: { initial: ["published"] } } },
+  public: {
+    enabled: true,
+    read: ["articles"],
+    submit: {
+      articles: {
+        auth: "verifiedEmail",
+        idFrom: "slug",
+        idField: "slug",
+        audience: "participant",
+        createFields: ["slug", "title", "lede", "prose", "status"],
+        initialStatus: "published",
+      },
+    },
+  },
+  views: [{ id: "public", audience: "public", type: "article", collections: ["articles"], article }],
+});
+
+/** The magazine's problems, with the field mapping the caller wants to try. Sound by default, so a
+ *  test names ONLY the thing it is provoking. */
+const magazine = (article: Partial<ArticleMap> = {}) =>
+  schemaRefProblems(app(magazineDraft({ title: "title", body: "prose", summary: "lede", ...article })), magazineSchemas as never);
+
+// --- an article view's field mapping, against the schema that holds the articles ---------------
+//
+// Codex found this on #51. Every way of getting it wrong is QUIET: the runtime reads a key that is
+// not there, gets undefined, and draws something rather than failing.
+
+test("refuses an article title the schema does not declare", () => {
+  refuses(magazine({ title: "headline" }), "does not declare");
+});
+
+test("refuses an article body the schema does not declare", () => {
+  refuses(magazine({ body: "text" }), "renders EMPTY");
+});
+
+test("refuses a summary the schema does not declare, though the page would still draw", () => {
+  // The mildest of the three and still a refusal: the index falls back to the article's opening,
+  // so the author's declaration does nothing and nothing anywhere says so.
+  refuses(magazine({ summary: "excerpt" }), "does nothing");
+});
+
+test("refuses a title that is not text — a number is read as a string that is never there", () => {
+  refuses(magazine({ title: "readCount" }), "number field");
+});
+
+test("accepts a markdown body, which is what an article body ought to be", () => {
+  // The positive half. A check that refused every type would satisfy all four tests above.
+  assert.deepEqual(magazine(), []);
+});
+
+/** A magazine's SUBMIT declaration, on its own — the collection half of `magazineDraft` is not
+ *  what these vary, and `publishProblems` is the gate that reads them. */
+const articles = (edit: (submit: Record<string, unknown>) => void = () => {}) => {
+  const submit: Record<string, unknown> = {
+    auth: "verifiedEmail",
+    idFrom: "slug",
+    idField: "slug",
+    emailField: "authorEmail",
+    stampField: "publishedAt",
+    createFields: ["slug", "title", "prose", "authorEmail", "uid", "publishedAt", "status"],
+    initialStatus: "published",
+  };
+  edit(submit);
+  return publishProblems(
+    app({
+      // `submitOnly` because the declaration binds each record to its submitter (`emailField`), and
+      // this repository already refuses that pair without it — a record created any other way would
+      // carry that meaning without having earned it. Worth knowing for a magazine: an app that
+      // stamps articles with their author's address is one the DESK cannot enter an article into.
+      collections: { articles: { submitOnly: true, statusField: "status", transitions: { initial: ["published"] } } },
+      public: { enabled: true, read: ["articles"], submit: { articles: submit } },
+    }),
+    [{ cid: "articles", primaryKey: "id" }],
+    OWNER,
+  );
+};
+
+// --- a slug taken from a field the HOST fills in -----------------------------------------------
+//
+// Codex found this on #51. Each one publishes cleanly and then refuses every submission, in a way
+// that reads like a rules problem rather than a declaration one.
+
+test("refuses a slug field that is also the email field", () => {
+  // An address always contains '@', which the slug grammar refuses — so the create fails on a
+  // value the visitor never typed and cannot correct.
+  refuses(
+    articles((draft) => {
+      draft.idField = "authorEmail";
+      draft.emailField = "authorEmail";
+    }),
+    "which a URL name may not",
+  );
+});
+
+test("refuses a slug field that is also the stamp field", () => {
+  // Not a string at all: the rules pin it to the server's clock, so no id can be built from it.
+  refuses(
+    articles((draft) => {
+      draft.idField = "publishedAt";
+      draft.stampField = "publishedAt";
+    }),
+    "timestamp rather than a string",
+  );
+});
+
+test("refuses a slug field that is also the uid field", () => {
+  refuses(
+    articles((draft) => {
+      draft.idField = "uid";
+      draft.uidField = "uid";
+    }),
+    'idFrom "auth.uid" is for',
+  );
+});
+
+test("refuses a slug field that is also the status field, when a status is filled in", () => {
+  // The worse of the two shapes: EVERY article would be named after the initial status, so the
+  // first create takes `articles/published` and every one after it is a write to a document that
+  // exists. The app works exactly once, and nothing about that reads as a declaration problem.
+  refuses(
+    articles((draft) => {
+      draft.idField = "status";
+    }),
+    "would work exactly once",
+  );
+});
+
+test("refuses a slug field that is also the status field, when nothing fills it", () => {
+  // The other shape. With no `initialStatus` nothing writes the field at all, so every submission
+  // is refused for a missing id — naming a box the form never showed.
+  refuses(
+    articles((draft) => {
+      draft.idField = "status";
+      delete draft.initialStatus;
+    }),
+    "nothing fills it at all",
+  );
+});
+
+test("accepts a slug field of its own, beside the fields the host fills", () => {
+  // The positive half: an app may bind a record to its submitter and stamp it AND have a URL name,
+  // so long as the name is a field of its own. A check that refused the combination outright would
+  // satisfy the three tests above.
+  assert.deepEqual(articles(), []);
 });

@@ -32,7 +32,7 @@ import { normalizeViews, participantScope, writeFor, type NormalizedView, type V
 import { agentCids, AGENT_ID_PATTERN, AGENT_INSTRUCTION_MAX, RESERVED_AGENT_IDS } from "./appAgents.js";
 import { APP_PROTOCOL, protocolOf, protocolWithin } from "./appProtocol.js";
 import { writersOf } from "./appViews.js";
-import type { AuthoredAgent, AuthoredApp, AuthoredCollectionConfig, AuthoredSubmit } from "./publishManifest.js";
+import type { AuthoredAgent, AuthoredApp, AuthoredCollectionConfig, AuthoredSubmit, AuthoredView } from "./publishManifest.js";
 
 /** What publish knows about a shared collection in this repository, as far as
  *  these checks are concerned: its cid and the schema key its records are
@@ -367,7 +367,7 @@ function ruleReadFields(submit: AuthoredSubmit): { field: string; why: string }[
       why: `public.submit.<cid>.uidField — the rules compare it to the submitter's own uid, and refuse a create that carries another`,
     });
   }
-  if ((submit.idFrom === "auth.uid+field" || submit.idFrom === "field") && submit.idField !== undefined) {
+  if (ID_FROM_FIELD_MODES.includes(submit.idFrom ?? "") && submit.idField !== undefined) {
     fields.push({ field: submit.idField, why: `public.submit.<cid>.idField — the rules rebuild the document id from it` });
   }
   if (submit.gateOn !== undefined) {
@@ -413,7 +413,7 @@ function submitCoherenceProblems(app: AuthoredApp, cid: string, submit: Authored
       `public.submit.${cid}.idFrom is "auth.uid+field" but no idField is declared: the rules rebuild the document id from that field and refuse every create.`,
     );
   }
-  problems.push(...fieldIdProblems(cid, submit));
+  problems.push(...fieldIdProblems(cid, submit, collection?.statusField));
   if ((submit.selfUpdate !== undefined || submit.selfTransitions !== undefined || submit.selfDelete !== undefined) && !collection?.statusField) {
     problems.push(
       `public.submit.${cid}.selfUpdate / selfTransitions / selfDelete are declared per CURRENT STATUS, but collections.${cid} declares no statusField: ` +
@@ -484,6 +484,13 @@ function selfDeleteProblems(cid: string, submit: AuthoredSubmit, collection: Aut
   ];
 }
 
+/** The id modes whose document id is REBUILT FROM A SUBMITTED FIELD.
+ *
+ *  One list because three checks ask the same question — is this field the
+ *  rules' business, is it frozen, may it appear in `selfUpdate` — and a mode
+ *  added to two of the three is the silent half of a permissive declaration. */
+const ID_FROM_FIELD_MODES: readonly string[] = ["auth.uid+field", "field", "slug"];
+
 /** `idFrom: "field"` makes the document id a CLAIM ABOUT ANOTHER RECORD, and
  *  the claim is only worth what is checked.
  *
@@ -496,8 +503,20 @@ function selfDeleteProblems(cid: string, submit: AuthoredSubmit, collection: Aut
  *  `idIn` without the mode is refused for the opposite reason: the rules read
  *  it only in that branch, so an author who wrote it believes a check is
  *  running that is not. */
-function fieldIdProblems(cid: string, submit: AuthoredSubmit): string[] {
+function fieldIdProblems(cid: string, submit: AuthoredSubmit, statusField: string | undefined): string[] {
   const problems: string[] = [];
+  // `slug` needs the same field and refuses the same way, and needs `idIn` not
+  // at all: the id is the record's own name, so there is no other record for a
+  // reference to be wrong about. What `idIn` does for `field`, the grammar in
+  // the rules does here — and it cannot be done at publish time, because
+  // publish never sees a submission (principle 2).
+  if (submit.idFrom === "slug" && submit.idField === undefined) {
+    problems.push(
+      `public.submit.${cid}.idFrom is "slug" but no idField is declared: the rules take the document id from that field and refuse every create. ` +
+        `Name the field the URL name is submitted in — "idField": "slug".`,
+    );
+  }
+  problems.push(...slugSourceProblems(cid, submit, statusField));
   if (submit.idFrom === "field") {
     if (submit.idField === undefined) {
       problems.push(
@@ -515,10 +534,77 @@ function fieldIdProblems(cid: string, submit: AuthoredSubmit): string[] {
     const mode = submit.idFrom === undefined ? "absent" : JSON.stringify(submit.idFrom);
     problems.push(
       `public.submit.${cid}.idIn is declared but idFrom is ${mode}: the rules read idIn only for ` +
-        `idFrom "field", so as written nothing checks the referenced record and the declaration promises a check it does not perform.`,
+        `idFrom "field", so as written nothing checks the referenced record and the declaration promises a check it does not perform.` +
+        (submit.idFrom === "slug"
+          ? ` A "slug" id names the record itself rather than another one, so there is nothing for idIn to look in — delete it, or use idFrom "field" if the ` +
+            `name really must already exist as a record somewhere.`
+          : ""),
     );
   }
   return problems;
+}
+
+/** A slug taken from a field the HOST fills in, which is a name no visitor can ever choose.
+ *
+ *  `recordOf` writes three fields itself, whatever the form showed: the verified address, the
+ *  uid, and the server stamp. Naming one of them as the slug source publishes cleanly and then
+ *  refuses every single submission, in a way that reads like a rules problem:
+ *
+ *    - `emailField` always holds an address, and an address always contains `@`, which the slug
+ *      grammar refuses — so the create fails on a value the visitor never typed;
+ *    - `stampField` is not a string at all. It is a server timestamp, so the id cannot be built
+ *      from it and `recordId` reads it as empty;
+ *    - `uidField` is an opaque id nobody chose, which would work and is certainly not a URL name —
+ *      and it is already what `idFrom: "auth.uid"` exists for.
+ *
+ *  Refused here rather than left to the rules, because the rules can only say no: they see one
+ *  submission and cannot know the field was never the visitor's to fill. */
+function slugSourceProblems(cid: string, submit: AuthoredSubmit, statusField: string | undefined): string[] {
+  if (submit.idFrom !== "slug" || submit.idField === undefined) return [];
+  const filled: [string | undefined, string, string][] = [
+    [
+      submit.emailField,
+      `public.submit.${cid}.emailField`,
+      "the rules fill it with the submitter's verified address, and an address contains '@', which a URL name may not",
+    ],
+    [
+      submit.stampField,
+      `public.submit.${cid}.stampField`,
+      "the rules fill it with the server's clock, which is a timestamp rather than a string, so no id can be built from it",
+    ],
+    [
+      submit.uidField,
+      `public.submit.${cid}.uidField`,
+      'the rules fill it with the submitter\'s own uid, which nobody chose and no reader can recognise — that is what idFrom "auth.uid" is for',
+    ],
+    // The STATUS field, and the one that is easy to miss because it is declared on the COLLECTION
+    // rather than here — which is why it has to be passed in. `recordOf` fills it from
+    // `initialStatus`, so it is no more the visitor's than the three above, and it fails in
+    // whichever of two ways the declaration chooses. The second is the worse one: the app works
+    // exactly once.
+    [statusField, `collections.${cid}.statusField`, statusWhy(submit)],
+  ];
+  return filled
+    .filter(([field]) => field !== undefined && field === submit.idField)
+    .map(
+      ([, key, why]) =>
+        `public.submit.${cid}.idField is '${submit.idField}', which is also ${key}: ${why}. Give the URL name a field of its own, ` +
+        "one the person writing the article fills in.",
+    );
+}
+
+/** Which way a status-named slug fails, which depends on whether anything fills the field. */
+function statusWhy(submit: AuthoredSubmit): string {
+  if (submit.initialStatus === undefined) {
+    return (
+      "the rules read it from the declaration rather than from the form, and with no initialStatus nothing fills it at all — so every submission is " +
+      "refused for a missing id, naming a box the form never showed"
+    );
+  }
+  return (
+    `every record would be named '${submit.initialStatus}', so the first article takes that id and every article after it is a write to a document ` +
+    "that already exists — which the public submission path never allows. The app would work exactly once"
+  );
 }
 
 /** Every `idIn` target, checked against the collections this repository has.
@@ -991,10 +1077,12 @@ function selfUpdateSystemProblems(app: AuthoredApp, cid: string, submit: Authore
         "The rules freeze it (`uidHeld`) so the write is refused rather than obeyed — a button the page draws with nothing behind it, and a declaration that reads like it grants something",
     },
     {
-      field: submit.idFrom === "field" || submit.idFrom === "auth.uid+field" ? submit.idField : undefined,
+      field: ID_FROM_FIELD_MODES.includes(submit.idFrom ?? "") ? submit.idField : undefined,
       why:
         `it is public.submit.${cid}.idField, the field the document id was built from. ` +
-        "Editing it leaves the record claiming one thing while living at the id of another, and in `field` mode the rules refuse the write — a button the page draws and nothing behind it",
+        "Editing it leaves the record claiming one thing while living at the id of another, and in `field` and `slug` mode the rules refuse the write " +
+        "(`idHeld`) — a button the page draws and nothing behind it. In `slug` mode it is also the URL, so a rename that DID go through would strand every " +
+        "link ever shared",
     },
     {
       field: app.collections?.[cid]?.statusField,
@@ -1174,6 +1262,10 @@ function mirrorOfProblems(app: AuthoredApp, cid: string, collection: AuthoredCol
  *  is this publisher's own narrowing, kept because there is no reason for a
  *  published view to live in a subdirectory. */
 function viewPathProblems(view: NormalizedView): string[] {
+  // A platform-drawn page has no file, and `normalizeViews` has already refused
+  // the case where it has neither. Asked here rather than at the call site so
+  // that every caller of this check gets the same answer for the same view.
+  if (view.path === undefined) return [];
   if (isSafeCustomViewPath(view.path) && view.path.split("/").length === 2) return [];
   return [
     `${view.where}.path is '${view.path}': a published view is exactly one HTML file directly inside the collection's own views/ directory ` +
@@ -1577,7 +1669,53 @@ export function schemaRefProblems(app: AuthoredApp, schemas: { cid: string; sche
     ...Object.entries(app.public?.submit ?? {}).flatMap(([cid, submit]) => submitRefProblems(schemaOf, cid, submit)),
     ...Object.entries(app.collections ?? {}).flatMap(([cid, collection]) => mailRefProblems(schemaOf, cid, collection)),
     ...Object.entries(app.collections ?? {}).flatMap(([cid, collection]) => refInRefProblems(schemaOf, cid, collection)),
+    ...(app.views ?? []).flatMap((view, index) => articleRefProblems(schemaOf, view, `views[${index}]`)),
   ];
+}
+
+/** WHICH FIELD IS THE TITLE, checked against the collection that holds the articles.
+ *
+ *  The same kind of check as `mailRefProblems` above and for the same reason: this is a field NAME
+ *  in `app.json` and whether it exists is a fact about the SCHEMA, so neither gate can see it
+ *  alone. What makes it worth having is that every way of getting it wrong is quiet — the runtime
+ *  reads a key that is not there, gets `undefined`, and draws something rather than failing:
+ *
+ *    - a missing `title` falls back to the DOCUMENT ID, so the index reads as a list of slugs;
+ *    - a missing `body` renders an empty article, indistinguishable from one nobody has written;
+ *    - a missing `summary` silently uses the article's opening instead, so the author's declaration
+ *      does nothing and nothing says so.
+ *
+ *  And the TYPE matters as much as the name, exactly as it does for `refIn.ref`: a `number` or
+ *  `boolean` title is read as a string that is never there. `STRING_VALUED` is the same set, so a
+ *  `markdown` body — which is what an article body ought to be — passes, and so does a plain
+ *  `string` or `text`.
+ *
+ *  Judged only where there IS a schema, so a collection the host could not read is named once by
+ *  its own error rather than a second time here. */
+function articleRefProblems(schemaOf: ReadonlyMap<string, CollectionSchema>, view: AuthoredView, where: string): string[] {
+  const { article } = view;
+  const cid = view.collections[0];
+  const schema = cid === undefined ? undefined : schemaOf.get(cid);
+  if (view.type !== "article" || article === undefined || schema === undefined) return [];
+  const fields = schema.fields ?? {};
+  const known = Object.keys(fields).sort().join(", ") || "(none)";
+  const drawn: { key: "title" | "body" | "summary"; field: string | undefined; missing: string }[] = [
+    { key: "title", field: article.title, missing: "the page falls back to the document id, so the index reads as a list of URL names" },
+    { key: "body", field: article.body, missing: "every article renders EMPTY, which looks exactly like one nobody has written yet" },
+    { key: "summary", field: article.summary, missing: "the index quietly shows the article's opening instead, and this declaration does nothing" },
+  ];
+  return drawn.flatMap(({ key, field, missing }) => {
+    if (field === undefined) return [];
+    if (!declaredField(fields, field)) {
+      return [`${where}.article.${key} names '${field}', which the schema of '${cid}' does not declare — ${missing}. Fields on '${cid}': ${known}.`];
+    }
+    const spec = fields[field];
+    if (spec === undefined || STRING_VALUED.has(spec.type)) return [];
+    return [
+      `${where}.article.${key} names '${field}', which the schema of '${cid}' declares as a ${spec.type} field. The page reads it as text, so ` +
+        `${missing}. Use a string, text or markdown field.`,
+    ];
+  });
 }
 
 /** The mail queue's field names, against the collection's own schema.

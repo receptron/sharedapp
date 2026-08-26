@@ -15,7 +15,7 @@ import assert from "node:assert/strict";
 
 import { AuthoredAppZ, type AuthoredApp } from "../src/publishManifest.js";
 import { projectApp, projectAppViews, type PublishStamp } from "../src/publishProject.js";
-import { APP_PROTOCOL } from "../src/appProtocol.js";
+import { APP_PROTOCOL, APP_PROTOCOL_BASE } from "../src/appProtocol.js";
 import type { CollectionSchema } from "@mulmoclaude/core/collection";
 
 const STAMP: PublishStamp = { uid: "uid_owner", email: "owner@salon.jp", publishedAt: 1_760_000_000_000, commit: "abc123def456" };
@@ -268,24 +268,42 @@ test("every projection states the contract it was written against", () => {
   // must NOT draw them — so it rides in the public config and in every tier, from one publish.
   const app = authored();
   const { config } = projectApp(app, [], STAMP, null);
-  assert.equal(config.protocol, APP_PROTOCOL);
+  assert.equal(config.protocol, APP_PROTOCOL_BASE);
   for (const tier of projectAppViews(app, STAMP)) {
-    assert.equal(tier.config.protocol, APP_PROTOCOL, `${tier.tier} states no contract`);
+    assert.equal(tier.config.protocol, APP_PROTOCOL_BASE, `${tier.tier} states no contract`);
   }
 });
 
 test("an app using uidField is stamped the same contract as one that does not", () => {
-  // Deliberately not a version of its own. Adding a key does not move the number (see
-  // `appProtocol.ts`), and stamping uid apps apart would have refused them on every older reader —
-  // which they already refuse, on the shape, through the submit/form consistency check.
+  // Deliberately not a version of its own. Adding a key an older reader may IGNORE does not move
+  // the number (see `appProtocol.ts`), and stamping uid apps apart would have refused them on every
+  // older reader — which they already refuse, on the shape, through the submit/form consistency
+  // check. Contrast the article view below, which an older reader cannot ignore: it would draw the
+  // generated form in the page's place.
   const app = AuthoredAppZ.parse({
     ...authored(),
     public: { enabled: true, submit: { claims: { auth: "verifiedEmail", uidField: "uid", createFields: ["taskId", "uid"] } } },
   });
-  assert.equal(projectApp(app, [], STAMP, null).config.protocol, APP_PROTOCOL);
+  assert.equal(projectApp(app, [], STAMP, null).config.protocol, APP_PROTOCOL_BASE);
   for (const tier of projectAppViews(app, STAMP)) {
-    assert.equal(tier.config.protocol, APP_PROTOCOL, `${tier.tier} states the wrong contract`);
+    assert.equal(tier.config.protocol, APP_PROTOCOL_BASE, `${tier.tier} states the wrong contract`);
   }
+});
+
+test("an app with an article view is stamped the newer contract, and it alone", () => {
+  // The reader must UNDERSTAND `views[].type` to be correct — without it there is no HTML to find,
+  // so an older build concludes the app publishes no view and draws the generated form. That is a
+  // different app on the visitor's screen with nothing erroring, which is what the major is for.
+  const app = AuthoredAppZ.parse({
+    ...authored(),
+    public: { enabled: true, read: ["articles"], submit: {} },
+    views: [{ id: "public", audience: "public", type: "article", collections: ["articles"], article: { title: "title", body: "body" } }],
+  });
+  assert.equal(projectApp(app, [], STAMP, null).config.protocol, APP_PROTOCOL);
+  assert.notEqual(APP_PROTOCOL, APP_PROTOCOL_BASE);
+  // The app next to it in the same deployment is untouched. This is the whole reason the stamp is
+  // computed per app rather than bumped as a constant.
+  assert.equal(projectApp(authored(), [], STAMP, null).config.protocol, APP_PROTOCOL_BASE);
 });
 
 test("what is published is the contract this compiler emits, not the author's declaration", () => {
@@ -293,12 +311,12 @@ test("what is published is the contract this compiler emits, not the author's de
   // produced them. Publishing the author's number instead would let an app claim a contract its
   // documents do not honour, under a version a reader believes.
   const declared = AuthoredAppZ.parse({ ...authored(), protocol: "1.0.0" });
-  assert.equal(projectApp(declared, [], STAMP, null).config.protocol, APP_PROTOCOL);
+  assert.equal(projectApp(declared, [], STAMP, null).config.protocol, APP_PROTOCOL_BASE);
   // And the other direction, which is the one the floor makes tempting: an author who names a
   // contract they use nothing from has not made their app need a newer reader, so the documents
   // must not say they do — the stamp is a statement about the documents.
   const asked = AuthoredAppZ.parse({ ...authored(), protocol: "1.0.0" });
-  assert.equal(projectApp(asked, [], STAMP, null).config.protocol, APP_PROTOCOL);
+  assert.equal(projectApp(asked, [], STAMP, null).config.protocol, APP_PROTOCOL_BASE);
 });
 
 test("the public config says what a visitor may change about their own row", () => {

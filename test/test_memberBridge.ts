@@ -24,7 +24,19 @@ const NONCE = "nonce-1";
 const viewer: Viewer = {
   me: "desk@gym.jp",
   can: {
-    bookings: { cid: "bookings", transitionAny: true, transitionOwn: false, assign: false, assignees: [], withdrawFrom: [], withdrawAny: false, sealed: [] },
+    bookings: {
+      cid: "bookings",
+      transitionAny: true,
+      transitionOwn: false,
+      assign: false,
+      assignees: [],
+      withdrawFrom: [],
+      withdrawAny: false,
+      sealed: [],
+      // Nothing correctable: this reader is the DESK, and a writer is not narrowed per status —
+      // `isWriter` in the rules carries no field list at all.
+      correctFrom: {},
+    },
   },
 };
 

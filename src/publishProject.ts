@@ -37,11 +37,12 @@
 // pins that the rules accept it.
 
 import type { CollectionSchema } from "@mulmoclaude/core/collection";
-import { APP_PROTOCOL } from "./appProtocol.js";
+import { protocolFor } from "./appProtocol.js";
 import {
   limitFor,
   normalizeViews,
   participantScope,
+  type ArticleFields,
   VIEW_CONFIG_ID,
   VIEW_TIER,
   viewDocId,
@@ -144,7 +145,18 @@ export interface PublishedConfigDoc extends Record<string, unknown> {
    *  be handed on a world-readable document; what the page needs is the
    *  dataset list, and `publishedAt` beside it is what pins this declaration
    *  to the HTML published in the same run. */
-  view?: { collections: string[]; live?: string[]; limit?: Record<string, { rows: number; field: string }> };
+  view?: {
+    collections: string[];
+    live?: string[];
+    limit?: Record<string, { rows: number; field: string }>;
+    /** A page the RUNTIME draws from the declaration, instead of the HTML this document is paired
+     *  with — `views[].type`. Declared here as well as emitted, because a consumer that has to cast
+     *  to reach a key is a consumer that will read it wrong: this is the type the published
+     *  document actually has. */
+    type?: "article" | undefined;
+    /** Which field of an article is which, for `type: "article"`. */
+    article?: ArticleFields | undefined;
+  };
   /** The publisher's standing instructions for whoever sits at the PUBLIC face
    *  — see `appAgents.ts`.
    *
@@ -308,7 +320,11 @@ export function projectApp(
     // WHICH CONTRACT THESE DOCUMENTS KEEP — the number a reader compares before drawing them.
     // Never the author's `protocol`, which is a floor: the documents keep what produced them, and
     // an app claiming a contract its documents do not honour is worse than one claiming none.
-    protocol: APP_PROTOCOL,
+    //
+    // PER APP, not one constant: an app that declares nothing a reader must understand keeps the
+    // contract every deployed reader already knows, and only the ones that do move up. See
+    // `protocolFor`.
+    protocol: protocolFor(authored),
     enabled: authored.public?.enabled === true,
     read: authored.public?.read ?? [],
     submit,
@@ -353,11 +369,23 @@ export function projectApp(
 function publicViewProjection(
   app: AuthoredApp,
   view: NormalizedView,
-): { collections: string[]; live?: string[]; limit?: Record<string, { rows: number; field: string }> } {
+): {
+  collections: string[];
+  live?: string[];
+  limit?: Record<string, { rows: number; field: string }>;
+  type?: "article" | undefined;
+  article?: ArticleFields | undefined;
+} {
   const capped = view.collections.map((cid) => ({ cid, limit: limitFor(app, view, { cid, scope: "all" }).limit }));
   const limit = Object.fromEntries(capped.flatMap((entry) => (entry.limit === undefined ? [] : [[entry.cid, entry.limit]])));
   return {
     collections: view.collections,
+    // WHAT DRAWS THE PAGE, when it is not the HTML at `config/view`. A reader
+    // older than this contract does not know these two keys — which is why an
+    // app carrying them is stamped a higher major and refused whole, rather
+    // than drawn as the generated form (`protocolFor`).
+    ...(view.type === undefined ? {} : { type: view.type }),
+    ...(view.article === undefined ? {} : { article: view.article }),
     ...(view.live === undefined ? {} : { live: view.live }),
     // Keyed by cid rather than riding on each entry, because a public page's
     // `collections` is a list of NAMES: it has no per-collection object to
@@ -575,7 +603,7 @@ function tierConfig(authored: AuthoredApp, audience: Exclude<ViewAudience, "publ
   const config: AppViewConfigDoc = {
     // Every tier carries it, for the reason `projectApp` gives beside the public one: one publish
     // writes them all, and a reader that can draw one and not another is a half-drawn app.
-    protocol: APP_PROTOCOL,
+    protocol: protocolFor(authored),
     write: tierWrites(authored, audience, cids),
     views: tierViews(authored, audience, views, authored.participantRead ?? []),
     submit: tierSubmit(authored, cids),

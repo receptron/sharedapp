@@ -112,6 +112,20 @@ export interface ViewCapability {
    *
    *  Empty for a collection that seals nothing, which is nearly all of them. */
   sealed: string[];
+  /** `{ <current status>: [<field>...] }` — the fields this reader may CORRECT in a row they
+   *  submitted, while it holds that status (`public.submit[cid].selfUpdate`).
+   *
+   *  A map rather than a list, for the reason `withdrawFrom` is a list rather than a boolean: the
+   *  rules read the row's CURRENT status before consulting it, so a caller holding only "may edit"
+   *  would offer the correction on a row the desk has since approved and be refused when it acted.
+   *
+   *  Empty for a writer, and that is the same shape as `withdrawFrom`: the writer's permission is
+   *  answered from the ROLE with no status condition and no field list at all, so a list beside it
+   *  would describe a narrowing the rules do not apply.
+   *
+   *  Nothing here GRANTS the edit — `selfWriteOk` in the rules does, and answers last. What it
+   *  buys is a refusal that can name the field and the status. */
+  correctFrom: Record<string, string[]>;
 }
 
 /** Which tier's projection this is — the answer to what ABSENCE means. */
@@ -142,6 +156,7 @@ const NOTHING = {
   withdrawFrom: [] as string[],
   withdrawAny: false,
   sealed: [] as string[],
+  correctFrom: {} as Record<string, string[]>,
 };
 
 const has = (addresses: string[] | undefined, address: string): boolean => (addresses ?? []).includes(address);
@@ -180,6 +195,20 @@ const withdrawable = (write: ProjectedViewWrite, tier: WriteTier, writer: boolea
   return write.selfDelete ?? [];
 };
 
+/** The fields a correction may touch, per status.
+ *
+ *  The same shape as `withdrawable` beside it and answered the same way round: a WRITER gets
+ *  nothing, because `isWriter` in the rules carries no status condition and no field list, so a
+ *  map handed to them would describe a narrowing that is not applied. Everybody else gets the
+ *  submitter's half, which `ownRow` + `selfWriteOk` answer from the record without asking which
+ *  tier the reader was standing on. */
+const correctable = (write: ProjectedViewWrite, tier: WriteTier, writer: boolean): Record<string, string[]> => {
+  if (write.statusField === undefined || (tier === "member" && writer)) {
+    return {};
+  }
+  return write.selfUpdate ?? {};
+};
+
 /** One collection's capability for one address. */
 export const capabilityOf = (write: ProjectedViewWrite, address: string, tier: WriteTier): ViewCapability => {
   const movable = write.statusField !== undefined && write.transitions !== undefined;
@@ -197,6 +226,7 @@ export const capabilityOf = (write: ProjectedViewWrite, address: string, tier: W
         withdrawFrom: withdrawable(write, tier, false),
         withdrawAny: false,
         sealed: write.sealed ?? [],
+        correctFrom: correctable(write, tier, false),
       };
     }
     return { cid: write.cid, ...NOTHING };
@@ -217,6 +247,7 @@ export const capabilityOf = (write: ProjectedViewWrite, address: string, tier: W
     // different job.
     assignees: [...(write.writers ?? []), ...(write.rowWriters ?? [])].sort((left, right) => left.localeCompare(right)),
     withdrawFrom: withdrawable(write, tier, writer),
+    correctFrom: correctable(write, tier, writer),
     // The role, and only the role, and only on the tier the role belongs to.
     //
     // A projection that names no writers never reaches here (see `namesRoles`

@@ -328,9 +328,24 @@ const SubmitZ = z
      *  the public submission path never allows. Firestore decides that
      *  atomically, so unlike a countable capacity (see `stampField`) this is
      *  first-come ENFORCED rather than first-come read off a rank. */
-    idFrom: z.enum(["auto", "auth.uid", "auth.uid+field", "field"]).optional(),
+    /** How the document id is chosen.
+     *
+     *  `slug` is the one that is a NAME rather than a claim, and the pair is
+     *  worth reading together. `field` says the record is FOR another one — a
+     *  slot, a seat, an asset — so the id is a claim on something that must
+     *  exist, and `idIn` is required to check it. `slug` says the record is
+     *  CALLED that, which is a claim about nothing but itself: there is
+     *  nothing to point `idIn` at, and what stands in its place is a GRAMMAR
+     *  the rules enforce (`slugOk`), because the value becomes a path segment
+     *  and is handed back out as a URL.
+     *
+     *  Both are frozen after create (`idHeld`), and for `slug` that is what
+     *  keeps a published link resolving: the id is the URL, and the id cannot
+     *  follow a renamed field. */
+    idFrom: z.enum(["auto", "auth.uid", "auth.uid+field", "field", "slug"]).optional(),
     idField: z.string().trim().min(1).optional(),
-    /** Required by `idFrom: "field"` — see {@link IdInZ}. */
+    /** Required by `idFrom: "field"`, and meaningless for every other mode
+     *  including `slug` — see {@link IdInZ}. */
     idIn: IdInZ.optional(),
     /** The collection holding this record's PUBLIC PROJECTION, one row per
      *  contested thing, sharing its document id.
@@ -431,7 +446,55 @@ const ViewZ = z
   .object({
     id: z.string().trim().min(1),
     audience: z.enum(VIEW_AUDIENCES),
-    path: z.string().trim().min(1),
+    /** The HTML file this page is drawn from, relative to the repository root.
+     *
+     *  Optional since `type` exists, and EXACTLY ONE of the two is required —
+     *  a view is either a page the author wrote or a page the platform draws.
+     *  The pair is refused by `normalizeViews` rather than by zod, so the
+     *  refusal can say which key to delete in the author's own words. */
+    path: z.string().trim().min(1).optional(),
+    /** A page the PLATFORM draws from the declaration, instead of HTML.
+     *
+     *  `article` is the first and, today, the only one: the collection named in
+     *  `collections` holds articles, `article` below says which field is the
+     *  title and which is the markdown body, and the runtime renders them —
+     *  index at `/a/{slug}`, one article at `/a/{slug}/{id}`.
+     *
+     *  IT IS NOT A SECOND DRAWING PATH. The prohibition in
+     *  mulmoterminal's `plans/feat-shared-app-platform.md` is against a naive
+     *  rendering of `public.read` living beside declared views; this is a
+     *  DECLARED view, judged by the same gate, published to the same document,
+     *  and an app that wants a bespoke index still writes `path` and gets the
+     *  sandbox. What separates them is which side authored the page, which is
+     *  the distinction that has always decided this.
+     *
+     *  A reader that does not know this key would find no HTML and draw the
+     *  GENERATED FORM in a magazine's place, so it moves the app's protocol
+     *  major — see `protocolFor`. */
+    type: z.literal("article").optional(),
+    /** Which field of an article is which, for `type: "article"`.
+     *
+     *  The DATE is deliberately absent: an article is ordered and dated by
+     *  `public.submit[cid].stampField`, the one field the rules pin to the
+     *  server clock on create and freeze afterwards. An author-named date
+     *  field would be a value the writer types, and a magazine whose running
+     *  order can be typed is not one. */
+    article: z
+      .object({
+        // FIELD NAMES, and so the same shape every other field-name key here has
+        // (`emailField`, `uidField`, `stampField`, `statusField`) rather than `NameZ`.
+        //
+        // `NameZ` is the COLLECTION-ID grammar — letters, digits, `-` and `_` — and a schema's
+        // fields are under no such rule: `headline.text`, `Article Title` and a Japanese name are
+        // all legal fields that an author may reasonably want to draw an article from. Narrowing
+        // them here would refuse declarations the rules and the runtime both handle, and the
+        // refusal would be about a grammar that governs something else entirely.
+        title: z.string().trim().min(1),
+        body: z.string().trim().min(1),
+        summary: z.string().trim().min(1).optional(),
+      })
+      .strict()
+      .optional(),
     collections: z.array(NameZ).min(1),
     /** The subset of `collections` this page watches LIVE (`onSnapshot`)
      *  instead of reading once.
@@ -601,6 +664,9 @@ export type AuthoredCollectionConfig = z.infer<typeof CollectionConfigZ>;
 export type AuthoredSubmit = z.infer<typeof SubmitZ>;
 export type AuthoredAgent = z.infer<typeof AgentZ>;
 export type AuthoredMail = z.infer<typeof MailZ>;
+/** One entry of `views[]` as the author wrote it. Named because the checks reach into it — the
+ *  `article` block is a set of field names, and whether they exist is a fact about the SCHEMA. */
+export type AuthoredView = z.infer<typeof ViewZ>;
 
 export type AuthoredAppResult = { ok: true; app: AuthoredApp } | { ok: false; problems: string[] };
 

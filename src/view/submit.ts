@@ -176,6 +176,27 @@ const stringAt = (record: Record<string, unknown>, field: string): string => {
  *  MulmoTerminal's preview and mulmoserver's page each phrase this for whoever is looking at it. */
 export const MISSING_ID_FIELD = "missing-id-field";
 
+/** The same, for a slug that is present and is not a legal name. */
+export const BAD_SLUG = "bad-slug";
+
+/** What an `idFrom: "slug"` name may be.
+ *
+ *  A SECOND STATEMENT of a grammar the rules already hold (`slugOk` in
+ *  `firestore.rules`), and that is a cost taken deliberately rather than an
+ *  oversight. The rules are the authority — they run for a client that never
+ *  came through this package — and this one exists so that a host can refuse
+ *  early and name the field, instead of handing the visitor a bare permission
+ *  error from a write that was never going to land.
+ *
+ *  THE TWO MUST NOT DRIFT. Loosening this one only produces worse error
+ *  messages; loosening the rules' one is what would actually change what may be
+ *  published. If they are ever changed, the rules go first and this follows.
+ *
+ *  Identical to `VIEW_ID_PATTERN` today and kept separate on purpose: a view id
+ *  addresses a document this repository writes, and a slug is a name a stranger
+ *  submits. One constant would make a change to either silently change both. */
+export const SLUG_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
+
 /** A submission this module will not turn into a write, with the reason in a form a host can
  *  branch on. Thrown rather than returned so that no caller can reach a Firestore path by ignoring
  *  a return value — the whole failure mode being fixed is a bad id that travelled silently. */
@@ -201,9 +222,25 @@ export class SubmitRefused extends Error {
  *  again, which is the collision this refusal exists to prevent. What is JUDGED is trimmed; what
  *  the id is BUILT from is not, so an id whose spaces are part of it is unchanged. */
 export const missingIdField = (submit: SubmitSpec, record: Record<string, unknown>): string | undefined => {
-  if (submit.idFrom !== "field" && submit.idFrom !== "auth.uid+field") return undefined;
+  if (submit.idFrom !== "field" && submit.idFrom !== "auth.uid+field" && submit.idFrom !== "slug") return undefined;
   if (submit.idField === undefined) return undefined;
   return stringAt(record, submit.idField).trim() === "" ? submit.idField : undefined;
+};
+
+/** The slug field whose value is not a legal name, or `undefined`.
+ *
+ *  Beside `missingIdField` and asked the same way round: a host that would
+ *  rather ask than catch calls it first to put the error next to the input.
+ *  `recordId` asks it again, so skipping it is refused rather than allowed.
+ *
+ *  Empty is NOT this function's answer — `missingIdField` speaks for that, and
+ *  reporting "not a legal name" about a box the visitor left blank sends them
+ *  looking for a typo in nothing. */
+export const badSlugField = (submit: SubmitSpec, record: Record<string, unknown>): string | undefined => {
+  if (submit.idFrom !== "slug" || submit.idField === undefined) return undefined;
+  const value = stringAt(record, submit.idField);
+  if (value.trim() === "") return undefined;
+  return SLUG_ID_PATTERN.test(value) ? undefined : submit.idField;
 };
 
 /** The record id the declaration asks for.
@@ -226,6 +263,18 @@ export const recordId = (submit: SubmitSpec, uid: string, record: Record<string,
   const missing = missingIdField(submit, record);
   if (missing !== undefined) throw new SubmitRefused(MISSING_ID_FIELD, `The submission has no value for "${missing}", which its id is built from.`);
   if (submit.idFrom === "auth.uid") return uid;
+  // The name the record is published under. Refused here rather than sent,
+  // because the rules refuse it too and a write that cannot land should not
+  // reach the network with the field it was wrong about left unnamed.
+  const badSlug = badSlugField(submit, record);
+  if (badSlug !== undefined) {
+    throw new SubmitRefused(
+      BAD_SLUG,
+      `"${stringAt(record, badSlug)}" is not a legal name for "${badSlug}": it becomes this record's document id and its URL, ` +
+        "so it must be lowercase letters, digits and hyphens, start with a letter or digit, and be at most 64 characters.",
+    );
+  }
+  if (submit.idFrom === "slug" && submit.idField !== undefined) return stringAt(record, submit.idField);
   if (submit.idFrom === "field" && submit.idField !== undefined) return stringAt(record, submit.idField);
   if (submit.idFrom === "auth.uid+field" && submit.idField !== undefined) return `${uid}_${stringAt(record, submit.idField)}`;
   return unique;
