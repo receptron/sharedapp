@@ -142,7 +142,7 @@ test("a submitter corrects the fields their status names", () => {
 });
 
 test("a field outside the list is the READER's refusal; a status outside the map is the RECORD's", () => {
-  const outside = readIntentMessage(note({ values: { status: "answered" } }), [notes], pending, guest);
+  const outside = readIntentMessage(note({ values: { author: "somebody" } }), [notes], pending, guest);
   assert.equal(outside.ok, false);
   assert.equal(outside.reason, "not-permitted");
   const moved = readIntentMessage(note(), [notes], answered, guest);
@@ -166,4 +166,14 @@ test("a status whose name is a prototype key is not a permission", () => {
   const read = readIntentMessage(note(), [notes], inherited, guest);
   assert.equal(read.ok, false);
   assert.equal(read.reason, "illegal-transition");
+});
+
+test("a correction never moves the status, whoever asks", () => {
+  // Not because the status is frozen — it moves — but because it moves through `transition`, which
+  // is judged against the declared table and carries the notice the declaration names for that
+  // move. A correction able to set it would be a way past both, and the writer branch asks nothing
+  // about tables at all.
+  const read = readIntentMessage(correction({ values: { status: "archived" } }), [posts], held, author);
+  assert.equal(read.ok, false);
+  assert.equal(read.reason, "status-field");
 });

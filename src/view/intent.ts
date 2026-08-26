@@ -99,6 +99,11 @@ export type IntentRefusal =
    *  an id was built from, the uid. Refused for EVERYBODY, the owner included,
    *  which is why it is not `not-permitted`: no role makes it writable. */
   | "frozen-field"
+  /** A correction naming the collection's own `statusField`. Refused for everybody, a writer
+   *  included: a status moves through `transition`, which is judged against the declared table and
+   *  carries the notice the declaration names for that move. A correction that could set it would
+   *  be a way past both. */
+  | "status-field"
   /** A value longer than `maxBytes` allows. The one refusal here that the rules
    *  do not also make — see {@link ProjectedViewWrite.maxBytes}. */
   | "too-long"
@@ -407,6 +412,10 @@ const judgeCorrect = (write: ProjectedViewWrite, asked: { values?: Record<string
   }
   if (fields.some((field) => (write.frozen ?? []).includes(field))) {
     return { ok: false, reason: "frozen-field" };
+  }
+  // The status is not frozen — it moves — but not through THIS ask. See the refusal.
+  if (write.statusField !== undefined && fields.includes(write.statusField)) {
+    return { ok: false, reason: "status-field" };
   }
   if (overLongFields(values, write).length > 0) {
     return { ok: false, reason: "too-long" };
