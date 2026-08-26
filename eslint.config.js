@@ -75,19 +75,13 @@ export default tseslint.config(
       // handled where it actually lives: `Object.hasOwn` / `Map` at the lookups that take a
       // caller-supplied key (see `publishChecks.ts`), which the rule cannot tell apart from the rest.
       "security/detect-object-injection": "off",
-      // The only fs in this repository is in `scripts/` and one test, and every path is one of
-      // these four: an argument the operator passed (`check:pack`'s tarball, `check:apps`'s
-      // checkout), a path derived from the reading file's own location (`import.meta.url`), a
-      // repo-relative path `git ls-files` printed, or `GITHUB_STEP_SUMMARY` from the CI runner.
-      // What the rule is actually about — a path steered by the DATA a script reads — is absent,
-      // and this is a LIST rather than a universal negative so a fifth source shows up as a
-      // sentence to extend rather than as a claim that has quietly become false.
+      // The only fs in this repository is in `scripts/` and one test, and every path is one they
+      // compute from a checkout root that was handed to them.
       "security/detect-non-literal-fs-filename": "off",
-      // One finding, `scripts/check-pack.ts:82`. `collect` walks the VALUES of `exports`, so what
-      // reaches the regexp is an export TARGET (`"dist/view/*.js"`), never the subpath key that
-      // pointed at it. A target holding `*` names a SET of files, and the regexp is how a tarball
-      // is checked against that set. The literal halves go through `escapeRegExp` first; the only
-      // thing not escaped is the `*` the author wrote, which is the whole point of the pattern.
+      // One finding, in `check-pack.ts`'s `satisfied`. `collect` walks the VALUES of `exports`, so
+      // what reaches the regexp is an export TARGET (`"dist/view/*.js"`), never the subpath key
+      // that pointed at it. The literal halves go through `escapeRegExp`; the only thing not
+      // escaped is the `*` the author wrote, which is the whole point of the pattern.
       "security/detect-non-literal-regexp": "off",
       // A quantifier inside a quantifier is a shape rather than a judgement call, so this one stays
       // at error where `recommended` ships it at warn.
@@ -100,10 +94,8 @@ export default tseslint.config(
   },
   {
     // `src/` must not need `@types/node`, so node globals are NOT declared globally. `scripts/` is
-    // the opposite: it only ever runs under node — `yarn check:pack` in CI, `yarn check:apps` by
-    // hand before a release, `yarn typecheck:summary` either way — so declare exactly what it uses
-    // rather than pull in a `globals` dependency. NOT "in CI": `check:apps` is deliberately outside
-    // it, because `../apps` is a private checkout (see CLAUDE.md).
+    // the opposite: it only ever runs under `node` in CI, so declare exactly what it uses rather
+    // than pull in a `globals` dependency for one file.
     files: ["scripts/**/*.{mjs,ts}"],
     languageOptions: {
       globals: { console: "readonly", process: "readonly", URL: "readonly" },
@@ -111,8 +103,8 @@ export default tseslint.config(
     rules: {
       // These scripts are release gates run by a human or by CI, and what they print IS the result.
       "no-console": "off",
-      // One finding, `scripts/check-pack.ts:65`: it runs `tar` to list the tarball, from PATH,
-      // because there is no portable absolute path for it.
+      // One finding, in `check-pack.ts`: it runs `tar` to list the tarball, from PATH, because
+      // there is no portable absolute path for it.
       "sonarjs/no-os-command-from-path": "off",
     },
   },
@@ -206,18 +198,11 @@ export default tseslint.config(
   },
 
   // ---------------------------------------------------------------------------------------------
-  // DEBT. Two kinds of entry live below and they are not the same decision. Most set a rule to
-  // `warn` for the files listed and leave it at `error` everywhere else. A few set it to `off`,
-  // with the reason, where the rule is wrong about this code rather than inconvenient —
-  // `require-await`, `no-hardcoded-ip`, `super-linear-regex`.
-  //
-  // NO COUNTS. Entries used to carry the number each file reported when the rule went in, and
-  // those numbers rotted silently: `publishChecks.ts` was annotated 863 while the file had grown
-  // to 2,220, and a `capability.ts` entry said "two" assertions where the rule reports four. A
-  // count in a comment has no last case and nothing checks it; `yarn lint` prints today's.
+  // DEBT. Everything below is at `warn` for the files listed and at `error` everywhere else. The
+  // number after each file is what it reported when the rule went in.
   // ---------------------------------------------------------------------------------------------
   {
-    // `as` on empty literals that an annotation would type instead.
+    // Two `[] as string[]` on empty literals that an annotation would type instead.
     files: ["src/view/capability.ts"], // 2
     rules: { "@typescript-eslint/consistent-type-assertions": "warn" },
   },
@@ -225,7 +210,10 @@ export default tseslint.config(
     // A guard the types already prove — defensive reading of a schema the caller supplies. The
     // suite used to hold 66 of these and holds none: `node:assert/strict`'s `equal` narrows, so
     // every `if (!read.ok) return;` written after one was dead code the compiler already knew about.
-    files: ["src/publishChecks.ts", "src/view/parent.ts"],
+    files: [
+      "src/publishChecks.ts", // 2
+      "src/view/parent.ts", // 2
+    ],
     rules: { "@typescript-eslint/no-unnecessary-condition": "warn" },
   },
   {
@@ -248,15 +236,24 @@ export default tseslint.config(
     // Bare `.sort()` on arrays of strings — correct as written (the default IS lexicographic), but
     // the rule cannot tell those from the numeric case where the default is a bug. An explicit
     // comparator retires each entry.
-    files: ["src/appViews.ts", "src/publishChecks.ts", "src/publishProject.ts"],
+    files: [
+      "src/appViews.ts", // 1
+      "src/publishChecks.ts", // 8
+      "src/publishProject.ts", // 1
+    ],
     rules: { "sonarjs/no-alphabetical-sort": "warn" },
   },
   {
-    files: ["scripts/check-apps.mjs", "src/publishChecks.ts"],
+    files: [
+      "scripts/check-apps.mjs", // 1
+      "src/publishChecks.ts", // 1
+    ],
     rules: { "sonarjs/no-nested-conditional": "warn" },
   },
   {
-    files: ["src/publishChecks.ts"],
+    files: [
+      "src/publishChecks.ts", // 1
+    ],
     rules: { "sonarjs/no-nested-template-literals": "warn" },
   },
   {
@@ -278,16 +275,18 @@ export default tseslint.config(
     // Over the 600-line file guard. `publishChecks.ts` is 863 and the biggest single file here;
     // its refusals come in families, so a split is a real change rather than a move.
     files: [
-      "src/publishChecks.ts",
-      // The gate's suite. Splitting it moves assertions away from the family they belong to.
-      "test/test_publishChecks.ts",
+      "src/publishChecks.ts", // 863
+      "test/test_publishChecks.ts", // 1479 — the gate's suite; splitting it moves assertions away from the family they belong to
     ],
     rules: { "max-lines": "warn" },
   },
   {
     // One arrow of 181 lines (`parent.ts`'s message handler) and one of 81 (`srcdoc.ts`'s
     // bootstrap builder). Both are a single sequence with the reasoning written between the steps.
-    files: ["src/view/parent.ts", "src/view/srcdoc.ts"],
+    files: [
+      "src/view/parent.ts", // 181
+      "src/view/srcdoc.ts", // 81
+    ],
     rules: { "max-lines-per-function": "warn" },
   },
 );
