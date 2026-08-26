@@ -1308,7 +1308,9 @@ test("uidField binds the record to its submitter, so the collection needs submit
   // that MEAN "this person took this task".
   refuses(
     board((draft) => {
-      delete (draft.collections as Record<string, Record<string, unknown>>).claims!.submitOnly;
+      const claims = (draft.collections as Record<string, Record<string, unknown>>).claims;
+      assert.ok(claims, "the fixture must carry a claims collection for this refusal to mean anything");
+      delete claims.submitOnly;
     }),
     "collections.claims.submitOnly must be true",
   );

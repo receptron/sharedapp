@@ -37,7 +37,6 @@ const intent = (over: Record<string, unknown> = {}) => ({
 test("a declared move by a writer is judged good", () => {
   const read = readIntentMessage(intent(), [bookings], held, desk);
   assert.equal(read.ok, true);
-  if (!read.ok) return;
   assert.equal(read.intent.field, "status");
   assert.equal(read.intent.to, "approved");
 });
@@ -45,7 +44,6 @@ test("a declared move by a writer is judged good", () => {
 test("something that is not an intent gets NO request id to answer on", () => {
   const read = readIntentMessage({ hello: "there" }, [bookings], held, desk);
   assert.equal(read.ok, false);
-  if (read.ok) return;
   assert.equal(read.reason, "not-an-intent");
   // The branch carries neither, which is what makes answering it impossible rather than
   // discouraged. A caller reaching for `requestId` here is a type error.
@@ -56,7 +54,6 @@ test("something that is not an intent gets NO request id to answer on", () => {
 test("a refusal that IS an answer carries what was asked, so the page can name the record", () => {
   const read = readIntentMessage(intent({ cid: "payments" }), [bookings], held, desk);
   assert.equal(read.ok, false);
-  if (read.ok || read.reason === "not-an-intent") return;
   assert.equal(read.reason, "unknown-collection");
   assert.equal(read.requestId, "r1");
   assert.equal(read.asked.cid, "payments");
@@ -65,14 +62,12 @@ test("a refusal that IS an answer carries what was asked, so the page can name t
 test("a reader holding no role is refused, though the tier admitted them", () => {
   const read = readIntentMessage(intent(), [bookings], held, { address: "observer@gym.jp", tier: "member" });
   assert.equal(read.ok, false);
-  if (read.ok || read.reason === "not-an-intent") return;
   assert.equal(read.reason, "not-permitted");
 });
 
 test("a move the table does not carry is refused against the status the page holds", () => {
   const read = readIntentMessage(intent({ to: "cancelled" }), [bookings], held, desk);
   assert.equal(read.ok, false);
-  if (read.ok || read.reason === "not-an-intent") return;
   assert.equal(read.reason, "illegal-transition");
 });
 
@@ -81,7 +76,6 @@ test("a withdrawal carrying a destination is not read as an intent at all", () =
   // describe. Answering it would be describing it.
   const read = readIntentMessage(intent({ kind: "withdraw", to: "gone" }), [bookings], held, desk);
   assert.equal(read.ok, false);
-  if (read.ok) return;
   assert.equal(read.reason, "not-an-intent");
 });
 
@@ -92,13 +86,16 @@ test("mail rides with the move, and takes only the fields the declaration named"
   };
   const read = readIntentMessage(intent(), [mailed], held, desk);
   assert.equal(read.ok, true);
-  if (!read.ok) return;
+  // The move itself, checked HERE too and not only on the mail-less path: the two share nothing
+  // but a name, so `field` could be wrong on this branch alone with the whole suite green.
+  assert.equal(read.intent.field, "status");
+  assert.equal(read.intent.to, "approved");
   assert.equal(read.intent.mail?.to, "guest@x.jp");
-  assert.equal(read.intent.mail?.template, "approved");
+  assert.equal(read.intent.mail.template, "approved");
   // `constructor` is on every object's PROTOTYPE and on no record. A declaration naming it must
   // not put a function into the queued mail — the rules refuse that with a permission error
   // naming nothing, over a template that reads as correct.
-  assert.deepEqual(read.intent.mail?.data, { status: "requested" });
+  assert.deepEqual(read.intent.mail.data, { status: "requested" });
 });
 
 // --- the staff half of a withdrawal (`writerDelete`)
@@ -121,7 +118,6 @@ test("a writer takes any row away, and needs no status to do it", () => {
   // without one grants nothing there however it is declared.
   const read = readIntentMessage(withdraw("names", "n1"), [names], () => null, desk);
   assert.equal(read.ok, true);
-  if (!read.ok) return;
   assert.equal(read.intent.kind, "withdraw");
   assert.equal(read.intent.field, undefined, "a withdrawal moves nothing");
 });
@@ -140,7 +136,6 @@ test("a reader on the same page who holds no role is NOT-PERMITTED, rather than 
   const observer = { address: "observer@gym.jp", tier: "member" as const };
   const read = readIntentMessage(withdraw("names", "n1"), [names], () => null, observer);
   assert.equal(read.ok, false);
-  if (read.ok || read.reason === "not-an-intent") return;
   assert.equal(read.reason, "not-permitted");
 });
 
@@ -148,7 +143,6 @@ test("a collection that declares neither half is still not-writable", () => {
   const readOnly: ProjectedViewWrite = { cid: "names", writers: ["desk@gym.jp"] };
   const read = readIntentMessage(withdraw("names", "n1"), [readOnly], () => null, desk);
   assert.equal(read.ok, false);
-  if (read.ok || read.reason === "not-an-intent") return;
   assert.equal(read.reason, "not-writable");
 });
 
@@ -159,7 +153,6 @@ test("the mirror rides with a writer's delete too", () => {
   const mirrored: ProjectedViewWrite = { ...names, cid: "bookings", withdrawMirror: "slots" };
   const read = readIntentMessage(withdraw("bookings", "b1"), [mirrored], held, desk);
   assert.equal(read.ok, true);
-  if (!read.ok) return;
   assert.equal(read.intent.mirror, "slots");
 });
 
@@ -173,7 +166,6 @@ test("a participant's own withdrawal is judged exactly as before", () => {
   const later = (cid: string, itemId: string) => (cid === "bookings" && itemId === "b1" ? { status: "approved" } : null);
   const refused = readIntentMessage(withdraw("bookings", "b1"), [own], later, guest);
   assert.equal(refused.ok, false);
-  if (refused.ok || refused.reason === "not-an-intent") return;
   assert.equal(refused.reason, "illegal-transition");
 });
 
@@ -199,7 +191,6 @@ const topicHeld = (cid: string, itemId: string): Record<string, unknown> | null 
 test("a writer cannot take away a row the record has sealed", () => {
   const read = readIntentMessage(withdraw("topics", "t-closed"), [sealedNames], topicHeld, desk);
   assert.equal(read.ok, false);
-  if (read.ok) return;
   // About the STATE the row is in, not about who asked — the same sentence the
   // status-out-of-range branch says for the submitter's half.
   assert.equal(read.reason, "illegal-transition");

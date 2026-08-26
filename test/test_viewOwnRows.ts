@@ -48,7 +48,7 @@ test("the visitor's own rows ride with the state, on the handshake and on every 
   bridge.receive(ready);
   far.send({ nonce: NONCE });
   assert.equal(far.posted[0]?.type, VIEW_MESSAGE.state);
-  assert.deepEqual(far.posted[0]?.viewer, { mine: MINE }, "the first state a page ever sees must already say so");
+  assert.deepEqual(far.posted[0].viewer, { mine: MINE }, "the first state a page ever sees must already say so");
 
   // A watched page is re-sent on every change, and the answer to "have I answered?" changes with
   // it — most obviously one tick after this visitor's own submission.
@@ -70,7 +70,7 @@ test("a host that does not offer them sends no viewer at all", () => {
   bridge.receive(ready);
   far.send({ nonce: NONCE });
   assert.equal(far.posted[0]?.type, VIEW_MESSAGE.state);
-  assert.equal("viewer" in (far.posted[0] ?? {}), false);
+  assert.equal("viewer" in far.posted[0], false);
 });
 
 test("a host that knows the visitor has submitted nothing says so, and it is not the same message", () => {
@@ -117,5 +117,9 @@ test("a host that has not read yet says nothing, and it is not an empty answer",
 
   bridge.receive(ready);
   far.send({ nonce: NONCE });
-  assert.equal("viewer" in (far.posted[0] ?? {}), false);
+  // The message has to BE there. Written as `"viewer" in (far.posted[0] ?? {})` this passed for a
+  // host that posted nothing at all — which is the one outcome the test exists to rule out, since
+  // saying nothing and saying `{}` are the two answers it is distinguishing between.
+  assert.equal(far.posted[0]?.type, VIEW_MESSAGE.state);
+  assert.equal("viewer" in far.posted[0], false);
 });

@@ -240,7 +240,7 @@ test("a request made before the channel opens is held, then answered", async () 
   assert.equal(sent[0]?.key, "q1");
 
   const onmessage = port.onmessage as (event: { data: unknown }) => void;
-  onmessage({ data: { type: VIEW_MESSAGE.lookupResult, requestId: sent[0]?.requestId, known: true, found: true, record: { choice: "b" } } });
+  onmessage({ data: { type: VIEW_MESSAGE.lookupResult, requestId: sent[0].requestId, known: true, found: true, record: { choice: "b" } } });
   // Field by field: the promise settles with an object built INSIDE the vm, and a structural
   // comparison across realms fails on the prototype rather than on anything this test is about.
   const settledAnswer = (await answer) as { known: boolean; found: boolean; record: { choice: string } };

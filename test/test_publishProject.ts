@@ -17,6 +17,7 @@ import { AuthoredAppZ, type AuthoredApp } from "../src/publishManifest.js";
 import { projectApp, projectAppViews, type PublishStamp } from "../src/publishProject.js";
 import { APP_PROTOCOL, APP_PROTOCOL_BASE } from "../src/appProtocol.js";
 import type { CollectionSchema } from "@mulmoclaude/core/collection";
+import { byText } from "./helpers.js";
 
 const STAMP: PublishStamp = { uid: "uid_owner", email: "owner@salon.jp", publishedAt: 1_760_000_000_000, commit: "abc123def456" };
 
@@ -76,7 +77,20 @@ test("the submit window is lowered to epoch millis", () => {
   const { app } = projectApp(authored(), [], STAMP, null);
   const submit = publishedSubmit(app, "bookings");
   assert.deepEqual(submit.window, { fromMs: Date.parse("2026-09-01T00:00:00Z"), untilMs: Date.parse("2026-09-30T23:59:59Z") });
-  assert.deepEqual(Object.keys(submit.window as object).sort(), ["fromMs", "untilMs"], "the ISO form must not survive alongside the millis");
+  assert.deepEqual(Object.keys(submit.window as object).sort(byText), ["fromMs", "untilMs"], "the ISO form must not survive alongside the millis");
+});
+
+test("a submit that declares no window publishes NO window key, not an empty one", () => {
+  // `{}` and absent are different documents to the rules: a present `window` says a window was
+  // declared, and one carrying neither bound reads as a declaration with nothing in it. The
+  // projection drops the key by returning `undefined` into `compact`, and returning `{}` there
+  // instead left the whole suite green — so this pins the ABSENCE rather than the shape.
+  const app = authored({
+    public: { submit: { bookings: { auth: "verifiedEmail", createFields: ["customerEmail"] } } },
+  });
+  const projected = projectApp(app, [], STAMP, null);
+  const submit = publishedSubmit(projected.app, "bookings");
+  assert.equal("window" in submit, false, "an undeclared window must not appear as an empty object");
 });
 
 test("a one-sided window publishes only the bound that was declared", () => {
@@ -175,7 +189,7 @@ test("memberEmails is derived from members, and a hand-written one is overwritte
   // authored value could only ever turn publish into a bare permission error.
   const { app } = projectApp(authored(), [], STAMP, null);
   assert.deepEqual(app.memberEmails, ["owner@salon.jp", "stylist-a@salon.jp"]);
-  assert.deepEqual(Object.keys(app.members as object).sort(), app.memberEmails);
+  assert.deepEqual(Object.keys(app.members as object).sort(byText), app.memberEmails);
 });
 
 test("public.read stays a list — the shape the rules were tested against", () => {

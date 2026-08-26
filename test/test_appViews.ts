@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import { normalizeViews, participantScope, viewDocId, writeFor, PUBLIC_VIEW_ID } from "../src/appViews.js";
 import { projectAppViews } from "../src/publishProject.js";
 import { AuthoredAppZ } from "../src/publishManifest.js";
+import { byText } from "./helpers.js";
 
 const OWNER = "owner@salon.jp";
 const STAMP = { publishedAt: 1_700_000_000_000, email: OWNER, uid: "u-owner" };
@@ -144,11 +145,11 @@ test("the projection separates the tiers, and a staff page is not in the partici
   assert.equal(member?.tier, "member");
   assert.equal(participant?.tier, "roster");
   assert.deepEqual(
-    member?.config.views,
+    member.config.views,
     [{ id: "desk", collections: [{ cid: "bookings", scope: "all" }] }],
     "the front desk reads the whole collection, and only the front desk's tier knows the page exists",
   );
-  assert.deepEqual(participant?.config.views, [{ id: "mine", collections: [{ cid: "notices", scope: "all" }] }]);
+  assert.deepEqual(participant.config.views, [{ id: "mine", collections: [{ cid: "notices", scope: "all" }] }]);
   // The public page is neither tier's business: it keeps config/public.
   assert.equal(
     tiers.flatMap((tier) => tier.views).some((view) => view.audience === "public"),
@@ -232,7 +233,7 @@ test("the two audiences get DIFFERENT transition tables for the same field", () 
   // The participant's own transitions, and nothing of the staff's: an
   // `approved` button on their page is refused the moment it is pressed.
   assert.deepEqual(theirs[0]?.transitions, { pending: ["cancelled"] });
-  assert.equal(theirs[0]?.statusField, "status");
+  assert.equal(theirs[0].statusField, "status");
 });
 
 test("the roster's answer to WHO may write travels with the declaration", () => {
@@ -243,15 +244,15 @@ test("the roster's answer to WHO may write travels with the declaration", () => 
   // not satisfy). Without these lists the page draws approve for all three and
   // the rules refuse two of them when pressed.
   const staff = writeOf(salon(), "member");
-  assert.deepEqual(staff[0]?.writers, [OWNER, RECEPTION].sort(), "owner and editor write every row");
-  assert.deepEqual(staff[0]?.rowWriters, [STYLIST], "the assignee writes only the rows assigned to them");
+  assert.deepEqual(staff[0]?.writers, [OWNER, RECEPTION].sort(byText), "owner and editor write every row");
+  assert.deepEqual(staff[0].rowWriters, [STYLIST], "the assignee writes only the rows assigned to them");
   // A viewer is in neither, which is the whole difference between "holds a
   // role" and "may change this".
-  assert.ok(!(staff[0]?.writers ?? []).includes(OBSERVER));
-  assert.ok(!(staff[0]?.rowWriters ?? []).includes(OBSERVER));
+  assert.ok(!(staff[0].writers ?? []).includes(OBSERVER));
+  assert.ok(!(staff[0].rowWriters ?? []).includes(OBSERVER));
   // And the assignment candidates are these two together — not published a
   // third time, so a third list cannot disagree with the two the rules read.
-  assert.deepEqual([...(staff[0]?.writers ?? []), ...(staff[0]?.rowWriters ?? [])].sort(), [OWNER, RECEPTION, STYLIST].sort());
+  assert.deepEqual([...(staff[0].writers ?? []), ...(staff[0].rowWriters ?? [])].sort(byText), [OWNER, RECEPTION, STYLIST].sort(byText));
 });
 
 test("assignment, and every address, reach the staff tier only", () => {
@@ -272,7 +273,7 @@ test("the assignee role with no field to compare grants nothing, and says so", (
   const noField = salon({ collections: { bookings: { statusField: "status", transitions: { pending: ["approved"] } } } });
   const staff = writeOf(noField, "member");
   assert.equal(staff[0]?.rowWriters, undefined);
-  assert.deepEqual(staff[0]?.writers, [OWNER, RECEPTION].sort(), "the unscoped writers are still named");
+  assert.deepEqual(staff[0]?.writers, [OWNER, RECEPTION].sort(byText), "the unscoped writers are still named");
 });
 
 test("the statuses a submitter may withdraw from reach a member too, where no role deletes", () => {
@@ -311,9 +312,9 @@ test("the status field a withdrawal is checked against travels with it, table or
   });
   const staff = writeOf(noTable, "member")[0];
   assert.equal(staff?.statusField, "status");
-  assert.deepEqual(staff?.selfDelete, ["pending"]);
+  assert.deepEqual(staff.selfDelete, ["pending"]);
   // Still not movable: a field with no table must not offer every value.
-  assert.equal(staff?.transitions, undefined);
+  assert.equal(staff.transitions, undefined);
 });
 
 test("the collection a withdrawal must reopen travels with the permission", () => {
@@ -350,7 +351,7 @@ test("withdrawal alone is enough to publish an entry", () => {
   });
   const theirs = writeOf(onlyWithdraw, "roster");
   assert.deepEqual(theirs[0]?.selfDelete, ["pending"]);
-  assert.equal(theirs[0]?.transitions, undefined);
+  assert.equal(theirs[0].transitions, undefined);
 });
 
 test("the mail a transition queues reaches the staff tier only", () => {
@@ -393,7 +394,7 @@ test("the write tables follow the declaration", () => {
     .filter((entry) => entry.tier === "member")
     .flatMap((entry) => entry.config.write);
   assert.equal(staff[0]?.statusField, "state");
-  assert.deepEqual(staff[0]?.transitions, { open: ["closed"] });
+  assert.deepEqual(staff[0].transitions, { open: ["closed"] });
 });
 
 test("a participant reads a collection the app opens to the world", () => {
@@ -463,7 +464,7 @@ test("the staff tier is handed the writer's delete, and the roster's tier is not
   assert.equal(staff?.writerDelete, true);
   // And the participant's half is untouched by it: `selfDelete` is what the rules read for THEM,
   // and this app declares none.
-  assert.equal(staff?.selfDelete, undefined);
+  assert.equal(staff.selfDelete, undefined);
   assert.equal(writeFor(deletable(), "participant", "bookings")?.writerDelete, undefined);
   assert.equal(writeFor(deletable(), "public", "bookings")?.writerDelete, undefined);
 });
@@ -473,7 +474,7 @@ test("a collection with NO status is deletable by a writer, which the participan
   // nothing there however it is declared. The role branch asks no status at all.
   const staff = writeFor(deletable(), "member", "names");
   assert.equal(staff?.writerDelete, true);
-  assert.equal(staff?.statusField, undefined);
+  assert.equal(staff.statusField, undefined);
 });
 
 test("the mirror rides with a writer's delete, because the rules ask for it before they ask who", () => {
@@ -508,8 +509,8 @@ test("an article view normalizes with its field mapping", () => {
   const result = normalizeViews(app({ views: [ARTICLE] }));
   assert.ok(result.ok);
   assert.equal(result.views[0]?.type, "article");
-  assert.equal(result.views[0]?.path, undefined, "a platform page names no file");
-  assert.deepEqual(result.views[0]?.article, { title: "title", body: "body", summary: "summary" });
+  assert.equal(result.views[0].path, undefined, "a platform page names no file");
+  assert.deepEqual(result.views[0].article, { title: "title", body: "body", summary: "summary" });
 });
 
 test("refuses a view that declares both a path and a type", () => {
@@ -562,7 +563,7 @@ test("a submitter's own tiers carry the fields they may correct, per status", ()
     assert.deepEqual(write?.selfUpdate, { published: ["title", "body"] }, `${audience} carries no selfUpdate`);
     // Beside the field the rules read the CURRENT status from, or the map names statuses nothing
     // can be compared against.
-    assert.equal(write?.statusField, "status", `${audience} carries selfUpdate with no statusField`);
+    assert.equal(write.statusField, "status", `${audience} carries selfUpdate with no statusField`);
   }
 });
 

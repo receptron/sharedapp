@@ -89,8 +89,8 @@ test("a host that serves nothing still answers every ask", async () => {
       assert.deepEqual(answer, { type: VIEW_MESSAGE.lookupResult, requestId: "r-lookup", known: false, found: false });
       continue;
     }
-    assert.equal(answer?.ok, false);
-    assert.equal(answer?.error, READ_ONLY, `${ask.name} should say the host writes nothing`);
+    assert.equal(answer.ok, false);
+    assert.equal(answer.error, READ_ONLY, `${ask.name} should say the host writes nothing`);
   }
 });
 
@@ -129,7 +129,7 @@ test("a host that serves everything performs every ask, whatever page it is", as
       assert.deepEqual(answer, { type: VIEW_MESSAGE.lookupResult, requestId: "r-lookup", known: true, found: true, record: { id: "slot-1" } });
       continue;
     }
-    assert.equal(answer?.ok, true);
+    assert.equal(answer.ok, true);
   }
 });
 
@@ -286,7 +286,7 @@ test("a submit port that throws SYNCHRONOUSLY still answers, and still reports",
   // knows the write may have landed before the host threw.
   const answered = far.posted.find((message) => message.type === VIEW_MESSAGE.result);
   assert.equal(answered?.requestId, "r-submit");
-  assert.equal(answered?.ok, false);
+  assert.equal(answered.ok, false);
   assert.deepEqual(defects, ["r-submit"], "the host's own bug is reported, after the view is answered");
 });
 
@@ -306,7 +306,7 @@ test("a write that lands after a restart answers its OWN page, and settles nobod
   // write is awaited this is the real `resolve`. Initialised rather than left null because control
   // flow cannot see that from here, and a test that silently skipped the release would pass by
   // never testing anything.
-  let release: (outcome: { ok: boolean }) => void = () => {
+  let release: (outcome: { ok: boolean }) => void = (_outcome) => {
     throw new Error("the write was released before it started");
   };
   const parent = viewParent(
@@ -344,7 +344,7 @@ test("a write that lands after a restart answers its OWN page, and settles nobod
   await writing;
   await settle();
 
-  assert.equal(cell.pending.value?.requestId, "r-second", "and it is still open afterwards");
+  assert.equal(cell.pending.value.requestId, "r-second", "and it is still open afterwards");
   assert.deepEqual([...second.posted], [], "nothing from the old write reaches the new page");
   assert.equal(first.posted.at(-1)?.requestId, "r-submit", "the page that asked is answered on its own channel");
 });
@@ -362,7 +362,7 @@ test("the host may close the confirmation when the record lands, and keep workin
   // Initialised to a throw rather than to null: assigned inside the port, TypeScript narrows a
   // nullable to `null` at the call below, and a test that has not started its write should say so
   // loudly anyway.
-  let release: (outcome: { ok: boolean }) => void = () => {
+  let release: (outcome: { ok: boolean }) => void = (_outcome) => {
     throw new Error("the write was released before it started");
   };
   const parent = opened(
@@ -405,7 +405,7 @@ test("a host that ignores `written` is unchanged: the dialog closes when the wri
   // Initialised to a throw rather than to null: assigned inside the port, TypeScript narrows a
   // nullable to `null` at the call below, and a test that has not started its write should say so
   // loudly anyway.
-  let release: (outcome: { ok: boolean }) => void = () => {
+  let release: (outcome: { ok: boolean }) => void = (_outcome) => {
     throw new Error("the write was released before it started");
   };
   const parent = opened(
@@ -443,7 +443,7 @@ test("closing early does not close the confirmation the NEXT page opened", async
   // Initialised to a throw rather than to null: assigned inside the port, TypeScript narrows a
   // nullable to `null` at the call below, and a test that has not started its write should say so
   // loudly anyway.
-  let release: (outcome: { ok: boolean }) => void = () => {
+  let release: (outcome: { ok: boolean }) => void = (_outcome) => {
     throw new Error("the write was released before it started");
   };
   const parent = viewParent(
@@ -474,11 +474,11 @@ test("closing early does not close the confirmation the NEXT page opened", async
   cell.pending.value = { requestId: "r-second", cid: "bookings", values: { note: "y" } };
 
   written();
-  assert.equal(cell.pending.value?.requestId, "r-second", "the new page's dialog is untouched");
+  assert.equal(cell.pending.value.requestId, "r-second", "the new page's dialog is untouched");
 
   release({ ok: true });
   await writing;
-  assert.equal(cell.pending.value?.requestId, "r-second", "and still untouched afterwards");
+  assert.equal(cell.pending.value.requestId, "r-second", "and still untouched afterwards");
   assert.equal(first.posted.at(-1)?.requestId, "r-submit", "the write that asked is still answered");
 });
 
@@ -494,7 +494,7 @@ test("a write that closed early and finished behind a REPLACED page tells only t
   let written: () => void = () => {
     throw new Error("the port was never called");
   };
-  let release: (outcome: { ok: boolean }) => void = () => {
+  let release: (outcome: { ok: boolean }) => void = (_outcome) => {
     throw new Error("the write was released before it started");
   };
   const parent = viewParent(

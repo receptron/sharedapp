@@ -23,13 +23,14 @@ const parse = (overrides: Record<string, unknown> = {}): ReturnType<typeof parse
 const problems = (overrides: Record<string, unknown>): string[] => {
   const parsed = parse(overrides);
   assert.equal(parsed.ok, false, "expected the declaration to be refused");
-  return parsed.ok ? [] : parsed.problems;
+  return parsed.problems;
 };
 
 const refuses = (lines: string[], fragment: string): void => {
+  const listed = lines.map((line) => `  - ${line}`).join("\n") || "  (none)";
   assert.ok(
     lines.some((line) => line.includes(fragment)),
-    `expected a problem mentioning ${JSON.stringify(fragment)}, got:\n${lines.map((line) => `  - ${line}`).join("\n") || "  (none)"}`,
+    `expected a problem mentioning ${JSON.stringify(fragment)}, got:\n${listed}`,
   );
 };
 
@@ -82,17 +83,17 @@ test("a file that is not a declaration says so in the words discovery uses", () 
   // not JSON, and a file that is JSON but is not an object.
   const broken = parseAuthoredApp("{ not json");
   assert.equal(broken.ok, false);
-  refuses(broken.ok ? [] : broken.problems, "not valid JSON");
+  refuses(broken.problems, "not valid JSON");
 
   const notAnObject = parseAuthoredApp(JSON.stringify(["app"]));
   assert.equal(notAnObject.ok, false);
-  refuses(notAnObject.ok ? [] : notAnObject.problems, "is not a JSON object");
+  refuses(notAnObject.problems, "is not a JSON object");
 });
 
 test("the roster is required — an app nobody is named in has no owner to publish it", () => {
   const parsed = parseAuthoredApp(JSON.stringify({ aid: "app_test" }));
   assert.equal(parsed.ok, false);
-  refuses(parsed.ok ? [] : parsed.problems, "members:");
+  refuses(parsed.problems, "members:");
 });
 
 test("the optional keys a repository may already be carrying all parse", () => {

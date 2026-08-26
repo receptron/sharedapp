@@ -205,48 +205,30 @@ export default tseslint.config(
     rules: { "@typescript-eslint/consistent-type-assertions": "warn" },
   },
   {
-    // A guard the types already prove. In `src/` (4) it is defensive reading of a schema the caller
-    // supplies; in the suite it is mostly `x !== null && x.field`, written so the compiler narrows
-    // where an assertion is banned.
+    // A guard the types already prove — defensive reading of a schema the caller supplies. The
+    // suite used to hold 66 of these and holds none: `node:assert/strict`'s `equal` narrows, so
+    // every `if (!read.ok) return;` written after one was dead code the compiler already knew about.
     files: [
       "src/publishChecks.ts", // 2
       "src/view/parent.ts", // 2
-      "test/test_appProtocol.ts", // 1
-      "test/test_appViews.ts", // 18
-      "test/test_authoredApp.ts", // 4
-      "test/test_authoredSlug.ts", // 3
-      "test/test_memberBridge.ts", // 8
-      "test/test_memberSelfWithdraw.ts", // 3
-      "test/test_publishBaseline.ts", // 2
-      "test/test_viewCapability.ts", // 1
-      "test/test_viewIntent.ts", // 14
-      "test/test_viewLookup.ts", // 1
-      "test/test_viewOwnRows.ts", // 2
-      "test/test_viewParent.ts", // 7
-      "test/test_viewWriteRead.ts", // 2
     ],
     rules: { "@typescript-eslint/no-unnecessary-condition": "warn" },
   },
   {
-    // `async` on a helper that never awaits — harmless in a suite, and a signature the callers read
-    // as "this settles later".
-    files: [
-      "test/test_viewLookup.ts", // 8
-      "test/test_viewNotice.ts", // 3
-      "test/test_viewOwnRows.ts", // 5
-      "test/test_viewParent.ts", // 5
-    ],
-    rules: { "@typescript-eslint/require-await": "warn" },
+    // OFF for the suite, because the rule is wrong about this code rather than inconvenient. Every
+    // finding is a STUB standing in for an async seam — `submit: async () => ({ ok: true })` against
+    // `(pending) => Promise<{ ok }>`. The seam's type demands a promise, so `async` cannot simply be
+    // dropped; `() => Promise.resolve(…)` says the same thing with more syntax and no more safety.
+    // A stub that awaits nothing is what a stub IS. Still an error in `src/`, where an `async` that
+    // never awaits is worth knowing about.
+    files: ["test/**/*.ts"],
+    rules: { "@typescript-eslint/require-await": "off" },
   },
   {
     // Four conditionals on a nullable string, where "" and absent take the same branch on purpose.
     // Worth spelling out one at a time, since an empty field name is a real authored mistake.
     files: ["src/publishChecks.ts"], // 4
     rules: { "@typescript-eslint/strict-boolean-expressions": "warn" },
-  },
-  {
-    files: ["test/test_publishChecks.ts"], // 1
-    rules: { "@typescript-eslint/no-non-null-assertion": "warn" },
   },
   {
     // Bare `.sort()` on arrays of strings — correct as written (the default IS lexicographic), but
@@ -256,15 +238,8 @@ export default tseslint.config(
       "src/appViews.ts", // 1
       "src/publishChecks.ts", // 8
       "src/publishProject.ts", // 1
-      "test/test_appViews.ts", // 4
-      "test/test_authoredSlug.ts", // 1
-      "test/test_publishProject.ts", // 2
     ],
     rules: { "sonarjs/no-alphabetical-sort": "warn" },
-  },
-  {
-    files: ["test/test_viewParent.ts"], // 5 — a handler called with an argument its stub ignores
-    rules: { "sonarjs/no-extra-arguments": "warn" },
   },
   {
     files: [
@@ -276,25 +251,30 @@ export default tseslint.config(
   {
     files: [
       "src/publishChecks.ts", // 1
-      "test/test_authoredApp.ts", // 1
     ],
     rules: { "sonarjs/no-nested-template-literals": "warn" },
   },
   {
-    // A `!==` the rule reads as always true, and a 1.2.3.4 standing in for a host in a fixture.
-    files: ["test/test_appProtocol.ts"], // 1 + 1
-    rules: { "sonarjs/different-types-comparison": "warn", "sonarjs/no-hardcoded-ip": "warn" },
+    // `"1.2.3.4"` is not an address here: it is the fixture for "four numbers is not a version",
+    // sitting in a list beside `"1.2"`, `"v1.2.3"` and `"beta"`. Any other quad reads as an address
+    // to this rule too, so there is no fixture that both makes the point and passes.
+    files: ["test/test_appProtocol.ts"],
+    rules: { "sonarjs/no-hardcoded-ip": "off" },
   },
   {
-    files: ["test/test_viewSelfContained.ts"], // 1 — backtracking in the fixture's own scan
-    rules: { "sonarjs/super-linear-regex": "warn" },
+    // The scanner this flags reads THIS repository's own `src/view/*.ts`, line by line, at test
+    // time. Backtracking is a statement about untrusted input, and there is none — while the regexp
+    // decides which imports count toward the view runtime being self-contained, so rewriting it
+    // would need the whole differential proof for a property nothing here is exposed to.
+    files: ["test/test_viewSelfContained.ts"],
+    rules: { "sonarjs/super-linear-regex": "off" },
   },
   {
     // Over the 600-line file guard. `publishChecks.ts` is 863 and the biggest single file here;
     // its refusals come in families, so a split is a real change rather than a move.
     files: [
       "src/publishChecks.ts", // 863
-      "test/test_publishChecks.ts", // its suite
+      "test/test_publishChecks.ts", // 1479 — the gate's suite; splitting it moves assertions away from the family they belong to
     ],
     rules: { "max-lines": "warn" },
   },

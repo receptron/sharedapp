@@ -40,7 +40,7 @@ const chat = (overrides: Record<string, unknown> = {}) =>
       // Holds a role, so the tier admits them, and may write nothing by role.
       [OBSERVER]: { "*": "viewer" },
     },
-    collections: { messages: { submitOnly: true, statusField: "status", ...((overrides.collection as object) ?? {}) } },
+    collections: { messages: { submitOnly: true, statusField: "status", ...(overrides.collection as object) } },
     public: {
       submit: {
         messages: {
@@ -116,7 +116,6 @@ test("a status the declaration does not name is still refused", () => {
   const elsewhere = (cid: string, itemId: string) => (mine(cid, itemId) === null ? null : { status: "archived", author: OBSERVER });
   const read = readIntentMessage(withdrawal(OBSERVER), [write], elsewhere, { address: OBSERVER, tier: "member" });
   assert.equal(read.ok, false);
-  if (read.ok) return;
   assert.equal(read.reason, "illegal-transition");
 });
 
@@ -155,7 +154,6 @@ test("a non-writer with no row of their own is refused, and named as a permissio
   const theirs = (cid: string, itemId: string) => (mine(cid, itemId) === null ? null : { status: "archived", author: OBSERVER });
   const read = readIntentMessage(withdrawal(OBSERVER), [write], theirs, { address: OBSERVER, tier: "member" });
   assert.equal(read.ok, false);
-  if (read.ok) return;
   assert.notEqual(read.reason, "unknown-collection");
 });
 
