@@ -21,6 +21,12 @@ checkout, so a job depending on it would be red for reasons nobody here could ac
 yarn check:apps [path-to-apps-checkout]                  # default ../apps
 ```
 
+It needs a full `yarn install`, devDependencies included — it imports `src/`, which imports
+`@mulmoclaude/core` for values (`isValidCollectionName`, `parseAppManifest`,
+`isSafeCustomViewPath`), and that package is a peer dependency carried here only as a dev one.
+That was already true when the command was spelled `npx tsx`; `npx` could fetch the runner but
+never the peer, so the failure just arrived one import later.
+
 It runs `publishProblems` + `schemaRefProblems` over the ten apps that already publish, reading
 each app's real collections from `<app>/.claude/skills/<cid>/schema.json` (an app IS a
 repository, so its schemas are committed beside its `app.json`) — without them the field-name,
