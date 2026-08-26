@@ -10,14 +10,14 @@
 // tarball and still pass. A list that is written out by hand reopens that hole the day a
 // third subpath is added; a list that is derived cannot.
 //
-// Usage: node scripts/check-pack.mjs <tarball>
+// Usage: yarn check:pack <tarball>
 
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
 const tarball = process.argv[2];
 if (!tarball) {
-  console.error("usage: node scripts/check-pack.mjs <tarball>");
+  console.error("usage: yarn check:pack <tarball>");
   process.exit(2);
 }
 
