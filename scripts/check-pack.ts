@@ -15,13 +15,23 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
+/** An object, for walking. Arrays pass too, which is what we want: an `exports` value may be
+ *  either, and the walk below treats both the same way. A type guard rather than a cast,
+ *  because a cast asserts what the compiler could not prove and this value came from
+ *  `JSON.parse` — the one place in this script where nothing is known. */
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null;
+
 const tarball = process.argv[2];
-if (!tarball) {
+if (tarball === undefined || tarball === "") {
   console.error("usage: yarn check:pack <tarball>");
   process.exit(2);
 }
 
-const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+const manifest: unknown = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+if (!isRecord(manifest)) {
+  console.error("package.json did not parse as an object");
+  process.exit(1);
+}
 
 /** Every relative path an entry point resolves to. `exports` nests conditions ("types",
  *  "default", "import", ...) to arbitrary depth and a subpath may also be a bare string, so
@@ -31,20 +41,20 @@ const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url),
  *  (`dist/index.js`), so anything that is not absolute counts. Dropping a path we did not
  *  recognise would fail OPEN — an unchecked entry point is exactly what this script exists
  *  to catch — so the rule is deliberately permissive. */
-const collect = (node, out) => {
+const collect = (node: unknown, out: Set<string>): Set<string> => {
   if (typeof node === "string") {
     const path = node.replace(/^\.\//, "");
     if (path !== "" && !path.startsWith("/") && !path.startsWith("../")) out.add(path);
     return out;
   }
-  if (node && typeof node === "object") {
-    for (const value of Object.values(node)) collect(value, out);
+  if (isRecord(node)) {
+    Object.values(node).forEach((value) => collect(value, out));
   }
   return out;
 };
 
-const declared = collect(pkg.exports ?? {}, new Set());
-for (const field of [pkg.main, pkg.types]) collect(field, declared);
+const declared = collect(manifest.exports ?? {}, new Set<string>());
+[manifest.main, manifest.types].forEach((field) => collect(field, declared));
 
 if (declared.size === 0) {
   console.error("no entry points found in package.json — exports/main/types are all empty");
@@ -60,21 +70,27 @@ const listed = new Set(
     .map((line) => (line.startsWith("package/") ? line.slice("package/".length) : line)),
 );
 
-const escapeRegExp = (literal) => literal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const escapeRegExp = (literal: string): string => literal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** A subpath pattern (`"./view/*": "./dist/view/*.js"`) names a SET of files, not one file.
  *  Checking it literally would fail a tarball that is perfectly correct, and this script
  *  exists to be added to without being re-read — the day someone declares a pattern, it must
  *  not be CI refusing a good publish. `*` in an exports pattern may span `/`, so it maps to
  *  `.*`; at least one packed FILE (tar lists directories with a trailing slash) has to match. */
-const satisfied = (path) => {
+const satisfied = (path: string): boolean => {
   if (!path.includes("*")) return listed.has(path);
   const pattern = new RegExp(`^${path.split("*").map(escapeRegExp).join(".*")}$`);
   return [...listed].some((entry) => !entry.endsWith("/") && pattern.test(entry));
 };
 
-const missing = [...declared].sort().filter((path) => !satisfied(path));
-for (const path of [...declared].sort()) {
+/** `.sort()`'s own order, spelled out: the rule that asks for a comparator cannot tell a string
+ *  array from a number one. The order is OBSERVABLE here — it is the order the ok/MISSING lines
+ *  print in — so it has to be the default's, not a locale's. Local rather than shared with the
+ *  suite's copy: `scripts/` must not depend on `test/`. */
+const byText = (a: string, b: string): number => Number(a > b) - Number(a < b);
+
+const missing = [...declared].sort(byText).filter((path) => !satisfied(path));
+for (const path of [...declared].sort(byText)) {
   console.log(`${missing.includes(path) ? "MISSING" : "ok     "} ${path}`);
 }
 
