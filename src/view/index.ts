@@ -69,8 +69,11 @@ export { portChannel, asIs, type Cloneable } from "./channel.js";
 export {
   MIRROR_OPEN,
   MIRROR_TAKEN,
+  BAD_SLUG,
+  badSlugField,
   MISSING_ID_FIELD,
   missingIdField,
+  SLUG_ID_PATTERN,
   missingRequired,
   needsAccount,
   plannedWrite,

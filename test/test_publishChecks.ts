@@ -1316,11 +1316,15 @@ test("declaring uidField needs no protocol floor, because a build that lacks the
   assert.deepEqual(board(), []);
   // And the floor mechanism is still there for the change a schema cannot see — a key whose
   // MEANING moves. Naming a contract this build does not implement is refused, floor or no floor.
+  //
+  // The example moved from 1.1.0 to 2.1.0 when article views made this build emit 2.0.0: a floor is
+  // a statement about the PUBLISHER, so 1.1.0 is now a contract this build can honour and refusing
+  // it would be wrong. What must still be refused is one above the newest it implements.
   refuses(
     board((draft) => {
-      draft.protocol = "1.1.0";
+      draft.protocol = "2.1.0";
     }),
-    "this publisher writes 1.0.0",
+    "this publisher writes 2.0.0",
   );
 });
 

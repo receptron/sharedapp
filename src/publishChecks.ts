@@ -367,7 +367,7 @@ function ruleReadFields(submit: AuthoredSubmit): { field: string; why: string }[
       why: `public.submit.<cid>.uidField — the rules compare it to the submitter's own uid, and refuse a create that carries another`,
     });
   }
-  if ((submit.idFrom === "auth.uid+field" || submit.idFrom === "field") && submit.idField !== undefined) {
+  if (ID_FROM_FIELD_MODES.includes(submit.idFrom ?? "") && submit.idField !== undefined) {
     fields.push({ field: submit.idField, why: `public.submit.<cid>.idField — the rules rebuild the document id from it` });
   }
   if (submit.gateOn !== undefined) {
@@ -484,6 +484,13 @@ function selfDeleteProblems(cid: string, submit: AuthoredSubmit, collection: Aut
   ];
 }
 
+/** The id modes whose document id is REBUILT FROM A SUBMITTED FIELD.
+ *
+ *  One list because three checks ask the same question — is this field the
+ *  rules' business, is it frozen, may it appear in `selfUpdate` — and a mode
+ *  added to two of the three is the silent half of a permissive declaration. */
+const ID_FROM_FIELD_MODES: readonly string[] = ["auth.uid+field", "field", "slug"];
+
 /** `idFrom: "field"` makes the document id a CLAIM ABOUT ANOTHER RECORD, and
  *  the claim is only worth what is checked.
  *
@@ -498,6 +505,17 @@ function selfDeleteProblems(cid: string, submit: AuthoredSubmit, collection: Aut
  *  running that is not. */
 function fieldIdProblems(cid: string, submit: AuthoredSubmit): string[] {
   const problems: string[] = [];
+  // `slug` needs the same field and refuses the same way, and needs `idIn` not
+  // at all: the id is the record's own name, so there is no other record for a
+  // reference to be wrong about. What `idIn` does for `field`, the grammar in
+  // the rules does here — and it cannot be done at publish time, because
+  // publish never sees a submission (principle 2).
+  if (submit.idFrom === "slug" && submit.idField === undefined) {
+    problems.push(
+      `public.submit.${cid}.idFrom is "slug" but no idField is declared: the rules take the document id from that field and refuse every create. ` +
+        `Name the field the URL name is submitted in — "idField": "slug".`,
+    );
+  }
   if (submit.idFrom === "field") {
     if (submit.idField === undefined) {
       problems.push(
@@ -515,7 +533,11 @@ function fieldIdProblems(cid: string, submit: AuthoredSubmit): string[] {
     const mode = submit.idFrom === undefined ? "absent" : JSON.stringify(submit.idFrom);
     problems.push(
       `public.submit.${cid}.idIn is declared but idFrom is ${mode}: the rules read idIn only for ` +
-        `idFrom "field", so as written nothing checks the referenced record and the declaration promises a check it does not perform.`,
+        `idFrom "field", so as written nothing checks the referenced record and the declaration promises a check it does not perform.` +
+        (submit.idFrom === "slug"
+          ? ` A "slug" id names the record itself rather than another one, so there is nothing for idIn to look in — delete it, or use idFrom "field" if the ` +
+            `name really must already exist as a record somewhere.`
+          : ""),
     );
   }
   return problems;
@@ -991,10 +1013,12 @@ function selfUpdateSystemProblems(app: AuthoredApp, cid: string, submit: Authore
         "The rules freeze it (`uidHeld`) so the write is refused rather than obeyed — a button the page draws with nothing behind it, and a declaration that reads like it grants something",
     },
     {
-      field: submit.idFrom === "field" || submit.idFrom === "auth.uid+field" ? submit.idField : undefined,
+      field: ID_FROM_FIELD_MODES.includes(submit.idFrom ?? "") ? submit.idField : undefined,
       why:
         `it is public.submit.${cid}.idField, the field the document id was built from. ` +
-        "Editing it leaves the record claiming one thing while living at the id of another, and in `field` mode the rules refuse the write — a button the page draws and nothing behind it",
+        "Editing it leaves the record claiming one thing while living at the id of another, and in `field` and `slug` mode the rules refuse the write " +
+        "(`idHeld`) — a button the page draws and nothing behind it. In `slug` mode it is also the URL, so a rename that DID go through would strand every " +
+        "link ever shared",
     },
     {
       field: app.collections?.[cid]?.statusField,
@@ -1174,6 +1198,10 @@ function mirrorOfProblems(app: AuthoredApp, cid: string, collection: AuthoredCol
  *  is this publisher's own narrowing, kept because there is no reason for a
  *  published view to live in a subdirectory. */
 function viewPathProblems(view: NormalizedView): string[] {
+  // A platform-drawn page has no file, and `normalizeViews` has already refused
+  // the case where it has neither. Asked here rather than at the call site so
+  // that every caller of this check gets the same answer for the same view.
+  if (view.path === undefined) return [];
   if (isSafeCustomViewPath(view.path) && view.path.split("/").length === 2) return [];
   return [
     `${view.where}.path is '${view.path}': a published view is exactly one HTML file directly inside the collection's own views/ directory ` +

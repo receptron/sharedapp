@@ -328,9 +328,24 @@ const SubmitZ = z
      *  the public submission path never allows. Firestore decides that
      *  atomically, so unlike a countable capacity (see `stampField`) this is
      *  first-come ENFORCED rather than first-come read off a rank. */
-    idFrom: z.enum(["auto", "auth.uid", "auth.uid+field", "field"]).optional(),
+    /** How the document id is chosen.
+     *
+     *  `slug` is the one that is a NAME rather than a claim, and the pair is
+     *  worth reading together. `field` says the record is FOR another one — a
+     *  slot, a seat, an asset — so the id is a claim on something that must
+     *  exist, and `idIn` is required to check it. `slug` says the record is
+     *  CALLED that, which is a claim about nothing but itself: there is
+     *  nothing to point `idIn` at, and what stands in its place is a GRAMMAR
+     *  the rules enforce (`slugOk`), because the value becomes a path segment
+     *  and is handed back out as a URL.
+     *
+     *  Both are frozen after create (`idHeld`), and for `slug` that is what
+     *  keeps a published link resolving: the id is the URL, and the id cannot
+     *  follow a renamed field. */
+    idFrom: z.enum(["auto", "auth.uid", "auth.uid+field", "field", "slug"]).optional(),
     idField: z.string().trim().min(1).optional(),
-    /** Required by `idFrom: "field"` — see {@link IdInZ}. */
+    /** Required by `idFrom: "field"`, and meaningless for every other mode
+     *  including `slug` — see {@link IdInZ}. */
     idIn: IdInZ.optional(),
     /** The collection holding this record's PUBLIC PROJECTION, one row per
      *  contested thing, sharing its document id.
@@ -431,7 +446,47 @@ const ViewZ = z
   .object({
     id: z.string().trim().min(1),
     audience: z.enum(VIEW_AUDIENCES),
-    path: z.string().trim().min(1),
+    /** The HTML file this page is drawn from, relative to the repository root.
+     *
+     *  Optional since `type` exists, and EXACTLY ONE of the two is required —
+     *  a view is either a page the author wrote or a page the platform draws.
+     *  The pair is refused by `normalizeViews` rather than by zod, so the
+     *  refusal can say which key to delete in the author's own words. */
+    path: z.string().trim().min(1).optional(),
+    /** A page the PLATFORM draws from the declaration, instead of HTML.
+     *
+     *  `article` is the first and, today, the only one: the collection named in
+     *  `collections` holds articles, `article` below says which field is the
+     *  title and which is the markdown body, and the runtime renders them —
+     *  index at `/a/{slug}`, one article at `/a/{slug}/{id}`.
+     *
+     *  IT IS NOT A SECOND DRAWING PATH. The prohibition in
+     *  mulmoterminal's `plans/feat-shared-app-platform.md` is against a naive
+     *  rendering of `public.read` living beside declared views; this is a
+     *  DECLARED view, judged by the same gate, published to the same document,
+     *  and an app that wants a bespoke index still writes `path` and gets the
+     *  sandbox. What separates them is which side authored the page, which is
+     *  the distinction that has always decided this.
+     *
+     *  A reader that does not know this key would find no HTML and draw the
+     *  GENERATED FORM in a magazine's place, so it moves the app's protocol
+     *  major — see `protocolFor`. */
+    type: z.literal("article").optional(),
+    /** Which field of an article is which, for `type: "article"`.
+     *
+     *  The DATE is deliberately absent: an article is ordered and dated by
+     *  `public.submit[cid].stampField`, the one field the rules pin to the
+     *  server clock on create and freeze afterwards. An author-named date
+     *  field would be a value the writer types, and a magazine whose running
+     *  order can be typed is not one. */
+    article: z
+      .object({
+        title: NameZ,
+        body: NameZ,
+        summary: NameZ.optional(),
+      })
+      .strict()
+      .optional(),
     collections: z.array(NameZ).min(1),
     /** The subset of `collections` this page watches LIVE (`onSnapshot`)
      *  instead of reading once.

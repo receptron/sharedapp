@@ -494,3 +494,94 @@ test("a collection whose ONLY writable thing is the writer's delete still gets a
   assert.notEqual(entry, null);
   assert.deepEqual(entry?.writers, [OWNER]);
 });
+
+// --- Platform-drawn pages (`views[].type`) -------------------------------------------------
+//
+// A view is either HTML the author wrote or a page the platform draws. These pin the four ways of
+// failing to say which, plus the one shape an article page has to have — because every one of them
+// fails by publishing SOMETHING rather than by erroring, and what a visitor then sees is a
+// different app.
+
+const ARTICLE = { id: "public", audience: "public", type: "article", collections: ["articles"], article: { title: "title", body: "body", summary: "summary" } };
+
+test("an article view normalizes with its field mapping", () => {
+  const result = normalizeViews(app({ views: [ARTICLE] }));
+  assert.ok(result.ok);
+  assert.equal(result.views[0]?.type, "article");
+  assert.equal(result.views[0]?.path, undefined, "a platform page names no file");
+  assert.deepEqual(result.views[0]?.article, { title: "title", body: "body", summary: "summary" });
+});
+
+test("refuses a view that declares both a path and a type", () => {
+  refuses(problemsOf({ views: [{ ...ARTICLE, path: "views/public.html" }] }), "both `path` and `type`");
+});
+
+test("refuses a view that declares neither", () => {
+  refuses(problemsOf({ views: [{ id: "public", audience: "public", collections: ["articles"] }] }), "neither `path` nor `type`");
+});
+
+test("refuses an article view with no article block", () => {
+  refuses(problemsOf({ views: [{ id: "public", audience: "public", type: "article", collections: ["articles"] }] }), "no `article` block");
+});
+
+test("refuses an article block with no type, which would silently draw the form", () => {
+  // The quiet one. Everything parses, publish succeeds, and the author believes they have named the
+  // title field while the visitor is shown the generated form.
+  refuses(
+    problemsOf({ views: [{ id: "public", audience: "public", path: "views/public.html", collections: ["articles"], article: { title: "t", body: "b" } }] }),
+    "`article` block but no `type`",
+  );
+});
+
+test("refuses an article view over more than one collection", () => {
+  // `/a/{slug}/{id}` carries nothing that says which collection the id is in.
+  refuses(problemsOf({ views: [{ ...ARTICLE, collections: ["articles", "notes"] }] }), "shows ONE running order");
+});
+
+test("refuses an article view published to a members' tier", () => {
+  refuses(problemsOf({ views: [{ ...ARTICLE, id: "desk", audience: "member" }] }), "PUBLIC face only");
+});
+
+// --- What a submitter may CORRECT (`selfUpdate`) --------------------------------------------
+//
+// The rules have carried `selfWriteOk` all along; what was missing was anything saying which
+// fields it means, which is what `useSharedApp update` needs in order to send the right ones
+// instead of everything and a bare permission error.
+
+test("a submitter's own tiers carry the fields they may correct, per status", () => {
+  const declaration = app({
+    collections: { articles: { statusField: "status", transitions: { initial: ["published"] } } },
+    public: {
+      enabled: true,
+      read: ["articles"],
+      submit: { articles: { auth: "verifiedEmail", createFields: ["title"], selfUpdate: { published: ["title", "body"] } } },
+    },
+  });
+  for (const audience of ["public", "participant"] as const) {
+    const write = writeFor(declaration, audience, "articles");
+    assert.deepEqual(write?.selfUpdate, { published: ["title", "body"] }, `${audience} carries no selfUpdate`);
+    // Beside the field the rules read the CURRENT status from, or the map names statuses nothing
+    // can be compared against.
+    assert.equal(write?.statusField, "status", `${audience} carries selfUpdate with no statusField`);
+  }
+});
+
+test("the staff tier does not carry it, because staff are not narrowed by it", () => {
+  // `isWriter` answers for them, so publishing the list there would describe a restriction the
+  // rules do not apply — a page drawing three editable fields on a row its reader may rewrite.
+  const declaration = app({
+    collections: { articles: { statusField: "status" } },
+    public: { enabled: true, submit: { articles: { auth: "verifiedEmail", createFields: ["title"], selfUpdate: { published: ["title"] } } } },
+  });
+  assert.equal(writeFor(declaration, "member", "articles")?.selfUpdate, undefined);
+});
+
+test("no statusField means no selfUpdate is projected", () => {
+  // The rules read the current status before consulting the map, so without the field the map
+  // names statuses nothing will ever match — a control drawn on every row and refused on all.
+  const declaration = app({
+    collections: { articles: {} },
+    public: { enabled: true, submit: { articles: { auth: "verifiedEmail", createFields: ["title"], selfUpdate: { published: ["title"] } } } },
+  });
+  assert.equal(writeFor(declaration, "participant", "articles")?.selfUpdate, undefined);
+});

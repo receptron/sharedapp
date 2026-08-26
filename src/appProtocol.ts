@@ -51,7 +51,34 @@
  *  publish a floor this build cannot honour, and if the reader must understand it, the major goes
  *  up and older readers refuse the app. That day the stamp becomes per-app again, so that the
  *  refusal lands on the apps that need it rather than on everything published afterwards. */
-export const APP_PROTOCOL = "1.0.0";
+export const APP_PROTOCOL = "2.0.0";
+
+/** The contract MOST apps are still stamped with, and the one every deployed reader knows.
+ *
+ *  Named rather than written as a literal at the two stamp sites, because what it means is not
+ *  "one" — it is "the contract before article views existed", which is what an app that does not
+ *  use them still keeps. */
+export const APP_PROTOCOL_BASE = "1.0.0";
+
+/** THE CONTRACT THIS APP'S DOCUMENTS KEEP — which is not always the newest one this build can emit.
+ *
+ *  The per-app stamp is back, and this is the day `APP_PROTOCOL`'s note above said it would be. An
+ *  ARTICLE VIEW is the first key a reader must UNDERSTAND to be correct rather than one it may
+ *  safely ignore: `views[].type` replaces the HTML a public page is drawn from, so a reader that
+ *  does not know it finds no HTML, concludes the app publishes no view, and draws the GENERATED
+ *  FORM in a magazine's place. Nothing errors. The visitor is shown a different app.
+ *
+ *  So the major goes up — and it goes up ONLY FOR THE APPS THAT USE IT. Stamping every app 2.0.0
+ *  would make every deployed reader refuse every app published after this build, including the ones
+ *  whose documents did not change in any way. That is the failure `APP_PROTOCOL`'s own note is
+ *  warning about, and it is why this function exists instead of a bumped constant.
+ *
+ *  The consequence for an author is stated plainly by publish: declare an article view and readers
+ *  older than this contract refuse the app — they show "this build cannot draw what it published"
+ *  rather than half of it. That is the intended outcome, and it is why the READER SHIPS FIRST. */
+export function protocolFor(app: { views?: readonly { type?: string | undefined }[] | undefined }): string {
+  return (app.views ?? []).some((view) => view.type !== undefined) ? APP_PROTOCOL : APP_PROTOCOL_BASE;
+}
 
 const SHAPE = /^(?<major>\d+)\.(?<minor>\d+)\.(?<patch>\d+)$/u;
 

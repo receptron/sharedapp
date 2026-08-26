@@ -65,10 +65,25 @@ const VIEW_ID_SHAPE = "must be lowercase letters, digits and hyphens, start with
 /** A view as the author wrote it, once normalized: one shape, whichever of
  *  the two declarations it came from. `where` is the path it was written at,
  *  carried only so a refusal names the key the author can go and edit. */
+/** Which field of an article is which. See `ViewZ.article`. */
+export interface ArticleFields {
+  title: string;
+  body: string;
+  /** `| undefined` explicitly, as everywhere else here: this repository builds with
+   *  `exactOptionalPropertyTypes`, under which "absent" and "present and undefined" are different
+   *  types — and the zod parse produces the second. */
+  summary?: string | undefined;
+}
+
 export interface NormalizedView {
   id: string;
   audience: ViewAudience;
-  path: string;
+  /** Absent exactly when `type` is present — see {@link NormalizedView.type}. */
+  path?: string | undefined;
+  /** A page the PLATFORM draws, instead of the author's HTML at `path`. */
+  type?: "article" | undefined;
+  /** Present with `type: "article"` and never without it. */
+  article?: ArticleFields | undefined;
   collections: string[];
   /** The subset of `collections` this page WATCHES rather than reads once.
    *
@@ -110,10 +125,12 @@ function declaredViews(app: AuthoredApp): NormalizedViewsResult {
   const authored = app.views;
   if (legacy !== undefined && authored !== undefined) return { ok: false, problems: [BOTH_FORMS] };
 
-  const views: NormalizedView[] = (authored ?? []).map((view, index) => ({
+  const views: NormalizedView[] = (authored ?? []).map((view, index): NormalizedView => ({
     id: view.id,
     audience: view.audience,
-    path: view.path,
+    ...(view.path === undefined ? {} : { path: view.path }),
+    ...(view.type === undefined ? {} : { type: view.type }),
+    ...(view.article === undefined ? {} : { article: view.article }),
     collections: view.collections,
     ...(view.live === undefined ? {} : { live: view.live }),
     ...(view.limit === undefined ? {} : { limit: view.limit }),
@@ -133,6 +150,72 @@ function declaredViews(app: AuthoredApp): NormalizedViewsResult {
     where: "public.view",
   };
   return { ok: true, views: [...views, legacyView] };
+}
+
+/** WHAT DRAWS THIS PAGE, and the four ways of not saying it.
+ *
+ *  A view is either HTML the author wrote (`path`) or a page the platform draws
+ *  from the declaration (`type`). Neither leaves publish nothing to write;
+ *  both leaves it two things and no way to choose, which — like the two
+ *  spellings of `views` above — would be the author writing two answers and
+ *  being shown neither.
+ *
+ *  `article` without `type` is the quiet one, and it is refused for the reason
+ *  `idIn` beside the wrong `idFrom` is: nothing reads it there, so the author
+ *  believes they have named the title field and the page they get is the
+ *  generated form. */
+function viewSourceProblems(view: NormalizedView): string[] {
+  if (view.path !== undefined && view.type !== undefined) {
+    return [
+      `${view.where} declares both \`path\` and \`type\`: a view is either HTML you wrote or a page the platform draws, and publishing would have to ` +
+        `choose one silently. Delete \`path\` to keep the ${view.type} page, or delete \`type\` to keep your own HTML.`,
+    ];
+  }
+  if (view.path === undefined && view.type === undefined) {
+    return [
+      `${view.where} declares neither \`path\` nor \`type\`, so there is nothing to draw. Name the HTML file with \`path\`, or ask for \`"type": "article"\`.`,
+    ];
+  }
+  if (view.type === "article" && view.article === undefined) {
+    return [
+      `${view.where} is \`"type": "article"\` but declares no \`article\` block, so nothing says which field is the title and which is the body. ` +
+        `Add "article": { "title": "title", "body": "body" }.`,
+    ];
+  }
+  if (view.type === undefined && view.article !== undefined) {
+    return [
+      `${view.where} declares an \`article\` block but no \`type\`: that block is read only by \`"type": "article"\`, so as written nothing names the ` +
+        `title or the body and the page drawn is the generated form. Add \`"type": "article"\`, or delete the block.`,
+    ];
+  }
+  return [];
+}
+
+/** An article view's collection: exactly one, because one page shows one
+ *  running order.
+ *
+ *  `collections` is a LIST for the HTML case, where a page may draw from
+ *  several — and an article page cannot: which of three collections held the
+ *  article at `/a/{slug}/{id}` would have no answer, and the id could name a
+ *  row in more than one of them. */
+function articleCollectionProblems(view: NormalizedView): string[] {
+  if (view.type === "article" && view.audience !== "public") {
+    // The public face only, for now. The member and roster tiers draw their
+    // pages through a different bridge with its own intents, and an article
+    // page there would be a second reader to keep in step for an audience that
+    // has not asked for one. Refused rather than half-published: publishing it
+    // to a tier whose runtime ignores `type` would leave the staff looking at
+    // an empty page.
+    return [
+      `${view.where} is \`"type": "article"\` with audience "${view.audience}". Platform-drawn pages are published for the PUBLIC face only; ` +
+        `give this view \`"audience": "public"\`, or write the page yourself with \`path\`.`,
+    ];
+  }
+  if (view.type !== "article" || view.collections.length === 1) return [];
+  return [
+    `${view.where} is \`"type": "article"\` and names ${view.collections.length} collections. An article page shows ONE running order, and an article's ` +
+      `URL is \`/a/{slug}/{id}\` with nothing in it to say which collection the id is in. Name just the one that holds the articles.`,
+  ];
 }
 
 /** Whether one id may be used, and what to say when it may not. */
@@ -186,7 +269,7 @@ export function normalizeViews(app: AuthoredApp): NormalizedViewsResult {
   const problems: string[] = [...singlePublicProblems(declared.views)];
   const seen = new Map<string, string>();
   for (const view of declared.views) {
-    problems.push(...viewIdProblems(view));
+    problems.push(...viewIdProblems(view), ...viewSourceProblems(view), ...articleCollectionProblems(view));
     const first = seen.get(view.id);
     if (first === undefined) {
       seen.set(view.id, view.where);
@@ -400,6 +483,23 @@ export interface ProjectedViewWrite {
    *  about is real: the row is gone afterwards, and with `mirror` the slot is
    *  back on the grid. */
   selfDelete?: string[];
+  /** `{ <current status>: [<field>...] }` — the fields a SUBMITTER may edit in
+   *  their own row while it holds that status (`public.submit[cid].selfUpdate`).
+   *
+   *  Not on the `member` tier: staff write by role, and the rules answer them
+   *  from `isWriter` rather than from this list, so publishing it there would
+   *  describe a narrowing that does not exist.
+   *
+   *  It is a MAP and not a list for the reason `transitions` is: "may edit
+   *  while pending" and "may edit after the desk approved it" are different
+   *  promises, and a collection that flattened them would offer a control that
+   *  works on some rows and is refused on others.
+   *
+   *  Rides with `statusField`, like `selfDelete` above and for the identical
+   *  reason: the rules read the CURRENT status off the record before consulting
+   *  the map, so a projection without the field describes an edit nobody can
+   *  perform. */
+  selfUpdate?: Record<string, string[]>;
   /** The statuses NO ONE may delete a row from (`collections[cid].sealed`).
    *
    *  It travels for BOTH halves of a withdrawal and for BOTH tiers, which none
@@ -578,6 +678,23 @@ function withdrawPart(app: AuthoredApp, audience: ViewAudience, cid: string): Pa
   return { ...byRole, ...own, ...sealed, ...withdrawMirrorPart(app, cid) };
 }
 
+/** The fields a submitter may correct in their own row, per status.
+ *
+ *  The counterpart of `withdrawPart`'s `selfDelete` half and projected on the same terms — the
+ *  submitter's own tiers only, beside the status field the rules consult first.
+ *
+ *  WHY IT IS PROJECTED AT ALL, when nothing drew a control from it before: `useSharedApp update`
+ *  in MulmoTerminal is an agent correcting a record as the person who submitted it, and without
+ *  this it has no way to know which fields that is — so it would either send everything and be
+ *  refused with a bare permission error, or send nothing. The rules already carry the branch
+ *  (`selfWriteOk`); this only says what it is. */
+function correctPart(app: AuthoredApp, audience: ViewAudience, cid: string): Partial<ProjectedViewWrite> {
+  const selfUpdate = app.public?.submit?.[cid]?.selfUpdate;
+  const statusField = app.collections?.[cid]?.statusField;
+  if (audience === "member" || selfUpdate === undefined || statusField === undefined) return {};
+  return { selfUpdate, statusField };
+}
+
 function assignPart(app: AuthoredApp, audience: ViewAudience, cid: string): Partial<ProjectedViewWrite> {
   const assigneeField = app.collections?.[cid]?.assigneeField;
   if (audience !== "member" || assigneeField === undefined) return {};
@@ -602,7 +719,13 @@ function assignPart(app: AuthoredApp, audience: ViewAudience, cid: string): Part
  *  What `public` never gets is the staff half — no `writers`, no assignment — for the same reason
  *  `participant` does not. */
 export function writeFor(app: AuthoredApp, audience: ViewAudience, cid: string): ProjectedViewWrite | null {
-  const write: ProjectedViewWrite = { cid, ...transitionPart(app, audience, cid), ...assignPart(app, audience, cid), ...withdrawPart(app, audience, cid) };
+  const write: ProjectedViewWrite = {
+    cid,
+    ...transitionPart(app, audience, cid),
+    ...assignPart(app, audience, cid),
+    ...withdrawPart(app, audience, cid),
+    ...correctPart(app, audience, cid),
+  };
   if (Object.keys(write).length === 1) return null;
   // Only the staff tier: a participant writes their own row, which the rules
   // answer from the record rather than from a role, and publishing the roster's
