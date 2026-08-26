@@ -1557,11 +1557,24 @@ function drawnTextFields(view: NormalizedView): string[] {
   return [...new Set([article.title, article.body, article.summary].filter((field): field is string => field !== undefined))];
 }
 
+/** One collection's submit declaration, read the way `capIn` reads a cap and for the same reason:
+ *  `constructor` is a legal collection name, and a plain index into a map that does not mention it
+ *  hands back Object's own constructor. That is not undefined, so the "no submit block" refusal is
+ *  skipped and the checks below judge a FUNCTION — refusing, but naming the wrong thing.
+ *
+ *  The older `app.public?.submit?.[cid]` call sites in this file predate the lookup and are not
+ *  touched here; each one refuses on a different key and needs its own reading. */
+function submitFor(app: AuthoredApp, cid: string): AuthoredSubmit | undefined {
+  const declared = app.public?.submit;
+  if (declared === undefined || !Object.hasOwn(declared, cid)) return undefined;
+  return declared[cid];
+}
+
 function articleCostProblems(app: AuthoredApp, view: NormalizedView): string[] {
   if (view.type !== "article") return [];
   const cid = view.collections[0];
   if (cid === undefined) return [];
-  const submit = app.public?.submit?.[cid];
+  const submit = submitFor(app, cid);
   const rows = capIn(view.limit, cid);
   const problems: string[] = [];
   // A MAGAZINE NOBODY MAY SUBMIT TO is a dead end rather than a shape to allow through, and the

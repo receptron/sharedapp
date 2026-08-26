@@ -14,6 +14,7 @@ import {
   MISSING_ID_FIELD,
   missingIdField,
   missingRequired,
+  overLongFields,
   recordId,
   recordOf,
   SubmitRefused,
@@ -244,4 +245,43 @@ test("an address app is untouched by the key it does not declare", () => {
   // must come out exactly as they did.
   const record = recordOf(fields(), drawn, submit, { memberName: "A" }, account, serverTime);
   assert.deepEqual(record, { memberName: "A", memberEmail: "visitor@example.com", status: "requested" });
+});
+
+// --- the length cap, which nothing downstream enforces -----------------------------------------
+//
+// The same reason this file exists at all, one key over: `stampField` was parsed, checked at
+// publish, published — and written by nobody, and every check passed. `maxBytes` is worse placed
+// than that, because there is no rule behind it to produce even a nameless refusal. If the host
+// does not check, the write simply lands.
+
+const capped = (maxBytes: Record<string, number> | undefined) => ({ createFields: ["prose"], maxBytes });
+
+test("measures BYTES of UTF-8, not characters — the whole reason the key was renamed", () => {
+  // 20 Japanese characters are 60 bytes. Counted as characters this passes a cap of 40; counted
+  // as bytes it does not, and the store and the reader's connection are both paid in bytes.
+  const value = "あ".repeat(20);
+  assert.equal(value.length, 20);
+  assert.deepEqual(overLongFields({ prose: value }, capped({ prose: 40 })), [{ name: "prose", bytes: 60, cap: 40 }]);
+  assert.deepEqual(overLongFields({ prose: value }, capped({ prose: 60 })), []);
+});
+
+test("reports the size and the cap, so a refusal can name both", () => {
+  // A host that only learned WHICH field was too long would say "too long" and leave the writer to
+  // guess by how much — which for an article means retyping until it fits.
+  assert.deepEqual(overLongFields({ prose: "abcdef" }, capped({ prose: 5 })), [{ name: "prose", bytes: 6, cap: 5 }]);
+});
+
+test("accepts a value of exactly the cap", () => {
+  assert.deepEqual(overLongFields({ prose: "abcde" }, capped({ prose: 5 })), []);
+});
+
+test("says nothing about a field with no cap, and nothing at all when none are declared", () => {
+  assert.deepEqual(overLongFields({ title: "x".repeat(999) }, capped({ prose: 5 })), []);
+  assert.deepEqual(overLongFields({ prose: "x".repeat(999) }, capped(undefined)), []);
+});
+
+test("does not read a cap off Object's prototype", () => {
+  // A field name has no grammar, so `toString` is a legal one. A plain index into a map that does
+  // not mention it hands back a FUNCTION, and comparing a number to it is not a check.
+  assert.deepEqual(overLongFields({ toString: "x".repeat(999) }, capped({ prose: 5 })), []);
 });

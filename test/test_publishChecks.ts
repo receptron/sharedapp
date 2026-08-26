@@ -1798,6 +1798,53 @@ test("refuses an article body with no length at all", () => {
   );
 });
 
+test("refuses a drawn title with no cap of its own, even when the BODY is capped", () => {
+  // The hole capping the body alone leaves: the long text moves to `title`, publish reports a
+  // cheap index, and the row is still whatever Firestore will hold. Deleting the whole map (above)
+  // would not pin this — that test passes on a check that only ever looks at the body.
+  refuses(
+    magazinePage(({ submit }) => {
+      submit.maxBytes = { prose: 60_000 };
+    }),
+    "draws 'title' and public.submit.articles.maxBytes says nothing about it",
+  );
+});
+
+test("refuses a drawn SUMMARY with no cap, which is the same hole one field over", () => {
+  refuses(
+    magazinePage(({ submit, view }) => {
+      submit.maxBytes = { prose: 60_000, title: 200 };
+      view.article = { title: "title", body: "prose", summary: "lede" };
+    }),
+    "draws 'lede'",
+  );
+});
+
+test("names the COLLECTION when it is called after an Object prototype key and has no submit block", () => {
+  // Grok on #53, second pass. `app.public?.submit?.["constructor"]` hands back Object's own
+  // constructor, which is not undefined — so the "no submit block" refusal was skipped and the
+  // checks below judged a FUNCTION. It still refused, with the wrong reason.
+  const problems = publishProblems(
+    app({
+      collections: { constructor: { statusField: "status", transitions: { initial: ["published"] } } },
+      public: { enabled: true, read: ["constructor"] },
+      views: [
+        {
+          id: "public",
+          audience: "public",
+          type: "article",
+          collections: ["constructor"],
+          article: { title: "title", body: "prose" },
+          limit: { constructor: 10 },
+        },
+      ],
+    }),
+    [{ cid: "constructor", primaryKey: "id" }],
+    OWNER,
+  );
+  refuses(problems, "cannot be indexed at all");
+});
+
 test("refuses a cap above what one field may be, and accepts the ceiling itself", () => {
   // BOTH SIDES, the way `viewLimitProblems` pins its own. A `>=` slip would satisfy the refusal
   // on its own, and the accepting half is what catches it.
