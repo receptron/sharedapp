@@ -66,6 +66,19 @@ export interface SubmitSpec {
    *  fill it in writes a record the rules refuse, with nothing on the page to say which field it
    *  was. `recordOf` is the one place it is filled in, for that reason. */
   stampField?: string | undefined;
+  /** The longest a field's value may be, in BYTES of UTF-8: `{ <field>: <bytes> }`.
+   *
+   *  THE ONE KEY HERE THAT IS THE HOST'S OBLIGATION RATHER THAN THE RULES'. Everything above is
+   *  read by `firestore.rules` and refused there if a host gets it wrong; this one is refused by
+   *  nothing. Publish checks the declaration and the host must check the value, so a host that
+   *  drops it does not fail — it accepts an article of any length and pays for it on every open of
+   *  the index (see `articleCostProblems`).
+   *
+   *  Which is exactly why it belongs on this type rather than being re-parsed off the raw
+   *  document. `writableFields` makes the same move for `uidField` and `stampField`, for the
+   *  reason written there: a host that has not been updated should fail to COMPILE, not to
+   *  submit. */
+  maxBytes?: Record<string, number> | undefined;
 }
 
 /** One collection's published form: what a page may draw, and the field publish pinned meaning to. */

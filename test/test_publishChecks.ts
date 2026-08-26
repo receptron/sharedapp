@@ -1747,7 +1747,9 @@ const magazinePage = (edit: (draft: { submit: Record<string, unknown>; view: Rec
     stampField: "publishedAt",
     createFields: ["slug", "title", "prose", "status", "publishedAt"],
     initialStatus: "published",
-    maxBytes: { prose: 60_000 },
+    // EVERY drawn text field, not only the body — an uncapped `title` is where the long text goes
+    // the moment the body is capped. 15 x (60,000 + 200) = 903,000, just inside the ceiling.
+    maxBytes: { prose: 60_000, title: 200 },
   };
   const view: Record<string, unknown> = {
     id: "public",
@@ -1796,23 +1798,82 @@ test("refuses an article body with no length at all", () => {
   );
 });
 
-test("refuses a cap above what one article may be", () => {
+test("refuses a cap above what one field may be, and accepts the ceiling itself", () => {
+  // BOTH SIDES, the way `viewLimitProblems` pins its own. A `>=` slip would satisfy the refusal
+  // on its own, and the accepting half is what catches it.
+  const at = (bytes: number) =>
+    magazinePage(({ submit, view }) => {
+      submit.maxBytes = { prose: bytes, title: 200 };
+      view.limit = { articles: 1 };
+    });
+  refuses(at(100_001), "bytes one field may be");
+  assert.deepEqual(at(100_000), []);
+});
+
+test("refuses an index one byte over its ceiling, and accepts the ceiling itself", () => {
+  const at = (prose: number) =>
+    magazinePage(({ submit, view }) => {
+      submit.maxBytes = { prose, title: 100 };
+      view.limit = { articles: 10 };
+    });
+  // 10 x (99,900 + 100) is exactly 1,000,000.
+  assert.deepEqual(at(99_900), []);
+  refuses(at(99_901), "above 1000000");
+});
+
+test("counts a drawn field named after an Object prototype key, rather than reaching the prototype", () => {
+  // Grok on #53. An article field name has no grammar, so `toString` is a legal body field — and
+  // a plain index into a map that does not mention it hands back a FUNCTION. Then the cap is not
+  // undefined, `rows * cap` is NaN, and every comparison against NaN is false: the missing-cap
+  // and over-budget refusals both go quiet and an unbounded index publishes.
   refuses(
-    magazinePage(({ submit }) => {
-      submit.maxBytes = { prose: 200_000 };
+    magazinePage(({ view }) => {
+      view.article = { title: "title", body: "toString" };
     }),
-    "bytes one article may be",
+    "maxBytes says nothing about it",
   );
+});
+
+test("refuses an index whose COLLECTION is named after an Object prototype key", () => {
+  // The same hole on the other map, and it needs a collection actually named one: `constructor`
+  // passes `isValidCollectionName`, and `view.limit?.["constructor"]` on a map that does not
+  // mention it hands back Object's own constructor. A test using 'articles' would pass either way.
+  const problems = publishProblems(
+    app({
+      collections: { constructor: { submitOnly: true, statusField: "status", transitions: { initial: ["published"] } } },
+      public: {
+        enabled: true,
+        read: ["constructor"],
+        submit: {
+          constructor: {
+            auth: "verifiedEmail",
+            idFrom: "slug",
+            idField: "slug",
+            audience: "participant",
+            stampField: "publishedAt",
+            createFields: ["slug", "title", "prose", "status", "publishedAt"],
+            initialStatus: "published",
+            maxBytes: { prose: 60_000, title: 200 },
+          },
+        },
+      },
+      views: [{ id: "public", audience: "public", type: "article", collections: ["constructor"], article: { title: "title", body: "prose" }, limit: {} }],
+    }),
+    [{ cid: "constructor", primaryKey: "id" }],
+    OWNER,
+  );
+  refuses(problems, "on every open, forever");
 });
 
 test("refuses an index whose rows TIMES its cap is what a reader pays", () => {
   // Both halves legal on their own — 20 rows is unremarkable and 60 KB is one article. The
-  // product is 1.2 MB down the wire on every open, and only publish sees it.
+  // product is 1.2 MB down the wire on every open, and only publish sees it. AT LEAST that: the
+  // index downloads whole records, so the slug, the status and the stamp ride along uncounted.
   refuses(
     magazinePage(({ view }) => {
       view.limit = { articles: 20 };
     }),
-    "costs a reader up to 1200000 bytes",
+    "costs a reader at least 1204000 bytes",
   );
 });
 

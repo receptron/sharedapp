@@ -267,7 +267,26 @@ function templateMailProblems(cid: string, collection: AuthoredCollectionConfig,
 /** INVARIANTS 6 and 7 — the window is a real interval, and `keyFields` fits
  *  the unrolled check in the rules. */
 function submitShapeProblems(app: AuthoredApp): string[] {
-  return Object.entries(app.public?.submit ?? {}).flatMap(([cid, submit]) => [...windowProblems(cid, submit), ...keyFieldCountProblems(cid, submit)]);
+  return Object.entries(app.public?.submit ?? {}).flatMap(([cid, submit]) => [
+    ...windowProblems(cid, submit),
+    ...keyFieldCountProblems(cid, submit),
+    ...capCeilingProblems(cid, submit),
+  ]);
+}
+
+/** EVERY declared cap against the per-field ceiling, not merely the one an article view draws its
+ *  body from. A cap above it is a number that cannot be honoured — the host would accept a value
+ *  the store then refuses — and it is just as wrong on a field no page reads. */
+function capCeilingProblems(cid: string, submit: AuthoredSubmit): string[] {
+  return Object.entries(submit.maxBytes ?? {}).flatMap(([field, cap]) =>
+    cap > MAX_FIELD_BYTES
+      ? [
+          `public.submit.${cid}.maxBytes.${field} is ${cap}, above the ${MAX_FIELD_BYTES} bytes one field may be. Bytes, not characters: Japanese ` +
+            "runs about 2.4 bytes a character, so this is roughly 40,000 characters of Japanese or 100,000 of English — long for one article, and a " +
+            "tenth of what a whole index may cost.",
+        ]
+      : [],
+  );
 }
 
 function windowProblems(cid: string, submit: AuthoredSubmit): string[] {
@@ -1501,24 +1520,49 @@ const MAX_FIELD_BYTES = 100_000;
  *  unit the reader's connection is. */
 const MAX_INDEX_BYTES = 1_000_000;
 
-/** An `article` view's two bounds, and the audience that makes them enforceable.
+/** A map entry, read the way `limitFor` reads one and for the reason written there: `constructor`,
+ *  `toString` and `hasOwnProperty` are all legal collection names, and an article field name has no
+ *  grammar at all. A plain index into a map that does not mention the key reaches Object.prototype
+ *  and hands back a FUNCTION — so `rows === undefined` is false, `rows * cap` is NaN, and every
+ *  comparison against NaN is false. The check would not fire, and an unbounded index would publish.
+ *
+ *  The non-number guard is the second half of the same thought: nothing but a number is a cap. */
+const capIn = (map: Record<string, number> | undefined, key: string): number | undefined => {
+  if (map === undefined || !Object.hasOwn(map, key)) return undefined;
+  const held = map[key];
+  return typeof held === "number" ? held : undefined;
+};
+
+/** An `article` view's bounds, and the audience that makes them enforceable.
  *
  *  THE AUDIENCE IS THE LOAD-BEARING ONE. `maxBytes` is not a rule (see its declaration): publish
  *  checks it and the host refuses the value before sending it, and neither of those binds somebody
  *  writing straight to Firestore. What makes that acceptable is that the only people who may write
  *  an article are the participants a roster carries — people the owner invited by name. Let a
- *  collection with `type: "article"` be submitted to by the world and the cap becomes a comment. */
+ *  collection with `type: "article"` be submitted to by the world and the cap becomes a comment.
+ *
+ *  EVERY TEXT FIELD THE PAGE DRAWS is capped, not only the body. Capping the body alone left the
+ *  long text one rename away: a contributor — or a `useSharedApp` agent that will not stop — puts
+ *  it in `title` or `summary`, publish reports a cheap index, and the row is still whatever
+ *  Firestore will hold. */
 const noLimitProblem = (view: NormalizedView, cid: string): string =>
   `${view.where} publishes '${cid}' as articles and declares no limit for it, so the index reads EVERY article — bodies included, because a rule ` +
   `cannot hide a field — on every open, forever. Add "limit": { "${cid}": 10 }.`;
+
+/** The text fields an article view draws, deduplicated — an author may legitimately point two of
+ *  the three at one field, and a cap named twice is not two costs. */
+function drawnTextFields(view: NormalizedView): string[] {
+  const { article } = view;
+  if (article === undefined) return [];
+  return [...new Set([article.title, article.body, article.summary].filter((field): field is string => field !== undefined))];
+}
 
 function articleCostProblems(app: AuthoredApp, view: NormalizedView): string[] {
   if (view.type !== "article") return [];
   const cid = view.collections[0];
   if (cid === undefined) return [];
   const submit = app.public?.submit?.[cid];
-  const body = view.article?.body;
-  const rows = view.limit?.[cid];
+  const rows = capIn(view.limit, cid);
   const problems: string[] = [];
   // A MAGAZINE NOBODY MAY SUBMIT TO is a dead end rather than a shape to allow through, and the
   // dead end is already there: the index needs a `limit`, a `limit` needs a `stampField` to order
@@ -1539,26 +1583,23 @@ function articleCostProblems(app: AuthoredApp, view: NormalizedView): string[] {
     );
   }
   if (rows === undefined) problems.push(noLimitProblem(view, cid));
-  const cap = body === undefined ? undefined : submit.maxBytes?.[body];
-  if (body !== undefined && cap === undefined) {
+  const drawn = drawnTextFields(view).map((field) => ({ field, cap: capIn(submit.maxBytes, field) }));
+  for (const { field, cap } of drawn) {
+    if (cap !== undefined) continue;
     problems.push(
-      `${view.where}.article.body names '${body}' and public.submit.${cid}.maxBytes says nothing about it, so an article has no length at all short ` +
-        `of Firestore's 1 MiB document. The index downloads bodies, so this is what stops one contributor deciding what every reader pays. Add ` +
-        `"maxBytes": { "${body}": 100000 }.`,
+      `${view.where} draws '${field}' and public.submit.${cid}.maxBytes says nothing about it, so that field has no length at all short of ` +
+        `Firestore's 1 MiB document. The index downloads whole records, so an uncapped text field is where the long text goes the moment the body ` +
+        `is capped. Add "maxBytes": { "${field}": 100000 }.`,
     );
   }
-  if (cap !== undefined && cap > MAX_FIELD_BYTES) {
+  const declared = drawn.map(({ cap }) => cap);
+  const total = declared.every((cap) => cap !== undefined) ? declared.reduce<number>((sum, cap) => sum + cap, 0) : undefined;
+  if (rows !== undefined && total !== undefined && rows * total > MAX_INDEX_BYTES) {
     problems.push(
-      `public.submit.${cid}.maxBytes.${body} is ${cap}, above the ${MAX_FIELD_BYTES} bytes one article may be. Bytes, not characters: Japanese runs ` +
-        "about 2.4 bytes a character, so this is roughly 40,000 characters of Japanese or 100,000 of English — long for one article, and a tenth of " +
-        "what the index may cost in total.",
-    );
-  }
-  if (rows !== undefined && cap !== undefined && rows * cap > MAX_INDEX_BYTES) {
-    problems.push(
-      `${view.where} reads ${rows} articles of up to ${cap} bytes, so one open of the index costs a reader up to ${rows * cap} bytes — above ` +
-        `${MAX_INDEX_BYTES}, and paid on every open by everyone. Lower the limit or the cap. The index cannot read less of an article than all of ` +
-        "it: a rule cannot project a field away, so the only way to a cheap index is a second collection carrying title and summary alone.",
+      `${view.where} reads ${rows} articles whose drawn text may total ${total} bytes each, so one open of the index costs a reader at least ` +
+        `${rows * total} bytes — above ${MAX_INDEX_BYTES}, and paid on every open by everyone. AT LEAST, not exactly: a rule cannot project a field ` +
+        "away, so the index downloads the whole record — the slug, the status, the stamp and every other field ride along uncounted. Lower the " +
+        "limit or the caps; the only way to a cheap index is a second collection carrying title and summary alone.",
     );
   }
   return problems;
