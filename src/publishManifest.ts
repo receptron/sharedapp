@@ -389,6 +389,26 @@ const SubmitZ = z
      *  that would rather keep the record names no status here and sends its
      *  members to the desk. */
     selfDelete: z.array(z.string().trim().min(1)).optional(),
+    /** The longest value, in characters, this collection accepts in a field:
+     *  `{ <field>: <chars> }`.
+     *
+     *  NOT A RULE, and the one place in this file where that is a design
+     *  decision rather than an omission. A length test on `items` create and
+     *  update is paid by EVERY app that writes a record (principle 10), and
+     *  what it would buy is a bound against somebody the owner INVITED — the
+     *  only people who write a long field are the participants a roster
+     *  carries, and `article` collections are refused any other audience at
+     *  the gate. So the cap is enforced where the writing happens: publish
+     *  checks the declaration, and the host refuses the value before sending
+     *  it. A participant writing straight to Firestore is not bound by it, and
+     *  that is the accepted cost.
+     *
+     *  What it is FOR is the index, not the record. Rules cannot project a
+     *  field away (principle 5), so a page reading the latest N articles
+     *  downloads N BODIES — and a cap here is the only number publish can
+     *  multiply by `views[].limit` to know what a reader pays on every open.
+     *  See `articleBoundProblems`. */
+    maxLen: z.record(z.string().trim().min(1), z.number().int().positive()).optional(),
     finalize: z.boolean().optional(),
     audience: z.literal("participant").optional(),
     gateOn: z

@@ -1671,7 +1671,7 @@ interface ArticleMap {
   summary?: string;
 }
 
-const magazineDraft = (article: ArticleMap): Record<string, unknown> => ({
+const magazineDraft = (article: ArticleMap, maxLen: Record<string, number>): Record<string, unknown> => ({
   collections: { articles: { statusField: "status", transitions: { initial: ["published"] } } },
   public: {
     enabled: true,
@@ -1684,16 +1684,17 @@ const magazineDraft = (article: ArticleMap): Record<string, unknown> => ({
         audience: "participant",
         createFields: ["slug", "title", "lede", "prose", "status"],
         initialStatus: "published",
+        maxLen,
       },
     },
   },
   views: [{ id: "public", audience: "public", type: "article", collections: ["articles"], article }],
 });
 
-/** The magazine's problems, with the field mapping the caller wants to try. Sound by default, so a
- *  test names ONLY the thing it is provoking. */
-const magazine = (article: Partial<ArticleMap> = {}) =>
-  schemaRefProblems(app(magazineDraft({ title: "title", body: "prose", summary: "lede", ...article })), magazineSchemas as never);
+/** The magazine's problems, with the field mapping — and the length caps — the caller wants to
+ *  try. Sound by default, so a test names ONLY the thing it is provoking. */
+const magazine = (article: Partial<ArticleMap> = {}, maxLen: Record<string, number> = { prose: 40_000 }) =>
+  schemaRefProblems(app(magazineDraft({ title: "title", body: "prose", summary: "lede", ...article }, maxLen)), magazineSchemas as never);
 
 // --- an article view's field mapping, against the schema that holds the articles ---------------
 //
@@ -1721,6 +1722,137 @@ test("refuses a title that is not text — a number is read as a string that is 
 test("accepts a markdown body, which is what an article body ought to be", () => {
   // The positive half. A check that refused every type would satisfy all four tests above.
   assert.deepEqual(magazine(), []);
+});
+
+// --- what an index costs, and what bounds it ---------------------------------------------------
+//
+// Codex on the architecture as a whole: content size and index cost are not bounded. Two holes,
+// and they are the same hole seen from either end. `limit` caps ROWS and a rule cannot project a
+// field away, so an index of twenty articles downloads twenty BODIES — and nothing capped a body.
+// The product of the two is what a reader pays on every open, and publish is the only place it can
+// be computed before somebody pays it.
+
+/** A whole magazine, through the real gate — `articleCostProblems` runs in `viewProblems`, which
+ *  neither `magazine()` (schema refs only) nor `articles()` (no views at all) reaches.
+ *
+ *  Sound by default, so each test names only what it is provoking. */
+const magazinePage = (edit: (draft: { submit: Record<string, unknown>; view: Record<string, unknown> }) => void = () => {}) => {
+  const submit: Record<string, unknown> = {
+    auth: "verifiedEmail",
+    idFrom: "slug",
+    idField: "slug",
+    audience: "participant",
+    // The cap is ordered by the one field the rules put on every record themselves, and a magazine
+    // wants that anyway: an article's date is its publication time, not a value the writer types.
+    stampField: "publishedAt",
+    createFields: ["slug", "title", "prose", "status", "publishedAt"],
+    initialStatus: "published",
+    maxLen: { prose: 40_000 },
+  };
+  const view: Record<string, unknown> = {
+    id: "public",
+    audience: "public",
+    type: "article",
+    collections: ["articles"],
+    article: { title: "title", body: "prose" },
+    limit: { articles: 20 },
+  };
+  edit({ submit, view });
+  return publishProblems(
+    app({
+      collections: { articles: { submitOnly: true, statusField: "status", transitions: { initial: ["published"] } } },
+      public: { enabled: true, read: ["articles"], submit: { articles: submit } },
+      views: [view],
+    }),
+    [{ cid: "articles", primaryKey: "id" }],
+    OWNER,
+  );
+};
+
+test("a bounded magazine publishes", () => {
+  // The positive half. A gate that refused every article view would satisfy all five below.
+  assert.deepEqual(magazinePage(), []);
+});
+
+test("refuses an article index with no limit, which reads every article ever written", () => {
+  refuses(
+    magazinePage(({ view }) => {
+      delete view.limit;
+    }),
+    "on every open, forever",
+  );
+});
+
+test("refuses an article body with no length at all", () => {
+  // Without it the only ceiling is Firestore's 1 MiB document, chosen by whoever writes the
+  // article rather than by the app — and paid by every reader of the index.
+  refuses(
+    magazinePage(({ submit }) => {
+      delete submit.maxLen;
+    }),
+    "no length at all",
+  );
+});
+
+test("refuses a cap no Firestore document could hold", () => {
+  refuses(
+    magazinePage(({ submit }) => {
+      submit.maxLen = { prose: 400_000 };
+    }),
+    "a Firestore document can hold",
+  );
+});
+
+test("refuses an index whose rows TIMES its cap is what a reader pays", () => {
+  // Both halves legal on their own — 50 rows is unremarkable and 40,000 characters is an article.
+  // The product is 2,000,000 characters down the wire on every open, and only publish sees it.
+  refuses(
+    magazinePage(({ view }) => {
+      view.limit = { articles: 50 };
+    }),
+    "costs a reader up to 2000000",
+  );
+});
+
+test("refuses articles the world may submit, because nothing would bound them", () => {
+  // THE LOAD-BEARING ONE. `maxLen` is not a rule: publish checks it and the host refuses the value
+  // before sending. Neither binds a stranger writing straight to Firestore, and what makes that
+  // acceptable is that an article's writers are people the roster names.
+  refuses(
+    magazinePage(({ submit }) => {
+      delete submit.audience;
+    }),
+    '"audience": "participant"',
+  );
+});
+
+test("names the collection when a magazine has no submit block, rather than the keys it is missing", () => {
+  // A DEAD END that was already there, and this is what makes it legible. The index needs a
+  // `limit`; a `limit` needs a `stampField` to order by; `stampField` lives in `public.submit`.
+  // So an article collection nobody may submit to is refused whichever way it is written, and
+  // neither of the two lines it used to collect said the collection was the problem.
+  const problems = publishProblems(
+    app({
+      collections: { articles: { statusField: "status", transitions: { initial: ["published"] } } },
+      public: { enabled: true, read: ["articles"] },
+      views: [{ id: "public", audience: "public", type: "article", collections: ["articles"], article: { title: "title", body: "prose" } }],
+    }),
+    [{ cid: "articles", primaryKey: "id" }],
+    OWNER,
+  );
+  refuses(problems, "cannot be indexed at all");
+});
+
+// --- a cap on a field that is not there, or is not text ----------------------------------------
+
+test("refuses a length cap on a field the schema does not declare, which bounds nothing", () => {
+  // The quiet one: the host looks the value up by the name it was SENT, finds no cap, and lets it
+  // through. The app reads as bounded and publish agreed.
+  refuses(magazine({}, { headline: 100 }), "bounds nothing");
+});
+
+test("refuses a length cap on a field that holds no text", () => {
+  refuses(magazine({}, { readCount: 100 }), "A cap is a length");
 });
 
 /** A magazine's SUBMIT declaration, on its own — the collection half of `magazineDraft` is not

@@ -1476,6 +1476,90 @@ function viewLimitProblems(app: AuthoredApp, view: NormalizedView): string[] {
   return problems;
 }
 
+/** The longest one field may be, and the most an index may cost — the two halves of the same
+ *  number.
+ *
+ *  A COLLECTION THAT GROWS FOREVER is what `limit` was written for, and an articles collection is
+ *  the purest example there is: it only ever gets longer, and every reader reads it. But `limit`
+ *  caps ROWS, and rules cannot project a field away (principle 5), so the index downloads whole
+ *  documents — BODIES INCLUDED. Twenty rows is a bound on nothing until something bounds the row.
+ *
+ *  `maxLen` is that something, and it is why this check multiplies. `limit x maxLen` is the
+ *  worst-case payload an anonymous reader pulls down on every single open of the index, and it is
+ *  a number publish can compute from the declaration alone — the only place in the system where
+ *  that cost is visible before somebody pays it.
+ *
+ *  A single article is capped separately because Firestore is: a document is 1 MiB, and a
+ *  Japanese article runs about three bytes a character, so a cap above `MAX_FIELD_CHARS` declares
+ *  a length the store cannot hold and the refusal would arrive at the writer instead of here. */
+const MAX_FIELD_CHARS = 300_000;
+
+/** The most an index may cost one reader, in characters, on one open. Deliberately generous — it
+ *  is a ceiling on the absurd, not an editorial opinion about article length. */
+const MAX_INDEX_CHARS = 1_000_000;
+
+/** An `article` view's two bounds, and the audience that makes them enforceable.
+ *
+ *  THE AUDIENCE IS THE LOAD-BEARING ONE. `maxLen` is not a rule (see its declaration): publish
+ *  checks it and the host refuses the value before sending it, and neither of those binds somebody
+ *  writing straight to Firestore. What makes that acceptable is that the only people who may write
+ *  an article are the participants a roster carries — people the owner invited by name. Let a
+ *  collection with `type: "article"` be submitted to by the world and the cap becomes a comment. */
+const noLimitProblem = (view: NormalizedView, cid: string): string =>
+  `${view.where} publishes '${cid}' as articles and declares no limit for it, so the index reads EVERY article — bodies included, because a rule ` +
+  `cannot hide a field — on every open, forever. Add "limit": { "${cid}": 20 }.`;
+
+function articleCostProblems(app: AuthoredApp, view: NormalizedView): string[] {
+  if (view.type !== "article") return [];
+  const cid = view.collections[0];
+  if (cid === undefined) return [];
+  const submit = app.public?.submit?.[cid];
+  const body = view.article?.body;
+  const rows = view.limit?.[cid];
+  const problems: string[] = [];
+  // A MAGAZINE NOBODY MAY SUBMIT TO is a dead end rather than a shape to allow through, and the
+  // dead end is already there: the index needs a `limit`, a `limit` needs a `stampField` to order
+  // by, and `stampField` lives in `public.submit[cid]`. Without the block, publish refuses the
+  // limit and this check refuses its absence, and neither line says the collection is the problem.
+  if (submit === undefined) {
+    return [
+      `${view.where} publishes '${cid}' as articles and there is no public.submit.${cid} to publish them through. Everything the index needs is ` +
+        "declared there — the stampField it is ordered by, the length an article may be, and the audience allowed to write one — so an article " +
+        "collection nobody may submit to cannot be indexed at all. Declare the submit block, or draw this page from HTML of your own.",
+    ];
+  }
+  if (submit.audience !== "participant") {
+    problems.push(
+      `${view.where} publishes '${cid}' as articles, and public.submit.${cid} does not say "audience": "participant". An article's length is bounded ` +
+        "by the declaration and by the host, never by the rules, so the bound holds only over people the roster names. Add the audience, or publish " +
+        "this collection through a page of your own instead.",
+    );
+  }
+  if (rows === undefined) problems.push(noLimitProblem(view, cid));
+  const cap = body === undefined ? undefined : submit?.maxLen?.[body];
+  if (body !== undefined && cap === undefined) {
+    problems.push(
+      `${view.where}.article.body names '${body}' and public.submit.${cid}.maxLen says nothing about it, so an article has no length at all short of ` +
+        `Firestore's 1 MiB document. The index downloads bodies, so this is what stops one contributor deciding what every reader pays. Add ` +
+        `"maxLen": { "${body}": 40000 }.`,
+    );
+  }
+  if (cap !== undefined && cap > MAX_FIELD_CHARS) {
+    problems.push(
+      `public.submit.${cid}.maxLen.${body} is ${cap}, above the ${MAX_FIELD_CHARS} a Firestore document can hold — one document is 1 MiB and a ` +
+        "Japanese article runs about three bytes a character, so a longer article is refused by the store and the writer finds out instead of you.",
+    );
+  }
+  if (rows !== undefined && cap !== undefined && rows * cap > MAX_INDEX_CHARS) {
+    problems.push(
+      `${view.where} reads ${rows} articles of up to ${cap} characters, so one open of the index costs a reader up to ${rows * cap} — above ` +
+        `${MAX_INDEX_CHARS}, and paid on every open by everyone. Lower the limit or the cap. The index cannot read less of an article than all of ` +
+        "it: a rule cannot project a field away, so the only way to a cheap index is a second collection carrying title and summary alone.",
+    );
+  }
+  return problems;
+}
+
 function viewProblems(app: AuthoredApp, collections: readonly PublishableCollection[]): string[] {
   const normalized = normalizeViews(app);
   if (!normalized.ok) return normalized.problems;
@@ -1485,6 +1569,7 @@ function viewProblems(app: AuthoredApp, collections: readonly PublishableCollect
     ...view.collections.flatMap((cid) => viewCollectionProblems(app, view, cid, known)),
     ...viewLiveProblems(app, view),
     ...viewLimitProblems(app, view),
+    ...articleCostProblems(app, view),
   ]);
 }
 
@@ -1872,10 +1957,37 @@ function refInRefProblems(schemaOf: ReadonlyMap<string, CollectionSchema>, cid: 
 
 function submitRefProblems(schemaOf: ReadonlyMap<string, CollectionSchema>, cid: string, submit: AuthoredSubmit): string[] {
   return [
+    ...maxLenRefProblems(schemaOf, cid, submit),
     ...idInRefProblems(schemaOf, cid, submit),
     ...boundRefProblems(schemaOf, cid, "fromField", submit.window?.fromField),
     ...boundRefProblems(schemaOf, cid, "untilField", submit.window?.untilField),
   ];
+}
+
+/** A length cap on a field that is not there, or is not text.
+ *
+ *  Both are silent, and silent in the direction that matters: a cap keyed by a misspelt field name
+ *  bounds NOTHING — the host looks the value up by the name it was sent, finds no cap, and lets it
+ *  through. So the app reads as bounded, publish agreed, and the first over-long article is the
+ *  first anyone hears of it. A cap on a `number` or a `table` is the same failure with a clearer
+ *  cause: the host measures a string's length and that field never holds one.
+ *
+ *  Judged only where there IS a schema, so a collection the host could not read is named once by
+ *  its own error rather than a second time here. */
+function maxLenRefProblems(schemaOf: ReadonlyMap<string, CollectionSchema>, cid: string, submit: AuthoredSubmit): string[] {
+  const schema = schemaOf.get(cid);
+  if (schema === undefined) return [];
+  const fields = schema.fields ?? {};
+  const known = Object.keys(fields).sort().join(", ") || "(none)";
+  return Object.keys(submit.maxLen ?? {}).flatMap((field) => {
+    const where = `public.submit.${cid}.maxLen.${field}`;
+    if (!declaredField(fields, field)) {
+      return [`${where} caps a field the schema of '${cid}' does not declare, so it bounds nothing and nothing says so. Fields on '${cid}': ${known}.`];
+    }
+    const spec = fields[field];
+    if (spec === undefined || STRING_VALUED.has(spec.type)) return [];
+    return [`${where} caps a ${spec.type} field. A cap is a length, and only a text field has one — use a string, text or markdown field.`];
+  });
 }
 
 function idInRefProblems(schemaOf: ReadonlyMap<string, CollectionSchema>, cid: string, submit: AuthoredSubmit): string[] {
