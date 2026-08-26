@@ -156,6 +156,12 @@ export interface PublishedConfigDoc extends Record<string, unknown> {
     type?: "article" | undefined;
     /** Which field of an article is which, for `type: "article"`. */
     article?: ArticleFields | undefined;
+    /** The app's own hue, 0-359, for the page the runtime draws — `theme.hue`.
+     *
+     *  ABSENT IS A REAL STATE and not a missing value: an app that declares no colour is drawn in
+     *  the runtime's own, which is a page. That is why this key does not move the protocol, unlike
+     *  the two above it. */
+    hue?: number | undefined;
   };
   /** The publisher's standing instructions for whoever sits at the PUBLIC face
    *  — see `appAgents.ts`.
@@ -375,6 +381,7 @@ function publicViewProjection(
   limit?: Record<string, { rows: number; field: string }>;
   type?: "article" | undefined;
   article?: ArticleFields | undefined;
+  hue?: number | undefined;
 } {
   const capped = view.collections.map((cid) => ({ cid, limit: limitFor(app, view, { cid, scope: "all" }).limit }));
   const limit = Object.fromEntries(capped.flatMap((entry) => (entry.limit === undefined ? [] : [[entry.cid, entry.limit]])));
@@ -386,6 +393,11 @@ function publicViewProjection(
     // than drawn as the generated form (`protocolFor`).
     ...(view.type === undefined ? {} : { type: view.type }),
     ...(view.article === undefined ? {} : { article: view.article }),
+    // The app's hue, projected ONTO THE VIEW rather than beside it. What reads it is the runtime
+    // drawing this page, and that runtime is handed the view — a colour parked at the top of the
+    // document would be one more thing every reader has to know to look for, for a value that
+    // means nothing to a page the author wrote.
+    ...(app.theme === undefined ? {} : { hue: app.theme.hue }),
     ...(view.live === undefined ? {} : { live: view.live }),
     // Keyed by cid rather than riding on each entry, because a public page's
     // `collections` is a list of NAMES: it has no per-collection object to

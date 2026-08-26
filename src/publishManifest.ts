@@ -675,6 +675,22 @@ export const AuthoredAppZ = z
     /** The standing jobs this app asks the agents sitting at it to do, per
      *  audience. See {@link AgentZ} and `appAgents.ts`. */
     agents: z.array(AgentZ).optional(),
+    /** How a page the PLATFORM draws should look — today, `views[].type: "article"`.
+     *
+     *  ONE NUMBER, and everything is derived from it, which is the same rule the shipped templates
+     *  are taught (`templates/design.md`): a palette is a hue plus a discipline about lightness and
+     *  chroma, and an author who is handed six colours picks six unrelated ones. A page written by
+     *  the author styles itself and ignores this; a page drawn by the platform has nowhere else to
+     *  take a colour from, and the alternative is that every magazine on the platform is grey.
+     *
+     *  NOT A THEME OBJECT of fonts and radii, deliberately. Each key added here is a key the
+     *  runtime must honour forever and every host must agree about, and the look of a drawn page is
+     *  the platform's job to keep coherent. A hue says whose magazine it is without letting the
+     *  declaration become a stylesheet. */
+    theme: z
+      .object({ hue: z.number().int().min(0).max(359) })
+      .strict()
+      .optional(),
     /** The version of the PUBLISH CONTRACT this app is written against — see
      *  `appProtocol.ts`. Optional, and it does not decide what is published:
      *  the projection always carries the version this compiler EMITS, because

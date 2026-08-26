@@ -1649,17 +1649,38 @@ function articleCostProblems(app: AuthoredApp, view: NormalizedView): string[] {
   return problems;
 }
 
+/** A colour for a page nobody draws.
+ *
+ *  `theme` is read by the runtime that DRAWS a page from the declaration, and only `views[].type`
+ *  produces one. An app whose pages are all its own HTML styles them itself and never looks here,
+ *  so the key would sit in the manifest meaning nothing — the same silent no-op `viewLiveProblems`
+ *  refuses one key over.
+ *
+ *  It does NOT move the protocol, and that asymmetry is the point: a reader too old to know `hue`
+ *  draws the page in its default colours, which is the page. A reader too old to know `type` draws
+ *  the GENERATED FORM in a magazine's place, which is not. */
+function themeProblems(app: AuthoredApp, views: readonly NormalizedView[]): string[] {
+  if (app.theme === undefined || views.some((view) => view.type !== undefined)) return [];
+  return [
+    "theme sets a colour and no view declares `type`, so nothing draws a page from this app's declaration and the key does nothing. A page " +
+      "written as HTML carries its own colours. Delete `theme`, or publish a page the platform draws.",
+  ];
+}
+
 function viewProblems(app: AuthoredApp, collections: readonly PublishableCollection[]): string[] {
   const normalized = normalizeViews(app);
   if (!normalized.ok) return normalized.problems;
   const known = new Set(collections.map((collection) => collection.cid));
-  return normalized.views.flatMap((view) => [
-    ...viewPathProblems(view),
-    ...view.collections.flatMap((cid) => viewCollectionProblems(app, view, cid, known)),
-    ...viewLiveProblems(app, view),
-    ...viewLimitProblems(app, view),
-    ...articleCostProblems(app, view),
-  ]);
+  return [
+    ...themeProblems(app, normalized.views),
+    ...normalized.views.flatMap((view) => [
+      ...viewPathProblems(view),
+      ...view.collections.flatMap((cid) => viewCollectionProblems(app, view, cid, known)),
+      ...viewLiveProblems(app, view),
+      ...viewLimitProblems(app, view),
+      ...articleCostProblems(app, view),
+    ]),
+  ];
 }
 
 // ---------------------------------------------------------------------------

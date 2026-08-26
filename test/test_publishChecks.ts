@@ -1736,7 +1736,7 @@ test("accepts a markdown body, which is what an article body ought to be", () =>
  *  neither `magazine()` (schema refs only) nor `articles()` (no views at all) reaches.
  *
  *  Sound by default, so each test names only what it is provoking. */
-const magazinePage = (edit: (draft: { submit: Record<string, unknown>; view: Record<string, unknown> }) => void = () => {}) => {
+const magazinePage = (edit: (draft: { submit: Record<string, unknown>; view: Record<string, unknown> }) => void = () => {}, theme?: { hue: number }) => {
   const submit: Record<string, unknown> = {
     auth: "verifiedEmail",
     idFrom: "slug",
@@ -1767,11 +1767,36 @@ const magazinePage = (edit: (draft: { submit: Record<string, unknown>; view: Rec
       collections: { articles: { submitOnly: true, statusField: "status", transitions: { initial: ["published"] } } },
       public: { enabled: true, read: ["articles"], submit: { articles: submit } },
       views: [view],
+      ...(theme === undefined ? {} : { theme }),
     }),
     [{ cid: "articles", primaryKey: "id" }],
     OWNER,
   );
 };
+
+test("carries the app's hue onto the drawn page, and refuses one nobody would draw", () => {
+  // ONE NUMBER, because a palette is a hue plus a discipline and an author handed six colours
+  // picks six unrelated ones — the same rule `templates/design.md` teaches.
+  assert.deepEqual(magazinePage(undefined, { hue: 200 }), []);
+  assert.deepEqual(magazinePage(undefined, { hue: 0 }), []);
+  assert.deepEqual(magazinePage(undefined, { hue: 359 }), []);
+});
+
+test("refuses a theme on an app whose pages are all its own HTML", () => {
+  // The silent no-op: nothing draws a page from the declaration, so the colour means nothing and
+  // the manifest reads as though it had been set.
+  const problems = publishProblems(
+    app({
+      collections: { bookings: { statusField: "status", transitions: { initial: ["booked"] } } },
+      theme: { hue: 200 },
+      views: [{ id: "public", audience: "public", path: "views/page.html", collections: ["bookings"] }],
+      public: { enabled: true, read: ["bookings"] },
+    }),
+    CIDS,
+    OWNER,
+  );
+  refuses(problems, "nothing draws a page from this app");
+});
 
 test("a bounded magazine publishes", () => {
   // The positive half. A gate that refused every article view would satisfy all five below.
