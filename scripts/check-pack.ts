@@ -72,7 +72,8 @@ const listed = new Set(
 
 const escapeRegExp = (literal: string): string => literal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-/** A subpath pattern (`"./view/*": "./dist/view/*.js"`) names a SET of files, not one file.
+/** An export TARGET holding `*` (`"./view/*": "./dist/view/*.js"` — the right-hand side is what
+ *  reaches here, because `collect` walks values) names a SET of files, not one file.
  *  Checking it literally would fail a tarball that is perfectly correct, and this script
  *  exists to be added to without being re-read — the day someone declares a pattern, it must
  *  not be CI refusing a good publish. `*` in an exports pattern may span `/`, so it maps to
