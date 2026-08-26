@@ -1654,7 +1654,18 @@ const magazineSchemas = [
   }),
 ];
 
-const magazineDraft = (): Record<string, unknown> => ({
+/** Which field of an article is which — the only part of the declaration these tests vary.
+ *
+ *  A TYPED parameter rather than a mutation of an untyped draft, and not only for tidiness: this
+ *  repository holds `test/tsconfig.json` to a type-coverage floor, and reaching into a
+ *  `Record<string, unknown>` through a cast to change one key spends that budget for nothing. */
+interface ArticleMap {
+  title: string;
+  body: string;
+  summary?: string;
+}
+
+const magazineDraft = (article: ArticleMap): Record<string, unknown> => ({
   collections: { articles: { statusField: "status", transitions: { initial: ["published"] } } },
   public: {
     enabled: true,
@@ -1670,14 +1681,13 @@ const magazineDraft = (): Record<string, unknown> => ({
       },
     },
   },
-  views: [{ id: "public", audience: "public", type: "article", collections: ["articles"], article: { title: "title", body: "prose", summary: "lede" } }],
+  views: [{ id: "public", audience: "public", type: "article", collections: ["articles"], article }],
 });
 
-const magazine = (edit: (draft: Record<string, unknown>) => void = () => {}) => {
-  const draft = magazineDraft();
-  edit(draft);
-  return schemaRefProblems(app(draft), magazineSchemas as never);
-};
+/** The magazine's problems, with the field mapping the caller wants to try. Sound by default, so a
+ *  test names ONLY the thing it is provoking. */
+const magazine = (article: Partial<ArticleMap> = {}) =>
+  schemaRefProblems(app(magazineDraft({ title: "title", body: "prose", summary: "lede", ...article })), magazineSchemas as never);
 
 // --- an article view's field mapping, against the schema that holds the articles ---------------
 //
@@ -1685,33 +1695,21 @@ const magazine = (edit: (draft: Record<string, unknown>) => void = () => {}) => 
 // not there, gets undefined, and draws something rather than failing.
 
 test("refuses an article title the schema does not declare", () => {
-  refuses(
-    magazine((draft) => ((draft.views as { article: Record<string, string> }[])[0]!.article.title = "headline")),
-    "does not declare",
-  );
+  refuses(magazine({ title: "headline" }), "does not declare");
 });
 
 test("refuses an article body the schema does not declare", () => {
-  refuses(
-    magazine((draft) => ((draft.views as { article: Record<string, string> }[])[0]!.article.body = "text")),
-    "renders EMPTY",
-  );
+  refuses(magazine({ body: "text" }), "renders EMPTY");
 });
 
 test("refuses a summary the schema does not declare, though the page would still draw", () => {
   // The mildest of the three and still a refusal: the index falls back to the article's opening,
   // so the author's declaration does nothing and nothing anywhere says so.
-  refuses(
-    magazine((draft) => ((draft.views as { article: Record<string, string> }[])[0]!.article.summary = "excerpt")),
-    "does nothing",
-  );
+  refuses(magazine({ summary: "excerpt" }), "does nothing");
 });
 
 test("refuses a title that is not text — a number is read as a string that is never there", () => {
-  refuses(
-    magazine((draft) => ((draft.views as { article: Record<string, string> }[])[0]!.article.title = "readCount")),
-    "number field",
-  );
+  refuses(magazine({ title: "readCount" }), "number field");
 });
 
 test("accepts a markdown body, which is what an article body ought to be", () => {
