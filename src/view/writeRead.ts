@@ -201,6 +201,32 @@ const addCorrection = (write: ProjectedViewWrite, value: Record<string, unknown>
   write.selfUpdate = Object.fromEntries(byStatus);
 };
 
+/** What a correction may not touch, and how long its values may be.
+ *
+ *  Read as its own half rather than beside `selfUpdate`, because neither key belongs to the
+ *  submitter's permission: `frozen` narrows a WRITER's correction too, and a collection may carry
+ *  caps while granting corrections only by role — which is the ordinary blog, where the author
+ *  edits their own article and no `selfUpdate` is declared at all.
+ *
+ *  Caps whose value is not a positive number are dropped rather than clamped. A cap is a refusal
+ *  the page makes on the app's behalf, and inventing one out of a malformed document would refuse
+ *  a write the rules allow — silently, since nothing else in the stack knows this key exists. */
+const addCorrectionCaps = (write: ProjectedViewWrite, value: Record<string, unknown>): void => {
+  const frozen = stringsOf(value.frozen);
+  if (frozen.length > 0) {
+    write.frozen = frozen;
+  }
+  if (!isRecord(value.maxBytes)) {
+    return;
+  }
+  const caps = Object.entries(value.maxBytes).filter(
+    (entry): entry is [string, number] => typeof entry[1] === "number" && Number.isFinite(entry[1]) && entry[1] > 0,
+  );
+  if (caps.length > 0) {
+    write.maxBytes = Object.fromEntries(caps);
+  }
+};
+
 export const projectedWriteOf = (value: unknown): ProjectedViewWrite | null => {
   if (!isRecord(value) || typeof value.cid !== "string" || value.cid === "") {
     return null;
@@ -220,6 +246,11 @@ export const projectedWriteOf = (value: unknown): ProjectedViewWrite | null => {
   if (Object.keys(write).length === 1) {
     return null;
   }
+  // AFTER the test, and for the reason `correctCapsPart` is attached after the
+  // emitter's — neither cap is a control, so neither may be what keeps an entry
+  // alive. Same order on both sides, or the reader would keep a collection the
+  // compiler dropped.
+  addCorrectionCaps(write, value);
   return write;
 };
 

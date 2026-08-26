@@ -145,8 +145,13 @@ export interface OverLongField {
  *
  *  `Object.hasOwn` before the lookup for `limitFor`'s reason: a field name has no grammar, so
  *  `toString` is a legal one, and a plain index into a map that does not mention it hands back a
- *  FUNCTION — which is not a cap and must not be compared to one. */
-export const overLongFields = (values: Record<string, string>, submit: SubmitSpec): OverLongField[] => {
+ *  FUNCTION — which is not a cap and must not be compared to one.
+ *
+ *  IT TAKES THE CAPS, NOT A `SubmitSpec`. A correction is the OTHER write of the same field and it
+ *  is judged from a `ProjectedViewWrite`, which is a different document with the same caps in it;
+ *  a signature naming the submit spec would have sent the correction path off to build a fake one.
+ *  Every existing caller passes a `SubmitSpec` and still does — it is a structural supertype. */
+export const overLongFields = (values: Record<string, string>, submit: { maxBytes?: Record<string, number> | undefined }): OverLongField[] => {
   const caps = submit.maxBytes;
   if (caps === undefined) return [];
   return Object.entries(values).flatMap(([name, value]) => {

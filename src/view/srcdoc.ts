@@ -63,11 +63,21 @@ import { GESTURE_MARK, VIEW_MESSAGE } from "./protocol.js";
  *  booking, hand it to somebody else, cancel my own; `withdraw` takes the
  *  reader's own row away, which is how a slot the record was holding goes back
  *  on the grid (`can.withdrawFrom` names the statuses it is allowed from, and
- *  the parent reopens the projection in the same batch). Each names a KIND and
- *  at most one value: which FIELD a transition moves is the
- *  projection's answer, and which NOTICE goes out with it is the transition's.
- *  A page that could choose either could mail "your booking is approved" about
- *  a booking it had just rejected.
+ *  the parent reopens the projection in the same batch); `correct` rewrites
+ *  fields of a record that already exists — fixing a typo in an article without
+ *  it becoming a second article.
+ *
+ *  The first four name a KIND and at most one value: which FIELD a transition
+ *  moves is the projection's answer, and which NOTICE goes out with it is the
+ *  transition's. A page that could choose either could mail "your booking is
+ *  approved" about a booking it had just rejected.
+ *
+ *  `correct` is the one that names fields, and the same two are closed to it:
+ *  the `statusField` and the `assigneeField` belong to the asks above, and a
+ *  correction able to set either would go round the transition table and the
+ *  assignee check. What it may name is `can.correctFrom` (the submitter's own
+ *  row, per status) or anything at all under `can.correctAny` (the role) —
+ *  minus `can.frozen`, and within `can.maxBytes`.
  *
  *  They also go through one `request` helper, so a second kind of ask
  *  cannot grow a second way of being left unresolved — which on a phone is a
@@ -367,6 +377,21 @@ ${gestureScript()}
     },
     withdraw(cid, itemId) {
       return request({ type: ${JSON.stringify(VIEW_MESSAGE.intent)}, kind: "withdraw", cid, itemId });
+    },
+    /** Rewrite fields of a record that already exists. \`values\` is an object of
+     *  field name to STRING -- a number sent here is not coerced, the whole
+     *  message is refused, because half-understanding an edit is worse than
+     *  declining one.
+     *
+     *  WHAT MAY BE SENT is \`can[cid].correctAny\` (any field, by role) or
+     *  \`can[cid].correctFrom[status]\` (the submitter's own row), MINUS
+     *  \`can[cid].frozen\` -- which nobody may write, the owner included, and
+     *  which includes the status and the assignee because those move through
+     *  \`transition\` and \`assign\`. Values are capped by
+     *  \`can[cid].maxBytes\`, in BYTES of UTF-8. Leave the frozen fields out of
+     *  the form rather than drawing them and being refused. */
+    correct(cid, itemId, values) {
+      return request({ type: ${JSON.stringify(VIEW_MESSAGE.intent)}, kind: "correct", cid, itemId, values });
     },
   };
   // TWO names for ONE object, for one release. The contract is not the public

@@ -156,3 +156,54 @@ test("a seal on a collection nobody may delete from is dropped with the rest", (
   // Nothing to narrow: no permission was carried, so there is no control for the page to draw.
   assert.equal(projectedWriteOf({ cid: "topics", statusField: "status", sealed: ["closed"] }), null);
 });
+
+test("the correction's two bounds survive the round trip, including the one no rule enforces", () => {
+  const emitted = writeFor(
+    AuthoredAppZ.parse({
+      aid: "app_blog",
+      members: { "owner@blog.jp": { "*": "owner" } },
+      collections: { posts: { statusField: "status", transitions: { published: ["archived"] } } },
+      views: [{ id: "desk", audience: "member", path: "views/desk.html", collections: ["posts"] }],
+      public: {
+        enabled: true,
+        read: ["posts"],
+        submit: {
+          posts: {
+            auth: "verifiedEmail",
+            createFields: ["slug", "title", "status", "publishedAt"],
+            initialStatus: "published",
+            idFrom: "slug",
+            idField: "slug",
+            stampField: "publishedAt",
+            maxBytes: { title: 200 },
+          },
+        },
+      },
+    }),
+    "member",
+    "posts",
+  );
+  const read = projectedWriteOf(emitted);
+  assert.deepEqual(read?.frozen, emitted?.frozen);
+  assert.deepEqual(read?.maxBytes, { title: 200 });
+});
+
+test("a cap that is not a positive number is DROPPED, never clamped", () => {
+  // A cap is a refusal the page makes on the app's behalf, and it is the one bound in this document
+  // that the deployed rules do not also make. Inventing one out of a malformed value would refuse a
+  // write nothing else in the stack objects to — silently, since no other layer knows the key.
+  const read = projectedWriteOf({
+    cid: "posts",
+    statusField: "status",
+    transitions: { published: ["archived"] },
+    maxBytes: { title: "200", body: 0, summary: -1, tags: 800 },
+  });
+  assert.deepEqual(read?.maxBytes, { tags: 800 });
+});
+
+test("caps alone do not keep an entry, on the reading side either", () => {
+  // The same order as the emitter: attached AFTER the "is anything writable here?" test. Were the
+  // reader to count them, it would keep a collection the compiler dropped — and the preview would
+  // draw a control the served page has no entry for.
+  assert.equal(projectedWriteOf({ cid: "posts", frozen: ["publishedAt"], maxBytes: { title: 200 } }), null);
+});
