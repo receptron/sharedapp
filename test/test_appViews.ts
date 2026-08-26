@@ -361,11 +361,26 @@ test("the mail a transition queues reaches the staff tier only", () => {
   assert.equal(writeOf(salon(), "roster")[0]?.mail, undefined);
 });
 
-test("a collection with nothing writable is ABSENT, not present and empty", () => {
-  // A page draws its buttons from these entries; an empty one would be a
-  // collection with a button that does nothing.
+test("a collection with nothing writable is ABSENT for the people with no role", () => {
+  // A page draws its buttons from these entries; an empty one would be a collection with a button
+  // that does nothing.
+  //
+  // THE STAFF TIER IS THE EXCEPTION, and it is not an empty entry: `updateWith` gives a writing
+  // role every field of every row here with no status condition and no list, so an owner reading
+  // this page really can rewrite a booking. The entry says so and says nothing else — the page
+  // draws an editor and no transition, which is exactly what exists.
   const readOnly = salon({ collections: { bookings: { statusField: "status" } }, public: { submit: {} } });
-  assert.deepEqual(writeOf(readOnly, "member"), []);
+  const staff = writeOf(readOnly, "member");
+  assert.deepEqual(
+    staff.map((entry) => entry.cid),
+    ["bookings"],
+  );
+  assert.equal(staff[0]?.transitions, undefined);
+  assert.equal(staff[0]?.assigneeField, undefined);
+  assert.equal(staff[0]?.selfUpdate, undefined);
+  assert.deepEqual([...(staff[0]?.writers ?? [])].sort(byText), [OWNER, RECEPTION].sort(byText));
+  // The roster tier carries no roles at all, so there is nothing to keep it alive and it stays
+  // absent — the participant's page is answered from the RECORD, and this declares none of that.
   assert.deepEqual(writeOf(readOnly, "roster"), []);
 });
 
@@ -380,7 +395,9 @@ test("a status field with no table, and a table with no field, are both nothing"
   assert.deepEqual(writeOf(noTable, "roster")[0]?.transitions, { pending: ["cancelled"] });
 
   const noField = salon({ collections: { bookings: { transitions: { pending: ["approved"] } } } });
-  assert.deepEqual(writeOf(noField, "member"), []);
+  // The table is dropped. The staff entry itself survives on the ROLE, which is a different
+  // permission and does not depend on any of this (see the test above).
+  assert.equal(writeOf(noField, "member")[0]?.transitions, undefined);
   // And with no status field there is nothing to write either table to, so the
   // participant loses their move as well — for the same reason, not by accident.
   assert.deepEqual(writeOf(noField, "roster"), []);
@@ -667,7 +684,28 @@ test("caps alone do not put a collection into the projection", () => {
   // Neither half is a control, so neither may be what keeps an entry alive: an entry is what a
   // page draws a button from, and a collection reachable only because it declares a byte cap would
   // answer a page's ask with a refusal that implies there was something there to refuse.
+  //
+  // Asked of the PUBLIC audience, which is where the question is still live: the staff tier carries
+  // the roles, and holding one is itself a control (see `writeFor`). A visitor holds none, so the
+  // caps are all there would be.
   const unwritable = structuredClone(BLOG);
   unwritable.collections = { posts: {} } as never;
-  assert.equal(writeFor(AuthoredAppZ.parse(unwritable), "member", "posts"), null);
+  assert.equal(writeFor(AuthoredAppZ.parse(unwritable), "public", "posts"), null);
+});
+
+test("a blog with no transitions still reaches its own author", () => {
+  // THE CASE THE ROLE KEEP-ALIVE EXISTS FOR, and the one every part of this feature is about: an
+  // ordinary blog declares no transitions, no assignment and no `selfUpdate`, because nobody but
+  // the author writes there. Dropped for having one key, `posts` would leave the projection
+  // entirely and the page's own `correct()` would come back `unknown-collection` about a row the
+  // rules let the owner rewrite. (CodeRabbit and Grok on #58.)
+  const plain = structuredClone(BLOG);
+  plain.collections = { posts: {} } as never;
+  const write = writeFor(AuthoredAppZ.parse(plain), "member", "posts");
+  assert.notEqual(write, null);
+  assert.deepEqual(write?.writers, [OWNER]);
+  // And the bounds ride with it, so the page can leave those fields out of the form rather than
+  // drawing them and being refused.
+  assert.deepEqual([...(write.frozen ?? [])].sort(byText), ["publishedAt", "slug"]);
+  assert.deepEqual(write.maxBytes, { title: 200, body: 60000 });
 });

@@ -139,8 +139,30 @@ export interface ViewCapability {
    *  that map would conclude the author may change nothing about their own article, while the
    *  rules let them rewrite every field but the frozen ones.
    *
-   *  What it does NOT reach: `ProjectedViewWrite.frozen`. Frozen means frozen, owner included. */
+   *  What it does NOT reach: `frozen` below. Frozen means frozen, owner included. */
   correctAny: boolean;
+  /** The fields NO correction may write, whoever asks: the ones the rules froze when the record
+   *  was created (`ProjectedViewWrite.frozen`) and the two the OTHER asks own — the status, which
+   *  moves through `transition`, and the assignee, which moves through `assign`.
+   *
+   *  IT RIDES ON THE CAPABILITY for `sealed`'s reason, one field up: the sandboxed page never sees
+   *  the projection, only `viewer.can`. A page told it may rewrite anything (`correctAny`) and not
+   *  told about these draws an input for `publishedAt`, and the reader presses Save and is refused.
+   *  A named refusal is better than a permission error and it is still the
+   *  declaration-and-enforcement mismatch this module exists to remove.
+   *
+   *  Copied from the write rather than resolved per reader: not one of them depends on who is
+   *  asking, which is what makes them different from every other field here. */
+  frozen: string[];
+  /** How long each field's value may be, in BYTES of UTF-8 (`public.submit[cid].maxBytes`).
+   *
+   *  Here for `frozen`'s reason: a page that cannot see the cap draws a textarea with no limit and
+   *  finds out at Save. It is also the one bound in this whole document that the deployed rules do
+   *  NOT also make, so a page ignoring it is not caught anywhere else.
+   *
+   *  Absent where the app declared none, which is most of them — an empty map would read as "every
+   *  field is capped at nothing". */
+  maxBytes?: Record<string, number>;
 }
 
 /** Which tier's projection this is — the answer to what ABSENCE means. */
@@ -173,9 +195,14 @@ const NOTHING = {
   sealed: [] as string[],
   correctFrom: {} as Record<string, string[]>,
   correctAny: false,
+  frozen: [] as string[],
 };
 
 const has = (addresses: string[] | undefined, address: string): boolean => (addresses ?? []).includes(address);
+
+/** The caps, attached only where the app declared some: an empty map would read as "every field is
+ *  capped at nothing", and a page comparing lengths against it would refuse everything. */
+const capped = (write: ProjectedViewWrite): { maxBytes?: Record<string, number> } => (write.maxBytes === undefined ? {} : { maxBytes: write.maxBytes });
 
 /** The row-owner field, attached only where it means something. */
 const assignedField = (write: ProjectedViewWrite): { assigneeField?: string } => {
@@ -210,6 +237,14 @@ const withdrawable = (write: ProjectedViewWrite, tier: WriteTier, writer: boolea
   }
   return write.selfDelete ?? [];
 };
+
+/** The fields no correction may write, whoever is asking.
+ *
+ *  The rules' own frozen set, plus the two fields the other asks own. Read together because a page
+ *  drawing a form has one question — "which inputs must I not draw" — and answering it in two
+ *  places invites a page that asks one of them. */
+const uncorrectable = (write: ProjectedViewWrite): string[] =>
+  [...(write.frozen ?? []), write.statusField, write.assigneeField].filter((field): field is string => field !== undefined);
 
 /** The fields a correction may touch, per status.
  *
@@ -246,6 +281,8 @@ export const capabilityOf = (write: ProjectedViewWrite, address: string, tier: W
         // No roles are named here at all, so nobody is a writer on this
         // projection — see the branch above.
         correctAny: false,
+        frozen: uncorrectable(write),
+        ...capped(write),
       };
     }
     return { cid: write.cid, ...NOTHING };
@@ -278,6 +315,8 @@ export const capabilityOf = (write: ProjectedViewWrite, address: string, tier: W
     // that is not this one — must not hand a participant's page an edit-any
     // control.
     correctAny: tier === "member" && writer,
+    frozen: uncorrectable(write),
+    ...capped(write),
     // The role, and only the role, and only on the tier the role belongs to.
     //
     // A projection that names no writers never reaches here (see `namesRoles`

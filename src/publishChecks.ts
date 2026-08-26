@@ -28,7 +28,7 @@
 
 import type { CollectionFieldSpec, CollectionSchema } from "@mulmoclaude/core/collection";
 import { isSafeCustomViewPath } from "@mulmoclaude/core/collection/server";
-import { normalizeViews, participantScope, writeFor, type NormalizedView, type ViewAudience } from "./appViews.js";
+import { declaresMoves, normalizeViews, participantScope, type NormalizedView, type ViewAudience } from "./appViews.js";
 import { agentCids, AGENT_ID_PATTERN, AGENT_INSTRUCTION_MAX, RESERVED_AGENT_IDS } from "./appAgents.js";
 import { APP_PROTOCOL, protocolOf, protocolWithin } from "./appProtocol.js";
 import { writersOf } from "./appViews.js";
@@ -1738,9 +1738,13 @@ function agentCanSubmit(app: AuthoredApp, audience: ViewAudience, cid: string): 
 }
 
 /** Can this audience DO anything to `cid` — move it, hand it over, take it
- *  away, or send one in? */
-const agentCanAct = (app: AuthoredApp, audience: ViewAudience, cid: string): boolean =>
-  writeFor(app, audience, cid) !== null || agentCanSubmit(app, audience, cid);
+ *  away, correct their own row, or send one in?
+ *
+ *  `declaresMoves` rather than `writeFor`, and the difference is the blanket permission a writing
+ *  role has over every collection there has ever been: an owner may rewrite any record in their own
+ *  app, so counting that here would make every duty over every collection actionable and this
+ *  refusal would never fire again. What the author is being asked about is what they DECLARED. */
+const agentCanAct = (app: AuthoredApp, audience: ViewAudience, cid: string): boolean => declaresMoves(app, audience, cid) || agentCanSubmit(app, audience, cid);
 
 /** One brief's id, held to the grammar it is reported under. */
 function agentIdProblems(id: string, where: string, seen: Map<string, string>): string[] {

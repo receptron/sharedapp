@@ -24,12 +24,25 @@ import { mailFor, type QueuedMail } from "./intentMail.js";
 //   never the person holding the phone.
 //
 //   A CLOSED VOCABULARY. A transition moves one declared field, an assignment
-//   moves one other, and a withdrawal takes the reader's own row away. Three
-//   named things, and no general patch.
+//   moves one other, a withdrawal takes the reader's own row away, and a
+//   CORRECTION rewrites the fields the declaration says this reader may rewrite.
+//   Four named things, and no general patch.
 //   The rules would allow a general patch just as readily — an editor may write
 //   the whole record — so what this stops is not an attacker but a BUG:
 //   a mis-wired button reaching as far as the member's role does, with nothing
 //   above able to say what happened.
+//
+//   THE FOURTH IS THE ONE THAT CARRIES FIELD NAMES, so it is worth saying what
+//   keeps it from being that patch. Three of the asks name a field the
+//   DECLARATION chose and let the page supply only a destination. A correction
+//   is the write where the field names ARE the ask, and what bounds it is the
+//   judgement rather than the vocabulary: `correctFrom` for the person who
+//   submitted the row, `correctAny` for the role that may rewrite any of them,
+//   `frozen` for what nobody may touch once the record exists, `maxBytes` for
+//   how long a value may be — and the two fields the OTHER asks own
+//   (`statusField`, `assigneeField`), which it may never name, because reaching
+//   them here would go round the transition table and the assignee check.
+//   Take those away and this IS the general patch.
 
 /** The things a view may ask for. A closed set, and the reason it is closed is
  *  above.
@@ -39,15 +52,8 @@ import { mailFor, type QueuedMail } from "./intentMail.js";
  *  the slot. It is the only ask that gives it back, by deleting the row and
  *  reopening the mirror in one batch.
  *
- *  `correct` is the one that carries VALUES, and it is worth saying why that
- *  does not reopen the general patch the header rules out. The other three name
- *  a field the DECLARATION chose — `statusField`, `assigneeField`, none — and
- *  the page supplies only a destination. A correction is the write where the
- *  field names are the ask, so what bounds it is not the vocabulary but the
- *  judgement below: `correctFrom` for the person who submitted the row,
- *  `correctAny` for the role that may rewrite any of them, `frozen` for the
- *  fields nobody may touch afterwards, and `maxBytes` for how long a value may
- *  be. Take those away and this IS the general patch. */
+ *  `correct` is the one that carries VALUES; the header above says what keeps
+ *  that from being the general patch. */
 export type IntentKind = "transition" | "assign" | "withdraw" | "correct";
 
 /** What the view asked, once it has survived judgement: one field, one value,
@@ -99,11 +105,16 @@ export type IntentRefusal =
    *  an id was built from, the uid. Refused for EVERYBODY, the owner included,
    *  which is why it is not `not-permitted`: no role makes it writable. */
   | "frozen-field"
-  /** A correction naming the collection's own `statusField`. Refused for everybody, a writer
-   *  included: a status moves through `transition`, which is judged against the declared table and
-   *  carries the notice the declaration names for that move. A correction that could set it would
-   *  be a way past both. */
-  | "status-field"
+  /** A correction naming a field one of the OTHER asks owns — the collection's own `statusField`
+   *  or its `assigneeField`. Refused for everybody, a writer included.
+   *
+   *  Both for the same reason, which is that the ask beside it is not only a write: a status moves
+   *  through `transition`, judged against the declared table and carrying the notice the
+   *  declaration names for that move, and an assignee moves through `assign`, which refuses an
+   *  address nobody on the roster holds a role at. A correction able to set either would go round
+   *  a check that exists — and for the assignee it would produce a row NOBODY may touch
+   *  afterwards, which is precisely what `unknown-assignee` is there to stop. */
+  | "reserved-field"
   /** A value longer than `maxBytes` allows. The one refusal here that the rules
    *  do not also make — see {@link ProjectedViewWrite.maxBytes}. */
   | "too-long"
@@ -413,9 +424,9 @@ const judgeCorrect = (write: ProjectedViewWrite, asked: { values?: Record<string
   if (fields.some((field) => (write.frozen ?? []).includes(field))) {
     return { ok: false, reason: "frozen-field" };
   }
-  // The status is not frozen — it moves — but not through THIS ask. See the refusal.
-  if (write.statusField !== undefined && fields.includes(write.statusField)) {
-    return { ok: false, reason: "status-field" };
+  // The fields the OTHER asks own. Not frozen — both of them move — but not through this one.
+  if ([write.statusField, write.assigneeField].some((owned) => owned !== undefined && fields.includes(owned))) {
+    return { ok: false, reason: "reserved-field" };
   }
   if (overLongFields(values, write).length > 0) {
     return { ok: false, reason: "too-long" };

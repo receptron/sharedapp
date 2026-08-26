@@ -185,5 +185,6 @@ test("a projection that names no roles grants the staff tier nothing, and every 
     sealed: [],
     correctFrom: {},
     correctAny: false,
+    frozen: [],
   });
 });

@@ -17,6 +17,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { readIntentMessage } from "../src/view/intent.js";
+import { capabilityOf } from "../src/view/capability.js";
+import { byText } from "./helpers.js";
 import { VIEW_MESSAGE } from "../src/view/protocol.js";
 import type { ProjectedViewWrite } from "../src/appViews.js";
 
@@ -175,5 +177,41 @@ test("a correction never moves the status, whoever asks", () => {
   // about tables at all.
   const read = readIntentMessage(correction({ values: { status: "archived" } }), [posts], held, author);
   assert.equal(read.ok, false);
-  assert.equal(read.reason, "status-field");
+  assert.equal(read.reason, "reserved-field");
+});
+
+test("a correction never moves the ASSIGNEE either, and that is the sharper half", () => {
+  // `assign` refuses an address nobody on the roster holds a role at, because writing one produces
+  // a row NOBODY may touch afterwards. A writer reaching the field through a correction skips that
+  // check entirely — the rules do not make it, and `correctAny` asks nothing about who is named.
+  const staffed: ProjectedViewWrite = { ...posts, assigneeField: "editor", rowWriters: ["sub@blog.jp"] };
+  const read = readIntentMessage(correction({ values: { editor: "stranger@x.jp" } }), [staffed], held, author);
+  assert.equal(read.ok, false);
+  assert.equal(read.reason, "reserved-field");
+  // Refused BEFORE the role, like the frozen fields: a reader with no role gets the same name for
+  // it, because no role makes it correctable.
+  const byStranger = readIntentMessage(correction({ values: { editor: "x@x.jp" } }), [staffed], held, stranger);
+  assert.equal(byStranger.ok, false);
+  assert.equal(byStranger.reason, "reserved-field");
+});
+
+test("the capability tells the page what NOT to draw, not only what it may write", () => {
+  // `sealed` rides here for the same reason one field up: the sandboxed page never sees the
+  // projection, only `viewer.can`. A page told it may rewrite anything and not told about these
+  // draws an input for `publishedAt`, and the reader presses Save and is refused. A named refusal
+  // is better than a permission error and it is still a control that should not have been drawn.
+  const staffed: ProjectedViewWrite = { ...posts, assigneeField: "editor" };
+  const can = capabilityOf(staffed, "author@blog.jp", "member");
+  assert.equal(can.correctAny, true);
+  // The rules' frozen set, AND the two fields the other asks own.
+  assert.deepEqual([...can.frozen].sort(byText), ["editor", "publishedAt", "slug", "status"]);
+  assert.deepEqual(can.maxBytes, { title: 200, body: 60000 });
+});
+
+test("a collection with no caps carries no empty map to compare against", () => {
+  // `{}` would read as "every field is capped at nothing" to a page comparing lengths.
+  const uncapped = capabilityOf(notes, "guest@x.jp", "roster");
+  assert.equal("maxBytes" in uncapped, false);
+  // And the frozen list is still answered — it is not the same key and not the same question.
+  assert.deepEqual([...uncapped.frozen].sort(byText), ["status", "submittedAt"]);
 });

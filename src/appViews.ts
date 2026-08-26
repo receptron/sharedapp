@@ -434,10 +434,19 @@ export const VIEW_CONFIG_ID = "config";
 // a bare permission error.
 //
 // THE VOCABULARY IS CLOSED: a transition moves one declared status field, an
-// assignment moves one declared assignee field, and there is no third thing.
-// A general patch would be no less safe (the rules bind either way) and two
-// things worse: a bug in the page reaches as far as the member's role does,
-// and nothing above can say what happened.
+// assignment moves one declared assignee field, a withdrawal takes a row away,
+// and a correction rewrites the fields the declaration names — and there is no
+// fifth thing. A general patch would be no less safe (the rules bind either
+// way) and two things worse: a bug in the page reaches as far as the member's
+// role does, and nothing above can say what happened.
+//
+// The correction is the one that carries field names, so what bounds it is
+// everything this file projects for it: `selfUpdate` and the roles for who may,
+// `frozen` for what nobody may touch once the record exists, `maxBytes` for how
+// long a value may be — and the two fields the other asks own, which a
+// correction may never name (`view/intent.ts` refuses them for every reader,
+// because reaching them here would go round the transition table and the
+// assignee check).
 //
 // AND IT IS PROJECTED PER TIER, because "which transitions" is a different
 // question for each audience. Staff move `pending → approved`
@@ -810,6 +819,29 @@ function assignPart(app: AuthoredApp, audience: ViewAudience, cid: string): Part
  *
  *  What `public` never gets is the staff half — no `writers`, no assignment — for the same reason
  *  `participant` does not. */
+/** Does the DECLARATION say anything about changing `cid` from this audience?
+ *
+ *  `writeFor` answers a wider question — it keeps an entry alive for the blanket "a writer may
+ *  rewrite any record here", which is true of every collection in every app and therefore
+ *  distinguishes nothing. This is the narrow one, and it is what a check about the AUTHOR's
+ *  declaration wants: is there a transition, an assignment, a withdrawal, a correction the
+ *  submitter may make.
+ *
+ *  Exported for `publishChecks`, which refuses an agent's duty over collections its audience can do
+ *  nothing to. Asking `writeFor` there would have made every duty actionable the moment the
+ *  correction landed — the owner can always rewrite a row — and a gate that never fires is one
+ *  nobody can trust is right. */
+export function declaresMoves(app: AuthoredApp, audience: ViewAudience, cid: string): boolean {
+  const write: ProjectedViewWrite = {
+    cid,
+    ...transitionPart(app, audience, cid),
+    ...assignPart(app, audience, cid),
+    ...withdrawPart(app, audience, cid),
+    ...correctPart(app, cid),
+  };
+  return Object.keys(write).length > 1;
+}
+
 export function writeFor(app: AuthoredApp, audience: ViewAudience, cid: string): ProjectedViewWrite | null {
   const write: ProjectedViewWrite = {
     cid,
@@ -818,11 +850,26 @@ export function writeFor(app: AuthoredApp, audience: ViewAudience, cid: string):
     ...withdrawPart(app, audience, cid),
     ...correctPart(app, cid),
   };
-  if (Object.keys(write).length === 1) return null;
-  Object.assign(write, correctCapsPart(app, cid));
   // Only the staff tier: a participant writes their own row, which the rules
   // answer from the record rather than from a role, and publishing the roster's
   // writers to them would be an address list for nothing.
-  if (audience === "member") write.writers = writersOf(app, cid);
+  const writers = audience === "member" ? writersOf(app, cid) : [];
+  // HAVING WRITERS IS ITSELF A CONTROL, and this is the half that is easy to
+  // lose. `updateWith` in the rules has `isWriter(r)` beside the submitter's
+  // branch, carrying no status condition and no field list — so a writer may
+  // rewrite any field of any row HERE even where the declaration says nothing
+  // else about this collection. That is the ordinary blog exactly: no
+  // transitions, no assignment, no `selfUpdate`, because nobody but the author
+  // writes there. Dropped for having one key, the collection leaves the
+  // projection, `capabilityOf` never sees a `writers` list to resolve
+  // `correctAny` from, and the page's own `correct()` comes back
+  // `unknown-collection` about a row the rules would let the owner rewrite.
+  //
+  // `writerDelete` is the same shape and was given the same treatment for the
+  // same reason (see `withdrawPart`): a collection whose only writable thing is
+  // the writer's own permission still gets an entry.
+  if (Object.keys(write).length === 1 && writers.length === 0) return null;
+  if (audience === "member") write.writers = writers;
+  Object.assign(write, correctCapsPart(app, cid));
   return write;
 }

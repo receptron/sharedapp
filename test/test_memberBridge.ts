@@ -37,6 +37,7 @@ const viewer: Viewer = {
       // `isWriter` in the rules carries no field list at all.
       correctFrom: {},
       correctAny: false,
+      frozen: [],
     },
   },
 };

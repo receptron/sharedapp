@@ -157,6 +157,7 @@ test("the viewer carries both halves, and neither half is invented", () => {
             sealed: [],
             correctFrom: {},
             correctAny: false,
+            frozen: [],
           },
         },
       }),
