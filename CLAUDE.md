@@ -18,7 +18,7 @@ Before a release, against a real apps checkout (NOT in CI — `../apps` is a pri
 checkout, so a job depending on it would be red for reasons nobody here could act on):
 
 ```
-npx tsx scripts/check-apps.mjs [path-to-apps-checkout]   # default ../apps
+yarn check:apps [path-to-apps-checkout]                  # default ../apps
 ```
 
 It runs `publishProblems` + `schemaRefProblems` over the ten apps that already publish, reading

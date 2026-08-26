@@ -25,6 +25,8 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "check:apps": "tsx scripts/check-apps.mjs",
+    "check:pack": "node scripts/check-pack.mjs",
     "format": "prettier --write \"{src,test}/**/*.ts\" \"scripts/**/*.{mjs,ts}\" \"*.{json,md}\" \"{scripts,test}/tsconfig.json\"",
     "format:check": "prettier --check \"{src,test}/**/*.ts\" \"scripts/**/*.{mjs,ts}\" \"*.{json,md}\" \"{scripts,test}/tsconfig.json\"",
     "lint": "eslint src test scripts",
