@@ -58,8 +58,9 @@ test("the consumable job names a script that exists", () => {
   // red test here says WHICH half broke where a `command not found` in a release job does not.
   assert.ok(scriptNames().has("check:pack"), "package.json must define check:pack");
   // Anchored to a `run:` value, not to the file: a workflow could name the command in a `name:`
-  // or a comment while the step that executes runs something else entirely. Positive and exact,
-  // so changing the step to a block scalar turns this RED rather than quietly matching nothing —
-  // which is the failure mode that cost this file its previous two versions.
-  assert.match(workflowText(), /^\s*-\s*run:\s*yarn check:pack\b/mu, "a workflow step must RUN it by that name");
+  // or a comment while the step that executes runs something else entirely. Literal spaces
+  // rather than `\s*`, because `\s` matches a newline and the pair of them backtracks — and the
+  // exactness is the point anyway: reformat the step and this turns RED rather than quietly
+  // matching nothing, which is the failure mode that cost this file its previous two versions.
+  assert.match(workflowText(), /^ *- run: yarn check:pack\b/mu, "a workflow step must RUN it by that name");
 });
