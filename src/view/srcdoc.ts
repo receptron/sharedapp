@@ -67,17 +67,19 @@ import { GESTURE_MARK, VIEW_MESSAGE } from "./protocol.js";
  *  fields of a record that already exists — fixing a typo in an article without
  *  it becoming a second article.
  *
- *  The first four name a KIND and at most one value: which FIELD a transition
- *  moves is the projection's answer, and which NOTICE goes out with it is the
- *  transition's. A page that could choose either could mail "your booking is
- *  approved" about a booking it had just rejected.
+ *  `transition`, `assign` and `withdraw` name a KIND and at most one value:
+ *  which FIELD a transition moves is the projection's answer, and which NOTICE
+ *  goes out with it is the transition's. A page that could choose either could
+ *  mail "your booking is approved" about a booking it had just rejected.
  *
- *  `correct` is the one that names fields, and the same two are closed to it:
- *  the `statusField` and the `assigneeField` belong to the asks above, and a
- *  correction able to set either would go round the transition table and the
- *  assignee check. What it may name is `can.correctFrom` (the submitter's own
- *  row, per status) or anything at all under `can.correctAny` (the role) —
- *  minus `can.frozen`, and within `can.maxBytes`.
+ *  `submit` and `correct` are the two that carry a MAP of fields — one for a
+ *  record that does not exist yet, one for a record that does. Two fields are
+ *  closed to `correct`: the `statusField` and the `assigneeField` belong to
+ *  the asks above, and a correction able to set either would go round the
+ *  transition table and the assignee check. What it may name is
+ *  `can.correctFrom` (the submitter's own row, per status) or anything at all
+ *  under `can.correctAny` (the role) — minus `can.frozen`, and within
+ *  `can.maxBytes`.
  *
  *  They also go through one `request` helper, so a second kind of ask
  *  cannot grow a second way of being left unresolved — which on a phone is a
