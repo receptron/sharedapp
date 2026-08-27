@@ -392,10 +392,12 @@ ${gestureScript()}
      *  the address, so this cannot send anybody anywhere but into an article of
      *  the app they are reading.
      *
-     *  Answers { opened, reason } -- and usually does not answer at all, because
-     *  a navigation that happened took this document with it. \`opened: false\`
-     *  with \`no-navigation\` is a host that does not navigate, such as the
-     *  author's preview pane; there is nothing for a page to do about it. */
+     *  Answers { opened, reason }, always -- including on success, so a page is
+     *  never left on a promise nothing settles. \`opened: false\` with
+     *  \`no-navigation\` is a host that did not go anywhere: the author's
+     *  preview pane, or a router that refused. Do not \`await\` this and then
+     *  carry on -- on the ordinary success this document is being torn down
+     *  while the answer is in flight. Read it to RECOVER, not to continue. */
     open(cid, id) {
       return request({ type: ${JSON.stringify(VIEW_MESSAGE.open)}, cid, id });
     },

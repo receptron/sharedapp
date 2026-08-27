@@ -281,6 +281,6 @@ export default tseslint.config(
     // a verb costs, and it is cheaper than the alternative — a page that cannot get out of the
     // frame because nobody could see how.
     files: ["src/view/srcdoc.ts"],
-    rules: { "max-lines-per-function": ["error", { max: 115, skipBlankLines: true, skipComments: true, IIFEs: true }] },
+    rules: { "max-lines-per-function": ["error", { max: 117, skipBlankLines: true, skipComments: true, IIFEs: true }] },
   },
 );

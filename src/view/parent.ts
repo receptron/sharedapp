@@ -289,11 +289,19 @@ export const viewParent = (ports: ViewParentPorts, config: () => ViewSubmitConfi
 
   /** Take the reader to an article.
    *
-   *  Answered EITHER WAY and as early as possible, which is the opposite of the usual arrangement
-   *  here: a successful navigation replaces this document, so the answer a page is most likely to
-   *  receive is a refusal. Sent before the port is called, the reply would race the navigation; sent
-   *  after it, a host that navigates synchronously never gets to send one. So the port is called and
-   *  the answer follows if there is still anything to send it on.
+   *  ANSWERED EITHER WAY, success included, which is the rule this module holds for every other ask:
+   *  nothing is dropped. It did not start that way — a successful navigation was assumed to take the
+   *  document with it, so the reply was thought to have nobody to reach.
+   *
+   *  That assumption is wrong twice. A host may navigate WITHIN the page (mulmoserver pushes a
+   *  route; the frame is unmounted a tick later, not replaced by the browser), and a host may
+   *  believe it navigated when the router refused — a guard, or the address already on screen. In
+   *  the second case the page is still on the reader's screen and, unanswered, waits for ever on a
+   *  promise: a headline that was clicked and did nothing, with nothing anywhere to say so.
+   *
+   *  So the port says whether it ACTUALLY navigated and the answer follows it. A reply posted to a
+   *  document being torn down reaches nobody and costs nothing, which is the cheap half of the
+   *  trade.
    *
    *  A host that throws is a defect of the host's own, and the page is told `no-navigation` — which
    *  is exactly true, and is the one thing it can act on. */
@@ -309,8 +317,7 @@ export const viewParent = (ports: ViewParentPorts, config: () => ViewSubmitConfi
         ports.defect(error, ask.requestId);
         return false;
       });
-    if (opened) return;
-    answerOpen(ask.requestId, { opened: false, reason: "no-navigation" });
+    answerOpen(ask.requestId, opened ? { opened: true } : { opened: false, reason: "no-navigation" });
   };
 
   /** A submission the frame sent, once it is known to be one.

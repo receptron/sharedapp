@@ -237,11 +237,18 @@ export const readOpenMessage = (data: unknown, articleCid: string | null): OpenR
 
 /** What the host did about an `open`.
  *
+ *  ALWAYS SENT, success included, because the alternative is a promise nothing settles. A host that
+ *  navigates within the page — mulmoserver pushes a route rather than replacing the document — has
+ *  a frame that lives for another tick, and one that BELIEVED it navigated and did not (a router
+ *  guard, the address already on screen) has a page still on the reader's screen. Unanswered, that
+ *  page waits for ever on a headline that was clicked and did nothing.
+ *
  *  `opened: false` is not always a refusal, which is why the reason rides beside it: a host that
- *  offers no navigation at all — the author's preview pane, where there is no browser history to
- *  push onto — answers `no-navigation`, and the honest thing for a page to do about that is
- *  nothing. In production the answer usually never arrives at all: the host navigates, this
- *  document is replaced, and the promise goes with it. That is what a link does. */
+ *  offers no navigation at all — the author's preview pane, where there is no history to push onto
+ *  — answers `no-navigation`, and the honest thing for a page to do about that is nothing.
+ *
+ *  A page still should not `await` this and then act: on the ordinary success the document is being
+ *  torn down while the answer is in flight. Read it to recover, not to continue. */
 export interface OpenAnswer {
   opened: boolean;
   reason?: OpenRefusal | "no-navigation";

@@ -74,7 +74,21 @@ test("the host is told which record, and builds the address itself", async () =>
   far.send(ask({}));
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.deepEqual(asked, [{ requestId: "r1", cid: "articles", id: "my-first-post" }]);
-  assert.equal(await settled(far), undefined, "a navigation that happened takes the document with it; there is nobody left to answer");
+  // AND ANSWERED, which is this module's rule for every other ask: nothing is dropped. The reply
+  // was left out at first, on the assumption that a navigation takes the document with it — wrong
+  // twice over. A host may navigate WITHIN the page (mulmoserver pushes a route and the frame is
+  // unmounted a tick later), and a host may believe it navigated when the router refused, which
+  // leaves the page on screen waiting for ever on a headline that did nothing.
+  assert.deepEqual(await settled(far), { type: VIEW_MESSAGE.openResult, requestId: "r1", opened: true });
+});
+
+test("and `opened` is the host's own word, not the fact that it was asked", async () => {
+  // The distinction the answer exists to carry. `articleOpener` in mulmoserver returns whether the
+  // ROUTER accepted the push, so a guard that refused it comes back here as a page that did not
+  // move — and the page is told, rather than being left to conclude it from silence.
+  const { far } = opened({ navigate: () => Promise.resolve(false) });
+  far.send(ask({}));
+  assert.deepEqual(await settled(far), { type: VIEW_MESSAGE.openResult, requestId: "r1", opened: false, reason: "no-navigation" });
 });
 
 test("a host that does not navigate says so, and it is not a refusal", async () => {
