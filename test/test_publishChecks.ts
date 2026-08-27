@@ -1659,6 +1659,7 @@ const magazineSchemas = [
     prose: { type: "markdown" },
     status: { type: "string" },
     readCount: { type: "number" },
+    writtenBy: { type: "string" },
   }),
 ];
 
@@ -1671,6 +1672,7 @@ interface ArticleMap {
   title: string;
   body: string;
   summary?: string;
+  byline?: string;
 }
 
 const magazineDraft = (article: ArticleMap, maxBytes: Record<string, number>): Record<string, unknown> => ({
@@ -1684,7 +1686,7 @@ const magazineDraft = (article: ArticleMap, maxBytes: Record<string, number>): R
         idFrom: "slug",
         idField: "slug",
         audience: "participant",
-        createFields: ["slug", "title", "lede", "prose", "status"],
+        createFields: ["slug", "title", "lede", "prose", "status", "writtenBy"],
         initialStatus: "published",
         maxBytes,
       },
@@ -1721,9 +1723,23 @@ test("refuses a title that is not text — a number is read as a string that is 
   refuses(magazine({ title: "readCount" }), "number field");
 });
 
+test("refuses a byline the schema does not declare, which is the QUIETEST of the four", () => {
+  // Quietest because the failure looks exactly like success: a byline the schema does not declare
+  // draws nothing, and nothing is what an app with no byline draws. The author sees the page they
+  // would have seen if they had never written the key. (Grok on #66.)
+  refuses(magazine({ byline: "author" }), "indistinguishable from an app that declared no byline");
+});
+
+test("refuses a byline that is not text, for the reason a title is refused", () => {
+  // `textAt` reads a non-string as "", so a number byline is a byline that is never there.
+  refuses(magazine({ byline: "readCount" }), "number field");
+});
+
 test("accepts a markdown body, which is what an article body ought to be", () => {
-  // The positive half. A check that refused every type would satisfy all four tests above.
+  // The positive half. A check that refused every type would satisfy all the tests above.
   assert.deepEqual(magazine(), []);
+  // And the byline is only refused for being WRONG, never for being present.
+  assert.deepEqual(magazine({ byline: "writtenBy" }), []);
 });
 
 // --- what an index costs, and what bounds it ---------------------------------------------------
