@@ -12,6 +12,9 @@ yarn typecheck      # src, test AND scripts — one tsconfig each, and `scripts/
                     #   compiling would otherwise be found by running it at release time
 yarn test           # tsx --test ./test/test_*.ts
 yarn lint           # src test scripts
+yarn lint:overrides # every per-file exemption in eslint.config.js still silences something —
+                    #   the direction `yarn lint` cannot check. It re-lints once per exemption
+                    #   with that one rule removed, so it costs a lint run per exemption
 yarn format         # prettier, printWidth 160
 yarn format:check   # what CI runs
 yarn check:pack <tarball>   # every entry point the package DECLARES is in the tarball
