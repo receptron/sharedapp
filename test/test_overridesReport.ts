@@ -1,78 +1,119 @@
-// Which config blocks count as a silencing override, and what a probe's answer means.
+// Which config blocks count as a silencing override, where the forced rule has to go, and what a
+// probe's answer means.
 //
 // The pairing matters as much as it does for the publish gate: a predicate that accepted NOTHING
-// would report "all 0 overrides still suppress something" and pass, while the check it powers
-// looked at nothing at all. That is the exact shape of the bug this check exists to catch, so
-// every refusal below sits beside the neighbouring block that must still be accepted.
+// would report "all 0 silencing overrides still suppress something" and pass, while the check it
+// powers looked at nothing at all. That is the shape of the bug this check exists to catch, so
+// every refusal below sits beside the block that must still be accepted.
+//
+// Three of these tests exist because a reviewer found the case, and all three were the SAME
+// failure — a block the predicate did not recognise and dropped in silence, which reads exactly
+// like a clean run.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { deadProbes, probesFor, renderReport, silencingOverrideOf, silencingOverrides, type Probe } from "../scripts/overrides-report.js";
+import { deadProbes, failed, probeConfig, renderReport, select, type Probe, type Override } from "../scripts/overrides-report.js";
 
 const DEBT = { files: ["src/publishChecks.ts"], rules: { "max-lines": "warn" } };
 
+const rulesOf = (config: readonly unknown[]): string[] => select(config).overrides.map((override) => override.rule);
+
 test("a hand-written silencing block is an override, in both the warn and off forms", () => {
-  assert.deepEqual(silencingOverrideOf(DEBT), { files: ["src/publishChecks.ts"], rules: ["max-lines"] });
-  assert.deepEqual(silencingOverrideOf({ files: ["test/a.ts"], rules: { "sonarjs/code-eval": "off" } }), {
-    files: ["test/a.ts"],
-    rules: ["sonarjs/code-eval"],
-  });
+  assert.deepEqual(select([DEBT]).overrides, [{ index: 0, files: ["src/publishChecks.ts"], rule: "max-lines" }]);
+  assert.deepEqual(rulesOf([{ files: ["test/a.ts"], rules: { "sonarjs/code-eval": "off" } }]), ["sonarjs/code-eval"]);
 });
 
 test("numeric severities say the same thing as the words", () => {
-  assert.deepEqual(silencingOverrideOf({ files: ["a.ts"], rules: { x: 0 } }), { files: ["a.ts"], rules: ["x"] });
-  assert.deepEqual(silencingOverrideOf({ files: ["a.ts"], rules: { x: 1 } }), { files: ["a.ts"], rules: ["x"] });
-  assert.equal(silencingOverrideOf({ files: ["a.ts"], rules: { x: 2 } }), null);
+  assert.deepEqual(rulesOf([{ files: ["a.ts"], rules: { x: 0 } }]), ["x"]);
+  assert.deepEqual(rulesOf([{ files: ["a.ts"], rules: { x: 1 } }]), ["x"]);
+  assert.deepEqual(rulesOf([{ files: ["a.ts"], rules: { x: 2 } }]), []);
 });
 
 test("a severity written with options is read from its first element", () => {
-  assert.deepEqual(silencingOverrideOf({ files: ["a.ts"], rules: { "max-lines": ["warn", { max: 600 }] } }), { files: ["a.ts"], rules: ["max-lines"] });
-  assert.equal(silencingOverrideOf({ files: ["a.ts"], rules: { "max-lines": ["error", { max: 600 }] } }), null);
+  assert.deepEqual(rulesOf([{ files: ["a.ts"], rules: { "max-lines": ["warn", { max: 600 }] } }]), ["max-lines"]);
+  assert.deepEqual(rulesOf([{ files: ["a.ts"], rules: { "max-lines": ["error", { max: 600 }] } }]), []);
 });
 
 test("a block carrying languageOptions is still an override — that is where the scripts exemptions live", () => {
   const scripts = { files: ["scripts/**/*.ts"], languageOptions: { globals: { console: "readonly" } }, rules: { "no-console": "off" } };
-  assert.deepEqual(silencingOverrideOf(scripts), { files: ["scripts/**/*.ts"], rules: ["no-console"] });
+  assert.deepEqual(rulesOf([scripts]), ["no-console"]);
 });
 
-test("a block that RAISES any rule is a gate, not an exemption", () => {
-  assert.equal(silencingOverrideOf({ files: ["a.ts"], rules: { x: "off", y: "error" } }), null);
-  assert.deepEqual(silencingOverrideOf({ files: ["a.ts"], rules: { x: "off", y: "warn" } }), { files: ["a.ts"], rules: ["x", "y"] });
+/** A block that silences one rule and raises another is not two-thirds of an exemption; it holds a
+ *  real one. An earlier predicate took a block to be silencing only if EVERY rule in it was, so
+ *  `x` here vanished whole and was never measured — a false LIVE wearing the check's own uniform. */
+test("a MIXED block yields its silencing rules and drops only the enforced ones", () => {
+  assert.deepEqual(rulesOf([{ files: ["a.ts"], rules: { x: "off", y: "error" } }]), ["x"]);
+  assert.deepEqual(rulesOf([{ files: ["a.ts"], rules: { x: "off", y: "warn" } }]), ["x", "y"]);
+  assert.deepEqual(rulesOf([{ files: ["a.ts"], rules: { y: "error" } }]), []);
 });
 
-test("a block with no files, or no rules, names nothing to measure", () => {
-  assert.equal(silencingOverrideOf({ rules: { x: "off" } }), null);
-  assert.equal(silencingOverrideOf({ files: [], rules: { x: "off" } }), null);
-  assert.equal(silencingOverrideOf({ files: ["a.ts"], rules: {} }), null);
-  assert.equal(silencingOverrideOf({ files: ["a.ts"] }), null);
+/** ESLint's AND form, `files: [["src/*", "**\/*.ts"]]`, is legal and unsupported here. What must not
+ *  happen is dropping it quietly, because a real exemption would then stop being measured and the
+ *  count would still read as complete. */
+test("a files shape this module cannot read is REPORTED, never skipped", () => {
+  const nested = select([{ files: [["src/*", "**/*.ts"]], rules: { x: "off" } }]);
+  assert.deepEqual(nested.overrides, []);
+  assert.equal(nested.unclassified.length, 1);
+  assert.match(nested.unclassified[0]?.why ?? "", /only an array of plain patterns/);
+
+  const unknownSeverity = select([{ files: ["a.ts"], rules: { x: "sometimes" } }]);
+  assert.deepEqual(unknownSeverity.overrides, []);
+  assert.match(unknownSeverity.unclassified[0]?.why ?? "", /neither silencing nor enforcing/);
+
+  // and the neighbouring shapes that must still be read
+  assert.equal(select([DEBT]).unclassified.length, 0);
 });
 
-test("nothing that is not a block survives the predicate", () => {
-  [null, undefined, 0, "", "files", [], { files: "a.ts", rules: { x: "off" } }, { files: [1], rules: { x: "off" } }, { files: ["a.ts"], rules: null }].forEach(
-    (value) => {
-      assert.equal(silencingOverrideOf(value), null, `accepted ${JSON.stringify(value)}`);
-    },
-  );
+test("an empty files list names nothing to measure, and says so", () => {
+  const empty = select([{ files: [], rules: { x: "off" } }]);
+  assert.deepEqual(empty.overrides, []);
+  assert.equal(empty.unclassified.length, 1);
 });
 
-test("silencingOverrides keeps the config's own order and drops the presets", () => {
-  const config = [{ name: "preset", rules: { a: "error" } }, DEBT, { files: ["b.ts"], rules: { z: "off" } }, "not a block"];
+/** A preset ships defaults nobody here maintains — `typescript-eslint/eslint-recommended` turns off
+ *  twenty-three core rules the compiler covers — so measuring it produces DEAD rows telling a
+ *  maintainer to delete something they do not own. Named blocks are counted instead of dropped, so
+ *  "not measured" is a number in the report rather than an absence. */
+test("named blocks are presets: counted, not measured", () => {
+  const chosen = select([{ name: "some/preset", files: ["a.ts"], rules: { x: "off" } }, DEBT]);
   assert.deepEqual(
-    silencingOverrides(config).map((override) => override.rules),
-    [["max-lines"], ["z"]],
+    chosen.overrides.map((override) => override.rule),
+    ["max-lines"],
   );
+  assert.equal(chosen.presets, 1);
+  assert.equal(chosen.unclassified.length, 0);
 });
 
-test("one probe per rule, because a block can be dead in one rule and live in another", () => {
-  assert.deepEqual(probesFor([{ files: ["a.ts"], rules: ["x", "y"] }]), [
-    { files: ["a.ts"], rule: "x" },
-    { files: ["a.ts"], rule: "y" },
-  ]);
-  assert.deepEqual(probesFor([]), []);
+test("blocks that are not per-file exemptions at all are passed over silently", () => {
+  const chosen = select([{ rules: { x: "off" } }, { files: ["a.ts"] }, "not a block", null, DEBT]);
+  assert.deepEqual(
+    chosen.overrides.map((override) => override.rule),
+    ["max-lines"],
+  );
+  assert.deepEqual(chosen.unclassified, []);
+  assert.equal(chosen.presets, 0);
 });
 
-const probe = (rule: string, reports: number): Probe => ({ files: ["a.ts"], rule, reports });
+test("the override remembers WHERE it was, because the probe depends on it", () => {
+  const chosen = select(["filler", { files: ["a.ts"], rules: { x: "off" } }]);
+  assert.equal(chosen.overrides[0]?.index, 1);
+});
+
+/** THE PLACEMENT IS THE WHOLE ANSWER. In a flat config the last matching entry wins, so a forced
+ *  block appended to the end also beats every LATER block — and a later block silencing the same
+ *  rule over the same files is exactly what makes the measured one dead. Measured on a three-block
+ *  config over one file, appending reported 1 where deleting the block reported 0. */
+test("probeConfig puts the forced block immediately after the one being measured, not at the end", () => {
+  const config = ["a", "b", "c"];
+  const override: Override = { index: 1, files: ["a.ts"], rule: "x" };
+  assert.deepEqual(probeConfig(config, override, "FORCED"), ["a", "b", "FORCED", "c"]);
+  assert.deepEqual(probeConfig(config, { ...override, index: 0 }, "FORCED"), ["a", "FORCED", "b", "c"]);
+  assert.deepEqual(probeConfig(config, { ...override, index: 2 }, "FORCED"), ["a", "b", "c", "FORCED"]);
+});
+
+const probe = (rule: string, reports: number): Probe => ({ index: 0, files: ["a.ts"], rule, reports });
 
 test("a probe is dead when the rule it silences reports nothing, and only then", () => {
   assert.deepEqual(deadProbes([probe("x", 0), probe("y", 1), probe("z", 99)]), [probe("x", 0)]);
@@ -81,21 +122,35 @@ test("a probe is dead when the rule it silences reports nothing, and only then",
 });
 
 test("the report names the dead ones and says so in its verdict", () => {
-  const clean = renderReport([probe("x", 3)]);
+  const clean = renderReport([probe("x", 3)], [], 0);
   assert.match(clean, /^live {2}x {2}<- {2}a\.ts$/m);
   assert.match(clean, /all 1 silencing overrides still suppress something/);
   assert.doesNotMatch(clean, /DEAD/);
 
-  const rotten = renderReport([probe("x", 3), probe("y", 0)]);
+  const rotten = renderReport([probe("x", 3), probe("y", 0)], [], 0);
   assert.match(rotten, /^DEAD {2}y {2}<- {2}a\.ts$/m);
   assert.match(rotten, /1 of 2 silencing overrides suppress NOTHING/);
 });
 
-test("the dead rows come last, so a truncated log keeps the actionable half", () => {
-  const lines = renderReport([probe("dead", 0), probe("live", 2)]).split("\n");
-  assert.ok(lines.indexOf("live  live  <-  a.ts") < lines.indexOf("DEAD  dead  <-  a.ts"));
+test("an unreadable block is in the report and in the verdict, even with nothing dead", () => {
+  const report = renderReport([probe("x", 3)], [{ index: 4, why: "files is 7" }], 0);
+  assert.match(report, /UNREAD {2}eslint\.config\.js element 4: files is 7/);
+  assert.match(report, /1 block\(s\) could not be read/);
 });
 
-test("an empty config is reported as such, never as a pass", () => {
-  assert.match(renderReport([]), /all 0 silencing overrides still suppress something/);
+test("the preset count is always stated, so 'not measured' is a number rather than an absence", () => {
+  assert.match(renderReport([probe("x", 1)], [], 3), /3 named block\(s\) are presets and were not measured/);
+  assert.match(renderReport([probe("x", 0)], [], 3), /3 named block\(s\) are presets and were not measured/);
+});
+
+test("the run fails on a dead override OR an unreadable block, and passes on neither", () => {
+  assert.equal(failed([probe("x", 1)], []), false);
+  assert.equal(failed([probe("x", 0)], []), true);
+  assert.equal(failed([probe("x", 1)], [{ index: 0, why: "why" }]), true);
+  assert.equal(failed([], []), false);
+});
+
+test("the dead rows come last, so a truncated log keeps the actionable half", () => {
+  const lines = renderReport([probe("dead", 0), probe("live", 2)], [], 0).split("\n");
+  assert.ok(lines.indexOf("live  live  <-  a.ts") < lines.indexOf("DEAD  dead  <-  a.ts"));
 });
