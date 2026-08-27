@@ -3,8 +3,11 @@ import {
   isRecord,
   readLookupMessage,
   readNotice,
+  readOpenMessage,
   readSubmitMessage,
   type LookupAsk,
+  type OpenAnswer,
+  type OpenAsk,
   type PendingSubmit,
   type SubmitRead,
   type ViewDataset,
@@ -179,6 +182,16 @@ export interface ViewParentPorts {
    *  OPTIONAL, and a host without it answers `known: false`. Absence is "nobody looked", never "you
    *  have not answered". */
   lookup?: ((ask: LookupAsk) => Promise<{ found: boolean; record?: Record<string, unknown> }>) | undefined;
+  /** Take the reader to one ARTICLE — the navigation a sandboxed page cannot perform for itself.
+   *
+   *  Returns whether it actually navigated. A host that WOULD but did not — the author's preview
+   *  pane, which has no browser history to push onto — returns false and the page is told
+   *  `no-navigation` rather than a refusal, because nothing about the ask was wrong.
+   *
+   *  OPTIONAL, and a host without it answers the same way. It is never told the URL: it holds the
+   *  slug and builds the address from `{ cid, id }`, which is what keeps a page from sending a
+   *  visitor out of the app it is part of. */
+  navigate?: ((ask: OpenAsk) => boolean | Promise<boolean>) | undefined;
   /** What to do about an intent. Omitted, every one is refused {@link READ_ONLY}.
    *
    *  A GETTER: a host holding this in a reactive prop can have it replaced under the parent, and a
@@ -233,6 +246,10 @@ export const viewParent = (ports: ViewParentPorts, config: () => ViewSubmitConfi
   const answerLookup = (requestId: string, found: { known: boolean; found: boolean; record?: Record<string, unknown> }) => {
     post({ type: VIEW_MESSAGE.lookupResult, requestId, ...found });
   };
+  /** The answer to an `open`, on its own message name for `answerLookup`'s reason. */
+  const answerOpen = (requestId: string, done: OpenAnswer) => {
+    post({ type: VIEW_MESSAGE.openResult, requestId, ...done });
+  };
 
   const sendState = () => {
     // Nothing before the document has answered on the channel — and the channel belongs to the
@@ -268,6 +285,32 @@ export const viewParent = (ports: ViewParentPorts, config: () => ViewSubmitConfi
     // Spread rather than naming `record`: `exactOptionalPropertyTypes` is on, and an explicit
     // `record: undefined` is a different thing from a key that was never there.
     answerLookup(ask.requestId, { known: true, ...found });
+  };
+
+  /** Take the reader to an article.
+   *
+   *  Answered EITHER WAY and as early as possible, which is the opposite of the usual arrangement
+   *  here: a successful navigation replaces this document, so the answer a page is most likely to
+   *  receive is a refusal. Sent before the port is called, the reply would race the navigation; sent
+   *  after it, a host that navigates synchronously never gets to send one. So the port is called and
+   *  the answer follows if there is still anything to send it on.
+   *
+   *  A host that throws is a defect of the host's own, and the page is told `no-navigation` — which
+   *  is exactly true, and is the one thing it can act on. */
+  const go = async (ask: OpenAsk) => {
+    const port = ports.navigate;
+    if (port === undefined) {
+      answerOpen(ask.requestId, { opened: false, reason: "no-navigation" });
+      return;
+    }
+    const opened = await Promise.resolve()
+      .then(() => port(ask))
+      .catch((error: unknown) => {
+        ports.defect(error, ask.requestId);
+        return false;
+      });
+    if (opened) return;
+    answerOpen(ask.requestId, { opened: false, reason: "no-navigation" });
   };
 
   /** A submission the frame sent, once it is known to be one.
@@ -355,6 +398,17 @@ export const viewParent = (ports: ViewParentPorts, config: () => ViewSubmitConfi
       // with no `known` at all — the shape it cannot tell apart from "nobody looked". Both refusals
       // mean the same thing to the page: nothing was read, so nothing is known.
       answerLookup(asked.requestId, { known: false, found: false });
+      return;
+    }
+    const wanted = readOpenMessage(data, config()?.articleCid ?? null);
+    if (wanted.ok) {
+      void go(wanted.ask);
+      return;
+    }
+    if (wanted.reason !== "not-an-open") {
+      // Answered as an OPEN, for the reason a refused lookup is answered as a lookup: the page is
+      // waiting on `view.open`, which settles on `openResult` and reads `{ opened }`.
+      answerOpen(wanted.requestId, { opened: false, reason: wanted.reason });
       return;
     }
     if (data.type === VIEW_MESSAGE.submit) {

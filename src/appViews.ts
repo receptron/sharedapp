@@ -69,6 +69,9 @@ const VIEW_ID_SHAPE = "must be lowercase letters, digits and hyphens, start with
  *  carried only so a refusal names the key the author can go and edit. */
 /** Which field of an article is which. See `ViewZ.article`. */
 export interface ArticleFields {
+  /** Which collection holds the articles. Absent where `collections` names exactly one — see
+   *  {@link articleCid}. */
+  collection?: string | undefined;
   title: string;
   body: string;
   /** `| undefined` explicitly, as everywhere else here: this repository builds with
@@ -83,11 +86,13 @@ export interface ArticleFields {
 export interface NormalizedView {
   id: string;
   audience: ViewAudience;
-  /** Absent exactly when `type` is present — see {@link NormalizedView.type}. */
+  /** The author's HTML. Optional in the TYPE and required of every view — the
+   *  legacy `public.view` spelling has no other shape, and `viewSourceProblems`
+   *  is where its absence is refused. */
   path?: string | undefined;
-  /** A page the PLATFORM draws, instead of the author's HTML at `path`. */
-  type?: "article" | undefined;
-  /** Present with `type: "article"` and never without it. */
+  /** The fields of the ARTICLE PAGE the platform draws at `/a/{slug}/{id}`, when
+   *  this view declares one. It does not replace `path`: that page is a second
+   *  address beside the author's, never instead of it. */
   article?: ArticleFields | undefined;
   collections: string[];
   /** The subset of `collections` this page WATCHES rather than reads once.
@@ -121,6 +126,20 @@ const BOTH_FORMS =
   "app.json declares both `views` and `public.view`. These are the same thing — `public.view` is the older spelling — and publishing would have to choose one silently. " +
   'Move the `public.view` entry into `views` as { id: "public", audience: "public", … } and delete it.';
 
+/** `"type": "article"` — a key that used to take the app's whole public face.
+ *
+ *  It meant "the platform draws this page instead of your HTML", and it drew TWO: the index at
+ *  `/a/{slug}` and one article at `/a/{slug}/{id}`. Only the second was ever the platform's, so
+ *  the key is gone and the `article` block stands on its own. What an author has to do about it is
+ *  ADD a page, which is the thing this refusal has to say — deleting the key alone leaves the view
+ *  with nothing to draw, and the next refusal they would see is about `path`. */
+const retiredType = (id: string): string =>
+  `views[id: "${id}"] declares \`"type": "article"\`, which no longer exists. The platform draws ONE page for an app — an article at ` +
+  `\`/a/{slug}/{id}\` — and the index at \`/a/{slug}\` is yours: it was never anything the platform could draw better than you can, and ` +
+  `taking it left an app that publishes articles with no public face of its own. Delete \`type\`, keep the \`article\` block, and add ` +
+  '`"path"` naming the HTML that lists them. Link an entry to its article with `view.open(cid, id)` — a sandboxed page cannot navigate ' +
+  "on its own.";
+
 /** The two declarations, as one list, or the refusal that they are both there.
  *
  *  `public.view` becomes an entry under the reserved id, so everything
@@ -130,11 +149,17 @@ function declaredViews(app: AuthoredApp): NormalizedViewsResult {
   const authored = app.views;
   if (legacy !== undefined && authored !== undefined) return { ok: false, problems: [BOTH_FORMS] };
 
+  // `type` is refused HERE rather than in `viewSourceProblems`, because past this point it does not
+  // exist: `NormalizedView` has no such key, so this is the last place holding what the author
+  // wrote. Refused rather than dropped for `BOTH_FORMS`'s reason — an author who wrote it is asking
+  // for a page, and silence would hand them a different one with nothing anywhere saying why.
+  const withType = (authored ?? []).filter((view) => view.type !== undefined);
+  if (withType.length > 0) return { ok: false, problems: withType.map((view) => retiredType(view.id)) };
+
   const views: NormalizedView[] = (authored ?? []).map((view, index): NormalizedView => ({
     id: view.id,
     audience: view.audience,
     ...(view.path === undefined ? {} : { path: view.path }),
-    ...(view.type === undefined ? {} : { type: view.type }),
     ...(view.article === undefined ? {} : { article: view.article }),
     collections: view.collections,
     ...(view.live === undefined ? {} : { live: view.live }),
@@ -157,69 +182,65 @@ function declaredViews(app: AuthoredApp): NormalizedViewsResult {
   return { ok: true, views: [...views, legacyView] };
 }
 
-/** WHAT DRAWS THIS PAGE, and the four ways of not saying it.
+/** WHAT DRAWS THIS PAGE — which, since the index came back to the app, is always the author.
  *
- *  A view is either HTML the author wrote (`path`) or a page the platform draws
- *  from the declaration (`type`). Neither leaves publish nothing to write;
- *  both leaves it two things and no way to choose, which — like the two
- *  spellings of `views` above — would be the author writing two answers and
- *  being shown neither.
- *
- *  `article` without `type` is the quiet one, and it is refused for the reason
- *  `idIn` beside the wrong `idFrom` is: nothing reads it there, so the author
- *  believes they have named the title field and the page they get is the
- *  generated form. */
+ *  Every view is HTML at `path`. There is no longer a second answer to choose between: the one page
+ *  the platform draws is the ARTICLE at `/a/{slug}/{id}`, and that is a second address under this
+ *  view rather than a different drawing of it. So `path` and `article` are not alternatives, and
+ *  declaring both is the ordinary shape of a magazine. */
 function viewSourceProblems(view: NormalizedView): string[] {
-  if (view.path !== undefined && view.type !== undefined) {
-    return [
-      `${view.where} declares both \`path\` and \`type\`: a view is either HTML you wrote or a page the platform draws, and publishing would have to ` +
-        `choose one silently. Delete \`path\` to keep the ${view.type} page, or delete \`type\` to keep your own HTML.`,
-    ];
-  }
-  if (view.path === undefined && view.type === undefined) {
-    return [
-      `${view.where} declares neither \`path\` nor \`type\`, so there is nothing to draw. Name the HTML file with \`path\`, or ask for \`"type": "article"\`.`,
-    ];
-  }
-  if (view.type === "article" && view.article === undefined) {
-    return [
-      `${view.where} is \`"type": "article"\` but declares no \`article\` block, so nothing says which field is the title and which is the body. ` +
-        `Add "article": { "title": "title", "body": "body" }.`,
-    ];
-  }
-  if (view.type === undefined && view.article !== undefined) {
-    return [
-      `${view.where} declares an \`article\` block but no \`type\`: that block is read only by \`"type": "article"\`, so as written nothing names the ` +
-        `title or the body and the page drawn is the generated form. Add \`"type": "article"\`, or delete the block.`,
-    ];
-  }
-  return [];
+  if (view.path !== undefined) return [];
+  return [
+    `${view.where} names no \`path\`, so there is no page to publish. Every view is HTML you wrote: name the file, relative to the repository root.` +
+      (view.article === undefined
+        ? ""
+        : " The `article` block here says how to draw ONE article at `/a/{slug}/{id}`; the page that lists them is still yours."),
+  ];
 }
 
-/** An article view's collection: exactly one, because one page shows one
- *  running order.
+/** WHICH collection holds the articles.
  *
- *  `collections` is a LIST for the HTML case, where a page may draw from
- *  several — and an article page cannot: which of three collections held the
- *  article at `/a/{slug}/{id}` would have no answer, and the id could name a
- *  row in more than one of them. */
+ *  One of them, because an article's URL is `/a/{slug}/{id}` with nothing in it to say which
+ *  collection the id is in — and the same id could name a row in more than one.
+ *
+ *  It used to be settled by refusing an article view that named more than one collection at all,
+ *  which was cheap while the platform drew the whole page: there was nothing else on it. Now the
+ *  page is the author's, and a magazine's index has every reason to read a second dataset — its
+ *  sections, its masthead — so the choice is NAMED instead of counted. Left out where there is
+ *  only one, because there the count still answers it and a key that can only repeat what is
+ *  already there is one more thing to keep in step. */
+export function articleCid(view: { article?: { collection?: string | undefined } | undefined; collections: readonly string[] }): string | undefined {
+  if (view.article === undefined) return undefined;
+  return view.article.collection ?? (view.collections.length === 1 ? view.collections[0] : undefined);
+}
+
 function articleCollectionProblems(view: NormalizedView): string[] {
-  if (view.type === "article" && view.audience !== "public") {
+  if (view.article === undefined) return [];
+  if (view.audience !== "public") {
     // The public face only, for now. The member and roster tiers draw their
     // pages through a different bridge with its own intents, and an article
     // page there would be a second reader to keep in step for an audience that
     // has not asked for one. Refused rather than half-published: publishing it
-    // to a tier whose runtime ignores `type` would leave the staff looking at
-    // an empty page.
+    // to a tier whose runtime ignores it would leave the staff looking at a
+    // link that goes nowhere.
     return [
-      `${view.where} is \`"type": "article"\` with audience "${view.audience}". Platform-drawn pages are published for the PUBLIC face only; ` +
-        `give this view \`"audience": "public"\`, or write the page yourself with \`path\`.`,
+      `${view.where} declares an \`article\` block with audience "${view.audience}". The article page is published under the PUBLIC entrance ` +
+        `(\`/a/{slug}/{id}\`) only; move the block to the public view, or delete it.`,
     ];
   }
-  if (view.type !== "article" || view.collections.length === 1) return [];
+  const named = view.article.collection;
+  if (named === undefined) {
+    if (view.collections.length === 1) return [];
+    return [
+      `${view.where} declares an \`article\` block and names ${view.collections.length} collections, so nothing says which of them holds the articles — ` +
+        `and \`/a/{slug}/{id}\` has nothing in it to say either. Add \`"collection"\` to the \`article\` block.`,
+    ];
+  }
+  if (view.collections.includes(named)) return [];
+  const read = view.collections.map((cid) => `'${cid}'`).join(", ");
   return [
-    `${view.where} is \`"type": "article"\` and names ${view.collections.length} collections. An article page shows ONE running order, and an article's ` +
-      `URL is \`/a/{slug}/{id}\` with nothing in it to say which collection the id is in. Name just the one that holds the articles.`,
+    `${view.where}.article.collection names '${named}', which is not in this view's \`collections\`. The article page is drawn from a dataset this ` +
+      `page reads, so the collection has to be one of them: ${read}.`,
   ];
 }
 

@@ -28,7 +28,7 @@
 
 import type { CollectionFieldSpec, CollectionSchema } from "@mulmoclaude/core/collection";
 import { isSafeCustomViewPath } from "@mulmoclaude/core/collection/server";
-import { declaresMoves, normalizeViews, participantScope, type NormalizedView, type ViewAudience } from "./appViews.js";
+import { articleCid, declaresMoves, normalizeViews, participantScope, type NormalizedView, type ViewAudience } from "./appViews.js";
 import { agentCids, AGENT_ID_PATTERN, AGENT_INSTRUCTION_MAX, RESERVED_AGENT_IDS } from "./appAgents.js";
 import { APP_PROTOCOL, protocolOf, protocolWithin } from "./appProtocol.js";
 import { writersOf } from "./appViews.js";
@@ -1545,8 +1545,8 @@ const capIn = (map: Record<string, number> | undefined, key: string): number | u
  *  THE AUDIENCE IS THE LOAD-BEARING ONE. `maxBytes` is not a rule (see its declaration): publish
  *  checks it and the host refuses the value before sending it, and neither of those binds somebody
  *  writing straight to Firestore. What makes that acceptable is that the only people who may write
- *  an article are the participants a roster carries — people the owner invited by name. Let a
- *  collection with `type: "article"` be submitted to by the world and the cap becomes a comment.
+ *  an article are the participants a roster carries — people the owner invited by name. Let an
+ *  ARTICLE collection be submitted to by the world and the cap becomes a comment.
  *
  *  EVERY TEXT FIELD THE PAGE DRAWS is capped, not only the body. Capping the body alone left the
  *  long text one rename away: a contributor — or a `useSharedApp` agent that will not stop — puts
@@ -1611,8 +1611,7 @@ function submitFor(app: AuthoredApp, cid: string): AuthoredSubmit | undefined {
 }
 
 function articleCostProblems(app: AuthoredApp, view: NormalizedView): string[] {
-  if (view.type !== "article") return [];
-  const cid = view.collections[0];
+  const cid = articleCid(view);
   if (cid === undefined) return [];
   const submit = submitFor(app, cid);
   const rows = capIn(view.limit, cid);
@@ -1661,19 +1660,19 @@ function articleCostProblems(app: AuthoredApp, view: NormalizedView): string[] {
 
 /** A colour for a page nobody draws.
  *
- *  `theme` is read by the runtime that DRAWS a page from the declaration, and only `views[].type`
- *  produces one. An app whose pages are all its own HTML styles them itself and never looks here,
- *  so the key would sit in the manifest meaning nothing — the same silent no-op `viewLiveProblems`
- *  refuses one key over.
+ *  `theme` is read by the runtime that DRAWS a page from the declaration, and since the index went
+ *  back to the app there is exactly one such page: the ARTICLE at `/a/{slug}/{id}`. An app whose
+ *  pages are all its own HTML styles them itself and never looks here, so the key would sit in the
+ *  manifest meaning nothing — the same silent no-op `viewLiveProblems` refuses one key over.
  *
  *  It does NOT move the protocol, and that asymmetry is the point: a reader too old to know `hue`
- *  draws the page in its default colours, which is the page. A reader too old to know `type` draws
- *  the GENERATED FORM in a magazine's place, which is not. */
+ *  draws the article in its default colours, which is the article. A reader too old to know
+ *  `article` sends every link ever shared to the index instead, which is not. */
 function themeProblems(app: AuthoredApp, views: readonly NormalizedView[]): string[] {
-  if (app.theme === undefined || views.some((view) => view.type !== undefined)) return [];
+  if (app.theme === undefined || views.some((view) => view.article !== undefined)) return [];
   return [
-    "theme sets a colour and no view declares `type`, so nothing draws a page from this app's declaration and the key does nothing. A page " +
-      "written as HTML carries its own colours. Delete `theme`, or publish a page the platform draws.",
+    "theme sets a colour and no view declares an `article` block, so nothing draws a page from this app's declaration and the key does nothing. " +
+      "A page written as HTML carries its own colours. Delete `theme`, or publish articles.",
   ];
 }
 
@@ -1941,15 +1940,15 @@ export function schemaRefProblems(app: AuthoredApp, schemas: { cid: string; sche
  *  its own error rather than a second time here. */
 function articleRefProblems(schemaOf: ReadonlyMap<string, CollectionSchema>, view: AuthoredView, where: string): string[] {
   const { article } = view;
-  const cid = view.collections[0];
+  const cid = articleCid(view);
   const schema = cid === undefined ? undefined : schemaOf.get(cid);
-  if (view.type !== "article" || article === undefined || schema === undefined) return [];
+  if (article === undefined || schema === undefined) return [];
   const fields = schema.fields ?? {};
   const known = Object.keys(fields).sort(byText).join(", ") || "(none)";
   const drawn: { key: "title" | "body" | "summary" | "byline"; field: string | undefined; missing: string }[] = [
-    { key: "title", field: article.title, missing: "the page falls back to the document id, so the index reads as a list of URL names" },
+    { key: "title", field: article.title, missing: "the page falls back to the document id, so an article is headed by its URL name" },
     { key: "body", field: article.body, missing: "every article renders EMPTY, which looks exactly like one nobody has written yet" },
-    { key: "summary", field: article.summary, missing: "the index quietly shows the article's opening instead, and this declaration does nothing" },
+    { key: "summary", field: article.summary, missing: "the article is drawn with no standfirst under its title, and this declaration does nothing" },
     {
       key: "byline",
       field: article.byline,

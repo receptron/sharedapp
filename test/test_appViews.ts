@@ -8,7 +8,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { normalizeViews, participantScope, viewDocId, writeFor, PUBLIC_VIEW_ID } from "../src/appViews.js";
+import { articleCid, normalizeViews, participantScope, viewDocId, writeFor, PUBLIC_VIEW_ID } from "../src/appViews.js";
 import { projectAppViews } from "../src/publishProject.js";
 import { AuthoredAppZ } from "../src/publishManifest.js";
 import { byText } from "../src/byText.js";
@@ -513,20 +513,26 @@ test("a collection whose ONLY writable thing is the writer's delete still gets a
   assert.deepEqual(entry?.writers, [OWNER]);
 });
 
-// --- Platform-drawn pages (`views[].type`) -------------------------------------------------
+// --- The ARTICLE page (`views[].article`) ---------------------------------------------------
 //
-// A view is either HTML the author wrote or a page the platform draws. These pin the four ways of
-// failing to say which, plus the one shape an article page has to have — because every one of them
-// fails by publishing SOMETHING rather than by erroring, and what a visitor then sees is a
-// different app.
+// The platform draws ONE page for an app: an article at `/a/{slug}/{id}`. The index at `/a/{slug}`
+// is the author's HTML and always was theirs to write — `type: "article"` took it, which left an app
+// that publishes articles with no public face of its own. These pin the retirement of that key and
+// the shape the block has to have, because every one of them fails by publishing SOMETHING rather
+// than by erroring, and what a visitor then sees is a different app.
 
-const ARTICLE = { id: "public", audience: "public", type: "article", collections: ["articles"], article: { title: "title", body: "body", summary: "summary" } };
+const ARTICLE = {
+  id: "public",
+  audience: "public",
+  path: "views/home.html",
+  collections: ["articles"],
+  article: { title: "title", body: "body", summary: "summary" },
+};
 
-test("an article view normalizes with its field mapping", () => {
+test("an article view normalizes with its field mapping, BESIDE the page the author wrote", () => {
   const result = normalizeViews(app({ views: [ARTICLE] }));
   assert.ok(result.ok);
-  assert.equal(result.views[0]?.type, "article");
-  assert.equal(result.views[0].path, undefined, "a platform page names no file");
+  assert.equal(result.views[0]?.path, "views/home.html", "the app still draws its own index");
   assert.deepEqual(result.views[0].article, { title: "title", body: "body", summary: "summary" });
 });
 
@@ -541,34 +547,62 @@ test("an article may name the field its byline is in, and most do not", () => {
   assert.equal("byline" in (plain.views[0]?.article ?? {}), false);
 });
 
-test("refuses a view that declares both a path and a type", () => {
-  refuses(problemsOf({ views: [{ ...ARTICLE, path: "views/public.html" }] }), "both `path` and `type`");
+test("refuses `type`, and says to add the page it used to take", () => {
+  // Refused rather than ignored. Dropped silently, an author who wrote it gets a page they did not
+  // ask for — and the refusal has to name what to ADD, because deleting the key alone leaves the
+  // view with nothing to draw and the next refusal they see would be about `path`.
+  const problems = problemsOf({
+    views: [{ id: "public", audience: "public", type: "article", collections: ["articles"], article: { title: "t", body: "b" } }],
+  });
+  refuses(problems, "no longer exists");
+  refuses(problems, '`"path"` naming the HTML that lists them');
 });
 
-test("refuses a view that declares neither", () => {
-  refuses(problemsOf({ views: [{ id: "public", audience: "public", collections: ["articles"] }] }), "neither `path` nor `type`");
+test("refuses a view that names no path, now that every view is HTML", () => {
+  const problems = problemsOf({ views: [{ id: "public", audience: "public", collections: ["articles"] }] });
+  refuses(problems, "names no `path`");
 });
 
-test("refuses an article view with no article block", () => {
-  refuses(problemsOf({ views: [{ id: "public", audience: "public", type: "article", collections: ["articles"] }] }), "no `article` block");
+test("tells an article view with no path that the page listing them is still its own", () => {
+  // The same refusal with the sentence that answers the question it raises: an author who declared
+  // an `article` block may reasonably believe the platform is drawing the whole thing.
+  refuses(problemsOf({ views: [{ ...ARTICLE, path: undefined }] }), "the page that lists them is still yours");
 });
 
-test("refuses an article block with no type, which would silently draw the form", () => {
-  // The quiet one. Everything parses, publish succeeds, and the author believes they have named the
-  // title field while the visitor is shown the generated form.
+test("an article block may say WHICH collection holds the articles", () => {
+  const result = normalizeViews(
+    app({ views: [{ ...ARTICLE, collections: ["articles", "sections"], article: { collection: "articles", title: "t", body: "b" } }] }),
+  );
+  assert.ok(result.ok);
+  const view = result.views[0];
+  assert.ok(view);
+  assert.equal(articleCid(view), "articles");
+});
+
+test("and need not, where there is only one to mean", () => {
+  const result = normalizeViews(app({ views: [ARTICLE] }));
+  assert.ok(result.ok);
+  const view = result.views[0];
+  assert.ok(view);
+  assert.equal(articleCid(view), "articles");
+});
+
+test("refuses an article view over several collections that does not say which", () => {
+  // `/a/{slug}/{id}` carries nothing that says which collection the id is in. Several collections
+  // are allowed now — an index has every reason to read its sections too — so the answer is NAMED
+  // rather than counted.
+  refuses(problemsOf({ views: [{ ...ARTICLE, collections: ["articles", "notes"] }] }), "which of them holds the articles");
+});
+
+test("refuses an article collection this page does not read", () => {
   refuses(
-    problemsOf({ views: [{ id: "public", audience: "public", path: "views/public.html", collections: ["articles"], article: { title: "t", body: "b" } }] }),
-    "`article` block but no `type`",
+    problemsOf({ views: [{ ...ARTICLE, collections: ["articles"], article: { collection: "notes", title: "t", body: "b" } }] }),
+    "not in this view's `collections`",
   );
 });
 
-test("refuses an article view over more than one collection", () => {
-  // `/a/{slug}/{id}` carries nothing that says which collection the id is in.
-  refuses(problemsOf({ views: [{ ...ARTICLE, collections: ["articles", "notes"] }] }), "shows ONE running order");
-});
-
-test("refuses an article view published to a members' tier", () => {
-  refuses(problemsOf({ views: [{ ...ARTICLE, id: "desk", audience: "member" }] }), "PUBLIC face only");
+test("refuses an article block on a members' tier", () => {
+  refuses(problemsOf({ views: [{ ...ARTICLE, id: "desk", audience: "member" }] }), "PUBLIC entrance");
 });
 
 // --- What a submitter may CORRECT (`selfUpdate`) --------------------------------------------

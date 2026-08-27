@@ -110,6 +110,15 @@ const channelScript = (): string => `
       // failed. NOT the same as \`found: false\`, and the page has to keep them
       // apart -- see the note on the wire name.
       if (settle) { pending.delete(data.requestId); settle({ known: data.known === true, found: data.found === true, record: data.record }); }
+      return;
+    }
+    if (data.type === ${JSON.stringify(VIEW_MESSAGE.openResult)}) {
+      const settle = pending.get(data.requestId);
+      // Usually never arrives: a host that navigates replaces this document and
+      // the promise goes with it. What settles here is the case where it did
+      // NOT -- so \`opened\` is the honest word, and the page decides whether
+      // \`reason\` is worth showing anyone.
+      if (settle) { pending.delete(data.requestId); settle({ opened: data.opened === true, reason: data.reason }); }
     }
   };
   window.addEventListener("message", (event) => {
@@ -370,6 +379,25 @@ ${gestureScript()}
      *  false\` means nobody looked, which a page must not draw as "no". */
     mine(cid, key) {
       return request({ type: ${JSON.stringify(VIEW_MESSAGE.lookup)}, cid, key });
+    },
+    /** Take the reader to ONE ARTICLE -- \`/a/{slug}/{id}\`, the page the
+     *  platform draws from this app's \`article\` declaration.
+     *
+     *  THE ONLY WAY OUT OF THIS FRAME. It is sandboxed with scripts and nothing
+     *  else, so a link out of it does nothing at all: no top navigation, no
+     *  popup. Draw an entry however you like and call this from its click
+     *  handler.
+     *
+     *  It names a RECORD, never a URL. The host holds the app's slug and builds
+     *  the address, so this cannot send anybody anywhere but into an article of
+     *  the app they are reading.
+     *
+     *  Answers { opened, reason } -- and usually does not answer at all, because
+     *  a navigation that happened took this document with it. \`opened: false\`
+     *  with \`no-navigation\` is a host that does not navigate, such as the
+     *  author's preview pane; there is nothing for a page to do about it. */
+    open(cid, id) {
+      return request({ type: ${JSON.stringify(VIEW_MESSAGE.open)}, cid, id });
     },
     transition(cid, itemId, to) {
       return request({ type: ${JSON.stringify(VIEW_MESSAGE.intent)}, kind: "transition", cid, itemId, to });

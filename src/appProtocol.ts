@@ -63,10 +63,15 @@ export const APP_PROTOCOL_BASE = "1.0.0";
 /** THE CONTRACT THIS APP'S DOCUMENTS KEEP — which is not always the newest one this build can emit.
  *
  *  The per-app stamp is back, and this is the day `APP_PROTOCOL`'s note above said it would be. An
- *  ARTICLE VIEW is the first key a reader must UNDERSTAND to be correct rather than one it may
- *  safely ignore: `views[].type` replaces the HTML a public page is drawn from, so a reader that
- *  does not know it finds no HTML, concludes the app publishes no view, and draws the GENERATED
- *  FORM in a magazine's place. Nothing errors. The visitor is shown a different app.
+ *  ARTICLE DECLARATION is the first key a reader must UNDERSTAND to be correct rather than one it
+ *  may safely ignore: `views[].article` turns on a second address under the app's public entrance,
+ *  `/a/{slug}/{id}`, and a reader that does not know it draws the app's index there instead. Every
+ *  link ever shared to an article lands on the wrong page. Nothing errors.
+ *
+ *  It used to be worse, and the note is kept because the difference is the whole reason the platform
+ *  gave the index back: while `views[].type` REPLACED the HTML a public page was drawn from, an
+ *  unknowing reader found no HTML at all, concluded the app published no view, and drew the
+ *  GENERATED FORM in a magazine's place — the visitor was shown a different app.
  *
  *  So the major goes up — and it goes up ONLY FOR THE APPS THAT USE IT. Stamping every app 2.0.0
  *  would make every deployed reader refuse every app published after this build, including the ones
@@ -77,11 +82,14 @@ export const APP_PROTOCOL_BASE = "1.0.0";
  *  older than this contract refuse the app — they show "this build cannot draw what it published"
  *  rather than half of it. That is the intended outcome, and it is why the READER SHIPS FIRST. */
 export function protocolFor(app: {
-  views?: readonly { type?: string | undefined }[] | undefined;
+  views?: readonly { article?: unknown }[] | undefined;
   public?: { submit?: Record<string, { idFrom?: string | undefined } | undefined> | undefined } | undefined;
 }): string {
-  // A page the reader must know how to DRAW.
-  const drawnHere = (app.views ?? []).some((view) => view.type !== undefined);
+  // A page the reader must know how to DRAW. `article` rather than the `type` this clause was
+  // written for: the platform no longer draws the INDEX, so an unknowing reader finds the app's own
+  // HTML at `/a/{slug}` and draws it — what it gets wrong is `/a/{slug}/{id}`, where every shared
+  // link lands on that index instead of the article it names.
+  const drawnHere = (app.views ?? []).some((view) => view.article !== undefined);
   // And an id the reader must know how to BUILD, which is the half that is easy to miss because it
   // is nowhere near a view. `recordId` in an older reader has no `slug` branch, so it falls through
   // to the random uuid it uses for `idFrom: "auto"` — while the deployed rules now require the

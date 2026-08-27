@@ -52,6 +52,7 @@ export {
 // The pages an app shows, per audience: the declaration, where each audience's
 // documents live, and what the parent page needs in order to query for them.
 export {
+  articleCid,
   normalizeViews,
   participantScope,
   viewDocId,
@@ -63,6 +64,7 @@ export {
   VIEW_ID_PATTERN,
   VIEW_TIER,
   type AppViewConfigDoc,
+  type ArticleFields,
   type NormalizedView,
   type NormalizedViewsResult,
   type ProjectedViewCollection,

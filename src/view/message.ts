@@ -25,6 +25,10 @@ export interface SubmitDeclaration {
 
 export interface ViewSubmitConfig {
   submit?: Record<string, SubmitDeclaration | undefined> | undefined;
+  /** The collection whose records the platform draws as ARTICLES, when this app has one — the only
+   *  cid `view.open` may name. Absent on every app that publishes none, where an open has no page
+   *  to reach and is refused. */
+  articleCid?: string | undefined;
 }
 
 /** One dataset, as the view receives it. */
@@ -184,6 +188,63 @@ export interface LookupAnswer {
   known: boolean;
   found: boolean;
   record?: Record<string, unknown>;
+}
+
+/** A view asking for ONE article to be opened: which collection, and which record. */
+export interface OpenAsk {
+  requestId: string;
+  cid: string;
+  id: string;
+}
+
+/** WHAT AN ID MAY BE, on its way into a URL.
+ *
+ *  The host builds `/a/{slug}/{id}` out of this, so the grammar is the defence that does not depend
+ *  on one host remembering to encode: a `/` would address a different route, a `.` at the front is
+ *  a relative segment, and an empty string is the index. Wider than the `slug` grammar
+ *  (`publishManifest`'s `idFrom: "slug"`) on purpose — an app whose articles have generated ids has
+ *  the same claim on a link — and narrower than a Firestore document id, which may hold anything at
+ *  all. */
+const OPEN_ID = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/u;
+
+/** Why an article will not be opened. `not-an-open` is the one that means THIS IS NOT ONE — nobody
+ *  is waiting on it, and the caller reads the message as something else. The other two mean it is
+ *  one and will not be served, so the page's promise has to be settled with them. */
+export type OpenRefusal = "not-an-open" | "invalid-open" | "unknown-collection";
+
+export type OpenRead = { ok: true; ask: OpenAsk } | { ok: false; reason: OpenRefusal; requestId: string };
+
+/** Read an `open`, against the ONE collection this app draws articles from.
+ *
+ *  A cid that is not that collection is refused rather than navigated to: `/a/{slug}/{id}` has
+ *  nothing in it to say which collection an id belongs to, so the host would send the visitor to a
+ *  page that reads a record of a different collection, or none — an address that looks broken.
+ *
+ *  `articleCid` is null on an app that publishes no articles, where every open is refused: there is
+ *  no such page to reach. */
+export const readOpenMessage = (data: unknown, articleCid: string | null): OpenRead => {
+  if (!isRecord(data) || data.type !== VIEW_MESSAGE.open || typeof data.requestId !== "string" || data.requestId === "") {
+    return { ok: false, reason: "not-an-open", requestId: "" };
+  }
+  if (typeof data.cid !== "string" || typeof data.id !== "string" || !OPEN_ID.test(data.id)) {
+    return { ok: false, reason: "invalid-open", requestId: data.requestId };
+  }
+  if (articleCid === null || data.cid !== articleCid) {
+    return { ok: false, reason: "unknown-collection", requestId: data.requestId };
+  }
+  return { ok: true, ask: { requestId: data.requestId, cid: data.cid, id: data.id } };
+};
+
+/** What the host did about an `open`.
+ *
+ *  `opened: false` is not always a refusal, which is why the reason rides beside it: a host that
+ *  offers no navigation at all — the author's preview pane, where there is no browser history to
+ *  push onto — answers `no-navigation`, and the honest thing for a page to do about that is
+ *  nothing. In production the answer usually never arrives at all: the host navigates, this
+ *  document is replaced, and the promise goes with it. That is what a link does. */
+export interface OpenAnswer {
+  opened: boolean;
+  reason?: OpenRefusal | "no-navigation";
 }
 
 /** What a frame may say about ITSELF, and the only codes a parent will hear.

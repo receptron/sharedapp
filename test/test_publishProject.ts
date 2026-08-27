@@ -305,13 +305,13 @@ test("an app using uidField is stamped the same contract as one that does not", 
 });
 
 test("an app with an article view is stamped the newer contract, and it alone", () => {
-  // The reader must UNDERSTAND `views[].type` to be correct — without it there is no HTML to find,
-  // so an older build concludes the app publishes no view and draws the generated form. That is a
-  // different app on the visitor's screen with nothing erroring, which is what the major is for.
+  // The reader must UNDERSTAND `views[].article` to be correct: without it there is no second
+  // address, so an older build draws the app's own index at `/a/{slug}/{id}` and every link ever
+  // shared to an article lands on the wrong page, with nothing erroring.
   const app = AuthoredAppZ.parse({
     ...authored(),
     public: { enabled: true, read: ["articles"], submit: {} },
-    views: [{ id: "public", audience: "public", type: "article", collections: ["articles"], article: { title: "title", body: "body" } }],
+    views: [{ id: "public", audience: "public", path: "views/home.html", collections: ["articles"], article: { title: "title", body: "body" } }],
   });
   assert.equal(projectApp(app, [], STAMP, null).config.protocol, APP_PROTOCOL);
   assert.notEqual(APP_PROTOCOL, APP_PROTOCOL_BASE);
@@ -327,15 +327,53 @@ test("the app's hue reaches the drawn page, and leaves the protocol alone", () =
     ...authored(),
     theme: { hue: 200 },
     public: { enabled: true, read: ["articles"], submit: {} },
-    views: [{ id: "public", audience: "public", type: "article", collections: ["articles"], article: { title: "title", body: "body" } }],
+    views: [{ id: "public", audience: "public", path: "views/home.html", collections: ["articles"], article: { title: "title", body: "body" } }],
   });
   const config = projectApp(withHue, [], STAMP, null).config;
   assert.equal(config.view?.hue, 200);
   // NOT a protocol move, and the asymmetry is the point: a reader too old to know `hue` draws the
-  // page in its own colours, which is still the page. One too old to know `type` draws the
-  // generated form in a magazine's place, which is not — so that one moves the major and this
+  // article in its own colours, which is still the article. One too old to know `article` sends
+  // every shared link to the index instead, which is not — so that one moves the major and this
   // does not. Pinned here because the two keys arrive on the same document.
   assert.equal(config.protocol, APP_PROTOCOL);
+});
+
+test("the projected article names its collection, whether or not the author had to", () => {
+  // RESOLVED ONCE, here, rather than by every reader re-deriving "the only collection this view
+  // names" — the sort of inference two readers eventually disagree about, on a document neither of
+  // them can ask about.
+  const one = projectApp(
+    AuthoredAppZ.parse({
+      ...authored(),
+      public: { enabled: true, read: ["articles"], submit: {} },
+      views: [{ id: "public", audience: "public", path: "views/home.html", collections: ["articles"], article: { title: "title", body: "body" } }],
+    }),
+    [],
+    STAMP,
+    null,
+  ).config;
+  assert.equal(one.view?.article?.collection, "articles");
+
+  const several = projectApp(
+    AuthoredAppZ.parse({
+      ...authored(),
+      public: { enabled: true, read: ["articles", "sections"], submit: {} },
+      views: [
+        {
+          id: "public",
+          audience: "public",
+          path: "views/home.html",
+          collections: ["articles", "sections"],
+          article: { collection: "articles", title: "title", body: "body" },
+        },
+      ],
+    }),
+    [],
+    STAMP,
+    null,
+  ).config;
+  assert.equal(several.view?.article?.collection, "articles");
+  assert.deepEqual(several.view.collections, ["articles", "sections"], "and the index still reads both");
 });
 
 test("an app that declares no hue publishes the document it published before the key existed", () => {
@@ -343,7 +381,7 @@ test("an app that declares no hue publishes the document it published before the
     AuthoredAppZ.parse({
       ...authored(),
       public: { enabled: true, read: ["articles"], submit: {} },
-      views: [{ id: "public", audience: "public", type: "article", collections: ["articles"], article: { title: "title", body: "body" } }],
+      views: [{ id: "public", audience: "public", path: "views/home.html", collections: ["articles"], article: { title: "title", body: "body" } }],
     }),
     [],
     STAMP,

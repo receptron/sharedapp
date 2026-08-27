@@ -1692,7 +1692,7 @@ const magazineDraft = (article: ArticleMap, maxBytes: Record<string, number>): R
       },
     },
   },
-  views: [{ id: "public", audience: "public", type: "article", collections: ["articles"], article }],
+  views: [{ id: "public", audience: "public", path: "views/home.html", collections: ["articles"], article }],
 });
 
 /** The magazine's problems, with the field mapping — and the length caps — the caller wants to
@@ -1772,7 +1772,7 @@ const magazinePage = (edit: (draft: { submit: Record<string, unknown>; view: Rec
   const view: Record<string, unknown> = {
     id: "public",
     audience: "public",
-    type: "article",
+    path: "views/home.html",
     collections: ["articles"],
     // 15 x 60,000 = 900,000 bytes, just inside the ceiling — and a realistic pair: a Japanese
     // magazine article of ordinary length measures about 60 KB.
@@ -1906,7 +1906,7 @@ test("names the COLLECTION when it is called after an Object prototype key and h
         {
           id: "public",
           audience: "public",
-          type: "article",
+          path: "views/home.html",
           collections: ["constructor"],
           article: { title: "title", body: "prose" },
           limit: { constructor: 10 },
@@ -1978,7 +1978,9 @@ test("refuses an index whose COLLECTION is named after an Object prototype key",
           },
         },
       },
-      views: [{ id: "public", audience: "public", type: "article", collections: ["constructor"], article: { title: "title", body: "prose" }, limit: {} }],
+      views: [
+        { id: "public", audience: "public", path: "views/home.html", collections: ["constructor"], article: { title: "title", body: "prose" }, limit: {} },
+      ],
     }),
     [{ cid: "constructor", primaryKey: "id" }],
     OWNER,
@@ -2048,7 +2050,7 @@ test("names the collection when a magazine has no submit block, rather than the 
     app({
       collections: { articles: { statusField: "status", transitions: { initial: ["published"] } } },
       public: { enabled: true, read: ["articles"] },
-      views: [{ id: "public", audience: "public", type: "article", collections: ["articles"], article: { title: "title", body: "prose" } }],
+      views: [{ id: "public", audience: "public", path: "views/home.html", collections: ["articles"], article: { title: "title", body: "prose" } }],
     }),
     [{ cid: "articles", primaryKey: "id" }],
     OWNER,

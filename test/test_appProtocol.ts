@@ -33,12 +33,15 @@ test("adding a key an older reader may ignore does not move the number", () => {
 });
 
 test("a view the reader must UNDERSTAND moves the major, for that app alone", () => {
-  // The other half, and the reason the stamp is per app again. `views[].type` replaces the HTML a
-  // public page is drawn from: a reader that does not know it finds none, concludes the app
-  // publishes no view, and draws the GENERATED FORM in a magazine's place. Nothing errors — the
-  // visitor is simply shown a different app — so the major has to move and the older reader has to
-  // refuse.
-  assert.equal(protocolFor({ views: [{ type: "article" }] }), "2.0.0");
+  // The other half, and the reason the stamp is per app again. `views[].article` turns on a SECOND
+  // address under the app's public entrance, `/a/{slug}/{id}`: a reader that does not know it draws
+  // the app's own index there instead, so every link ever shared to an article lands on the wrong
+  // page. Nothing errors, so the major has to move and the older reader has to refuse.
+  assert.equal(protocolFor({ views: [{ article: { title: "title", body: "body" } }] }), "2.0.0");
+  // The KEY that is asked about is `article` and not the retired `type`, which no reader will ever
+  // see again — a view carrying it is refused at the gate, so a protocol derived from it would be
+  // derived from a declaration that cannot be published.
+  assert.equal(protocolFor({ views: [{}] }), APP_PROTOCOL_BASE);
   // And ONLY for that app. Stamping every app 2.0.0 would make every deployed reader refuse every
   // app published after this build, including ones whose documents did not change at all.
   assert.equal(protocolFor({ views: [{}] }), "1.0.0");
@@ -89,8 +92,8 @@ test("a slug id moves the major on its own, with no article view anywhere", () =
   // Stamped 1.0.0, that older reader would have gone ahead and done it.
   assert.equal(protocolFor({ public: { submit: { articles: { idFrom: "slug" } } } }), APP_PROTOCOL);
   // And the two are INDEPENDENT: neither implies the other, so both are asked. An app may name its
-  // records by slug and publish its own HTML, or draw an article index over generated ids.
-  assert.equal(protocolFor({ views: [{ type: "article" }], public: { submit: { notes: { idFrom: "auto" } } } }), APP_PROTOCOL);
+  // records by slug and publish no articles, or publish articles over generated ids.
+  assert.equal(protocolFor({ views: [{ article: { title: "title", body: "body" } }], public: { submit: { notes: { idFrom: "auto" } } } }), APP_PROTOCOL);
   assert.equal(protocolFor({ public: { submit: { bookings: { idFrom: "field" }, notes: {} } } }), APP_PROTOCOL_BASE);
   assert.equal(protocolFor({ public: { submit: {} } }), APP_PROTOCOL_BASE);
 });
