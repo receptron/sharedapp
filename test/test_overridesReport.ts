@@ -13,7 +13,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { deadProbes, failed, probeConfig, renderReport, select, type Probe, type Override } from "../scripts/overrides-report.js";
+import { deadProbes, failed, withoutRule, renderReport, select, type Probe, type Override } from "../scripts/overrides-report.js";
 
 const DEBT = { files: ["src/publishChecks.ts"], rules: { "max-lines": "warn" } };
 
@@ -82,7 +82,7 @@ test("named blocks are presets: counted, not measured", () => {
     chosen.overrides.map((override) => override.rule),
     ["max-lines"],
   );
-  assert.equal(chosen.presets, 1);
+  assert.deepEqual(chosen.presets, [0]);
   assert.equal(chosen.unclassified.length, 0);
 });
 
@@ -93,7 +93,7 @@ test("blocks that are not per-file exemptions at all are passed over silently", 
     ["max-lines"],
   );
   assert.deepEqual(chosen.unclassified, []);
-  assert.equal(chosen.presets, 0);
+  assert.deepEqual(chosen.presets, []);
 });
 
 test("the override remembers WHERE it was, because the probe depends on it", () => {
@@ -101,16 +101,42 @@ test("the override remembers WHERE it was, because the probe depends on it", () 
   assert.equal(chosen.overrides[0]?.index, 1);
 });
 
-/** THE PLACEMENT IS THE WHOLE ANSWER. In a flat config the last matching entry wins, so a forced
- *  block appended to the end also beats every LATER block — and a later block silencing the same
- *  rule over the same files is exactly what makes the measured one dead. Measured on a three-block
- *  config over one file, appending reported 1 where deleting the block reported 0. */
-test("probeConfig puts the forced block immediately after the one being measured, not at the end", () => {
-  const config = ["a", "b", "c"];
+/** ASKING THE QUESTION INSTEAD OF A PROXY FOR IT. Two earlier versions forced the rule to `error`
+ *  and counted what it reported, which beats whatever ELSE silences the same rule over the same
+ *  files — so an exemption already covered by another one was called live. Measured on a
+ *  three-block config over one file, twice:
+ *
+ *      a LATER block silencing the same rule       forced: 1   removed: 0
+ *      an EARLIER named preset silencing it        forced: 1   removed: 0
+ *
+ *  Removing the rule from its own block has no such blind spot, and it is what "delete this
+ *  exemption" actually means. */
+test("withoutRule drops the one rule from the one block, and leaves every other block alone", () => {
+  const config = [
+    { files: ["a.ts"], rules: { x: "off", y: "warn" } },
+    { files: ["a.ts"], rules: { x: "off" } },
+    { files: ["b.ts"], rules: { x: "off" } },
+  ];
   const override: Override = { index: 1, files: ["a.ts"], rule: "x" };
-  assert.deepEqual(probeConfig(config, override, "FORCED"), ["a", "b", "FORCED", "c"]);
-  assert.deepEqual(probeConfig(config, { ...override, index: 0 }, "FORCED"), ["a", "FORCED", "b", "c"]);
-  assert.deepEqual(probeConfig(config, { ...override, index: 2 }, "FORCED"), ["a", "b", "c", "FORCED"]);
+  assert.deepEqual(withoutRule(config, override), [
+    { files: ["a.ts"], rules: { x: "off", y: "warn" } },
+    { files: ["a.ts"], rules: {} },
+    { files: ["b.ts"], rules: { x: "off" } },
+  ]);
+});
+
+test("withoutRule keeps everything else in the block — the scripts exemption carries its globals there", () => {
+  const scripts = { files: ["scripts/**/*.ts"], languageOptions: { globals: { console: "readonly" } }, rules: { "no-console": "off", "no-eval": "off" } };
+  assert.deepEqual(withoutRule([scripts], { index: 0, files: ["scripts/**/*.ts"], rule: "no-console" }), [
+    { files: ["scripts/**/*.ts"], languageOptions: { globals: { console: "readonly" } }, rules: { "no-eval": "off" } },
+  ]);
+});
+
+test("withoutRule is a no-op where there is nothing to remove", () => {
+  const config = [{ files: ["a.ts"], rules: { y: "off" } }];
+  assert.deepEqual(withoutRule(config, { index: 0, files: ["a.ts"], rule: "x" }), config);
+  assert.deepEqual(withoutRule(config, { index: 9, files: ["a.ts"], rule: "y" }), config);
+  assert.deepEqual(withoutRule([{ files: ["a.ts"] }], { index: 0, files: ["a.ts"], rule: "y" }), [{ files: ["a.ts"] }]);
 });
 
 const probe = (rule: string, reports: number): Probe => ({ index: 0, files: ["a.ts"], rule, reports });
@@ -122,25 +148,29 @@ test("a probe is dead when the rule it silences reports nothing, and only then",
 });
 
 test("the report names the dead ones and says so in its verdict", () => {
-  const clean = renderReport([probe("x", 3)], [], 0);
+  const clean = renderReport([probe("x", 3)], [], []);
   assert.match(clean, /^live {2}x {2}<- {2}a\.ts$/m);
   assert.match(clean, /all 1 silencing overrides still suppress something/);
   assert.doesNotMatch(clean, /DEAD/);
 
-  const rotten = renderReport([probe("x", 3), probe("y", 0)], [], 0);
+  const rotten = renderReport([probe("x", 3), probe("y", 0)], [], []);
   assert.match(rotten, /^DEAD {2}y {2}<- {2}a\.ts$/m);
   assert.match(rotten, /1 of 2 silencing overrides suppress NOTHING/);
 });
 
 test("an unreadable block is in the report and in the verdict, even with nothing dead", () => {
-  const report = renderReport([probe("x", 3)], [{ index: 4, why: "files is 7" }], 0);
+  const report = renderReport([probe("x", 3)], [{ index: 4, why: "files is 7" }], []);
   assert.match(report, /UNREAD {2}eslint\.config\.js element 4: files is 7/);
   assert.match(report, /1 block\(s\) could not be read/);
 });
 
-test("the preset count is always stated, so 'not measured' is a number rather than an absence", () => {
-  assert.match(renderReport([probe("x", 1)], [], 3), /3 named block\(s\) are presets and were not measured/);
-  assert.match(renderReport([probe("x", 0)], [], 3), /3 named block\(s\) are presets and were not measured/);
+/** WHICH blocks, not how many. A count says "something was not looked at"; a list says which, so a
+ *  hand-written block that acquired a `name` and dropped out of the measurement can be recognised
+ *  by the person reading the report rather than only by whoever wrote this module. */
+test("the unmeasured blocks are always NAMED in the report, in both verdicts", () => {
+  assert.match(renderReport([probe("x", 1)], [], [4, 7]), /not measured: named block\(s\) 4, 7/);
+  assert.match(renderReport([probe("x", 0)], [], [4, 7]), /not measured: named block\(s\) 4, 7/);
+  assert.match(renderReport([probe("x", 1)], [], []), /no named blocks/);
 });
 
 test("the run fails on a dead override OR an unreadable block, and passes on neither", () => {
@@ -151,6 +181,6 @@ test("the run fails on a dead override OR an unreadable block, and passes on nei
 });
 
 test("the dead rows come last, so a truncated log keeps the actionable half", () => {
-  const lines = renderReport([probe("dead", 0), probe("live", 2)], [], 0).split("\n");
+  const lines = renderReport([probe("dead", 0), probe("live", 2)], [], []).split("\n");
   assert.ok(lines.indexOf("live  live  <-  a.ts") < lines.indexOf("DEAD  dead  <-  a.ts"));
 });

@@ -19,11 +19,14 @@
  *  check's own uniform. So the rule is inverted: every block naming `files` and `rules` is
  *  classified rule by rule, and a shape this module cannot classify is REPORTED, never skipped.
  *
+ *  One population IS left unmeasured, and the report NAMES it rather than dropping it: a block
+ *  carrying `name` is a preset, and a preset ships rules nobody here maintains. The footer lists
+ *  which blocks those were, so "not measured" is an auditable list instead of an absence.
+ *
  *  The measurement is deliberately NOT "delete the block and re-lint the repo". That is slower,
  *  and it cannot be done at all for the block that supplies the type-aware parser — removing it
- *  crashes every typed rule, which measures the harness rather than the config. Forcing one rule
- *  back to `error` asks the same question directly, PROVIDED it is forced in the right place: see
- *  {@link probeConfig}.
+ *  crashes every typed rule, which measures the harness rather than the config. The answer is to
+ *  remove the RULE rather than the block: see {@link withoutRule}.
  *
  *  Split from the runner so the decisions have tests: everything here is a function of plain data,
  *  and `scripts/lint-overrides.ts` supplies the linting. */
@@ -37,10 +40,10 @@ export type Override = { readonly index: number; readonly files: readonly string
  *  is exactly how a real exemption stops being measured without anyone noticing. */
 export type Unclassified = { readonly index: number; readonly why: string };
 
-export type Selection = { readonly overrides: Override[]; readonly unclassified: Unclassified[]; readonly presets: number };
+export type Selection = { readonly overrides: Override[]; readonly unclassified: Unclassified[]; readonly presets: number[] };
 
-/** One override's answer: how many reports its rule makes on its files with the silencing forced
- *  off. Zero means the override silences nothing. */
+/** One override's answer: how many reports its rule makes on its files once the exemption is gone.
+ *  Zero means removing it changed nothing, so it silences nothing. */
 export type Probe = Override & { readonly reports: number };
 
 const SILENCING = new Set(["off", "0", "warn", "1"]);
@@ -75,13 +78,13 @@ const asRecord = (value: unknown): Record<string, unknown> | null => (typeof val
 export const select = (config: readonly unknown[]): Selection => {
   const overrides: Override[] = [];
   const unclassified: Unclassified[] = [];
-  let presets = 0;
+  const presets: number[] = [];
   config.forEach((element, index) => {
     const block = asRecord(element);
     const rules = block === null ? null : asRecord(block["rules"]);
     if (block === null || block["files"] === undefined || rules === null) return;
     if (block["name"] !== undefined) {
-      presets += 1;
+      presets.push(index);
       return;
     }
     const files = block["files"];
@@ -101,18 +104,29 @@ export const select = (config: readonly unknown[]): Selection => {
   return { overrides, unclassified, presets };
 };
 
-/** The config to lint with, to ask whether `override` silences anything.
+/** The config with THIS exemption removed and nothing else touched: the same array, with the one
+ *  rule dropped from the one block that silenced it.
  *
- *  The forced block goes IMMEDIATELY AFTER the block being measured, never at the end. In a flat
- *  config the last matching entry wins, so an appended block also beats every LATER block — and a
- *  later block silencing the same rule over the same files is exactly what makes the measured one
- *  dead. Appending reported such a block as live; measured on a three-block config over one file,
- *  appending gave 1 report where deleting the block gave 0. */
-export const probeConfig = <Block>(config: readonly Block[], override: Override, forced: Block): Block[] => [
-  ...config.slice(0, override.index + 1),
-  forced,
-  ...config.slice(override.index + 1),
-];
+ *  This is the question itself rather than a proxy for it — "does deleting this exemption change
+ *  what lint reports" — and every wrong answer this module has given came from proxying it. An
+ *  earlier version forced the rule to `error` and counted; that beats whatever ELSE silences the
+ *  same rule over the same files, so it called an exemption live whenever another one already
+ *  covered it. Measured twice, on a three-block config over one file:
+ *
+ *    a LATER block silencing the same rule       forced: 1 report   removed: 0   -> false LIVE
+ *    an EARLIER preset silencing the same rule   forced: 1 report   removed: 0   -> false LIVE
+ *
+ *  Removing the RULE rather than the whole block matters too: the `scripts/` exemption carries the
+ *  node globals in the same block, and dropping it wholesale would make `no-undef` fire for a
+ *  reason that has nothing to do with the exemption being measured. */
+export const withoutRule = (config: readonly unknown[], override: Override): unknown[] =>
+  config.map((element, index) => {
+    if (index !== override.index) return element;
+    const block = asRecord(element);
+    const rules = block === null ? null : asRecord(block["rules"]);
+    if (block === null || rules === null) return element;
+    return { ...block, rules: Object.fromEntries(Object.entries(rules).filter(([rule]) => rule !== override.rule)) };
+  });
 
 export const deadProbes = (probes: readonly Probe[]): Probe[] => probes.filter((probe) => probe.reports === 0);
 
@@ -120,11 +134,11 @@ const line = (probe: Probe): string => `${probe.reports === 0 ? "DEAD" : "live"}
 
 /** The whole report. Dead entries and unreadable blocks come last, so the actionable half is what a
  *  truncated log keeps. */
-export const renderReport = (probes: readonly Probe[], unclassified: readonly Unclassified[], presets: number): string => {
+export const renderReport = (probes: readonly Probe[], unclassified: readonly Unclassified[], presets: readonly number[]): string => {
   const dead = deadProbes(probes);
   const lines = [...probes.filter((probe) => probe.reports > 0), ...dead].map(line);
   const unread = unclassified.map((block) => `UNREAD  eslint.config.js element ${block.index}: ${block.why}`);
-  const footer = `(${presets} named block(s) are presets and were not measured)`;
+  const footer = presets.length === 0 ? "(no named blocks)" : `(not measured: named block(s) ${presets.join(", ")} — presets ship rules nobody here maintains)`;
   if (dead.length === 0 && unclassified.length === 0) {
     return [...lines, `\nall ${probes.length} silencing overrides still suppress something ${footer}`].join("\n");
   }

@@ -61,15 +61,18 @@ and it hides that the rule quietly stopped being an error there. Both were live 
 `no-nested-conditional` entry outlived the rewrite of the file it named, and the PR that pruned
 the ledger of zeroed entries left that one behind.
 
-It PROBES rather than deletes: removing the block that supplies the type-aware parser crashes
-every typed rule, which measures the harness instead of the config. The forced rule goes
-immediately AFTER the block being measured, never at the end — in a flat config the last match
-wins, so appending also beats every LATER block, and a later block silencing the same rule over
-the same files is exactly what makes the measured one dead. And **nothing is skipped in
-silence**: a block whose shape it cannot read is REPORTED and fails the job, and the presets it
-deliberately does not measure (named blocks, which ship rules nobody here maintains) are counted
-in the footer. Three separate versions of that predicate dropped a real exemption without
-saying so, which is the failure this check exists to catch wearing the check's own uniform.
+It asks the question directly — it removes THAT RULE from THAT BLOCK and re-lints — rather than
+proxying it. Two earlier versions forced the rule to `error` and counted what it reported, which
+beats whatever ELSE silences the same rule over the same files, so an exemption another one
+already covered was reported live. Removing the rule rather than the whole block matters too:
+the `scripts/` exemption carries the node globals in the same block.
+
+**Nothing is dropped without being named.** A block whose shape it cannot read is REPORTED and
+fails the job; the presets it deliberately does not measure — blocks carrying `name`, which ship
+rules nobody here maintains — are listed by index in the footer. Six separate findings landed on
+that predicate before it took this shape, every one of them a real exemption that stopped being
+measured without anyone noticing: the failure this check exists to catch, wearing the check's own
+uniform.
 
 Commit messages in this repository are Conventional Commits with a Japanese subject.
 

@@ -7,7 +7,7 @@
 
 import { ESLint, type Linter } from "eslint";
 
-import { type Override, type Probe, isArray, probeConfig, renderReport, select, failed } from "./overrides-report.js";
+import { type Override, type Probe, isArray, withoutRule, renderReport, select, failed } from "./overrides-report.js";
 
 const CONFIG = new URL("../eslint.config.js", import.meta.url).href;
 
@@ -16,15 +16,19 @@ const CONFIG = new URL("../eslint.config.js", import.meta.url).href;
  *  exactly what this script relies on and claims nothing more. */
 const isFlatConfig = (value: unknown): value is Linter.Config[] => isArray(value) && value.every((entry) => typeof entry === "object" && entry !== null);
 
-/** Forced to `error` on exactly the files the override names, with the rest of the config intact:
- *  the parser, the plugin and the type information all still come from the real config, so a typed
- *  rule answers the same way it would in `yarn lint`. */
+/** With this one exemption removed and nothing else changed, how much does its rule still report
+ *  over the files it named? Zero means removing it changed nothing, so it silences nothing. The
+ *  parser, the plugins and the type information all still come from the real config, so a typed
+ *  rule answers exactly as it would in `yarn lint`. */
 const reportsFor = async (config: readonly Linter.Config[], probe: Override): Promise<number> => {
   // `errorOnUnmatchedPattern: false`, because a `files` glob matching nothing is a real answer —
   // the override covers no file, so it silences nothing — and throwing would turn that answer
   // into a crash nobody can read.
-  const forced: Linter.Config = { files: [...probe.files], rules: { [probe.rule]: "error" } };
-  const eslint = new ESLint({ overrideConfigFile: true, baseConfig: probeConfig(config, probe, forced), cwd: process.cwd(), errorOnUnmatchedPattern: false });
+  const removed = withoutRule(config, probe);
+  if (!isFlatConfig(removed)) {
+    throw new Error(`removing ${probe.rule} from block ${probe.index} did not leave a config array`);
+  }
+  const eslint = new ESLint({ overrideConfigFile: true, baseConfig: removed, cwd: process.cwd(), errorOnUnmatchedPattern: false });
   const results = await eslint.lintFiles([...probe.files]);
   const fatal = results.flatMap((result) => result.messages).filter((message) => message.fatal === true);
   if (fatal.length > 0) {
