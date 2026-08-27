@@ -245,7 +245,7 @@ export default tseslint.config(
   },
   {
     files: [
-      "scripts/check-apps.mjs", // 1
+      "scripts/check-apps.ts", // 1
       "src/publishChecks.ts", // 1
     ],
     rules: { "sonarjs/no-nested-conditional": "warn" },

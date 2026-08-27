@@ -18,7 +18,7 @@
 //                      rather than an idea.
 //
 // They are kept HERE rather than run against `../apps`, because a sibling checkout is not a thing
-// CI has. `scripts/check-apps.mjs` is the other half: it runs the same two gates over the real ten
+// CI has. `scripts/check-apps.ts` is the other half: it runs the same two gates over the real ten
 // on the machine of whoever is about to release. This file is what stops the drift; that script is
 // what proves it stopped it.
 

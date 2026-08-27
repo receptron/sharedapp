@@ -30,7 +30,9 @@ never the peer, so the failure just arrived one import later.
 It runs `publishProblems` + `schemaRefProblems` over the ten apps that already publish, reading
 each app's real collections from `<app>/.claude/skills/<cid>/schema.json` (an app IS a
 repository, so its schemas are committed beside its `app.json`) — without them the field-name,
-enum and bound checks would be skipped while still printing a pass. An app it cannot read is a
+enum and bound checks would be skipped while still printing a pass. A `schema.json` missing any
+of `title`, `icon`, `primaryKey` or `fields` is a FAILURE naming the absent keys, not a skip: it
+is not a schema the host would promote, and the four are what `CollectionSchema` requires. An app it cannot read is a
 FAILURE, not a skip: ten minus the missing ones is a weaker claim that looks identical going
 past. It is the counterweight to a gate tested one rule at a time: a tightened check is judged
 against the fixture written to provoke it, and the app it newly refuses is in another
