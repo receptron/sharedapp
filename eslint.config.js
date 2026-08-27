@@ -264,17 +264,27 @@ export default tseslint.config(
   // rule's own `max`, which CI checks, rather than a count in a comment that nothing checks. The
   // previous form carried `// 863` and `// 1479` beside files that measured 1301 and 1500.
   //
+  // RAISED IN THE CHANGE THAT GROWS THE FILE, which is the whole mechanism: 1301 -> 1303 and
+  // 1500 -> 1533 for `article.byline` (#66), where the byline joined the two lists an article's
+  // drawn fields are enumerated in and brought its own refusals with it. A ratchet that could not
+  // be raised would not be a ratchet, it would be a freeze — what it buys is that the growth is a
+  // line in a diff somebody approves rather than something nobody sees.
+  //
+  // It went red on `main` rather than on the PR because the two changes never met: #67 pinned these
+  // at what the files measured, and #66 was already green against the base before that pin. Nothing
+  // is wrong with either — it is the ordinary shape of a ratchet landing beside a feature.
+  //
   // Splitting any of these is a real change rather than a move: `publishChecks.ts`'s refusals come
   // in families, its suite keeps each assertion beside the family it belongs to, and both arrows
   // are one sequence with the reasoning written between the steps. The ratchet says so without
   // pretending the split is imminent.
   {
     files: ["src/publishChecks.ts"],
-    rules: { "max-lines": ["error", { max: 1301, skipBlankLines: true, skipComments: true }] },
+    rules: { "max-lines": ["error", { max: 1303, skipBlankLines: true, skipComments: true }] },
   },
   {
     files: ["test/test_publishChecks.ts"],
-    rules: { "max-lines": ["error", { max: 1500, skipBlankLines: true, skipComments: true }] },
+    rules: { "max-lines": ["error", { max: 1533, skipBlankLines: true, skipComments: true }] },
   },
   {
     files: ["src/view/parent.ts"],
