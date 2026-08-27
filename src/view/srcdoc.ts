@@ -74,12 +74,12 @@ import { GESTURE_MARK, VIEW_MESSAGE } from "./protocol.js";
  *
  *  `submit` and `correct` are the two that carry a MAP of fields — one for a
  *  record that does not exist yet, one for a record that does. Two fields are
- *  closed to `correct`:
- *  the `statusField` and the `assigneeField` belong to the asks above, and a
- *  correction able to set either would go round the transition table and the
- *  assignee check. What it may name is `can.correctFrom` (the submitter's own
- *  row, per status) or anything at all under `can.correctAny` (the role) —
- *  minus `can.frozen`, and within `can.maxBytes`.
+ *  closed to `correct`: the `statusField` and the `assigneeField` belong to
+ *  the asks above, and a correction able to set either would go round the
+ *  transition table and the assignee check. What it may name is
+ *  `can.correctFrom` (the submitter's own row, per status) or anything at all
+ *  under `can.correctAny` (the role) — minus `can.frozen`, and within
+ *  `can.maxBytes`.
  *
  *  They also go through one `request` helper, so a second kind of ask
  *  cannot grow a second way of being left unresolved — which on a phone is a
