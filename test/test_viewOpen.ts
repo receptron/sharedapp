@@ -91,6 +91,48 @@ test("and `opened` is the host's own word, not the fact that it was asked", asyn
   assert.deepEqual(await settled(far), { type: VIEW_MESSAGE.openResult, requestId: "r1", opened: false, reason: "no-navigation" });
 });
 
+test("answers the page that ASKED, not the one the navigation brought", async () => {
+  // The failure this shape exists to prevent, and `open` is the one ask that provokes it: its whole
+  // purpose is to bring a NEW document. If that document handshakes before the navigation settles,
+  // a reply sent to "whatever channel is open now" reaches a page that never asked — and the page
+  // that did asks for ever. `act` captures the channel for the same reason.
+  const asking = fakeChannel();
+  const arriving = fakeChannel();
+  const handed = [asking, arriving];
+  let next = 0;
+  let settleNavigation = (_opened: boolean) => {};
+  const cellPack = cells();
+  const bridge = viewBridge(
+    {
+      channel: () => (handed[next++] ?? arriving).channel,
+      submit: async () => ({ ok: true }),
+      state: () => ({}),
+      navigate: () => new Promise<boolean>((resolve) => (settleNavigation = resolve)),
+    },
+    () => CONFIG,
+    () => NONCE,
+    cellPack,
+  );
+
+  bridge.receive(ready);
+  asking.send({ nonce: NONCE });
+  asking.posted.length = 0;
+  asking.send(ask({}));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  // The navigation happens: this frame is torn down and the next document handshakes.
+  bridge.restart();
+  bridge.receive(ready);
+  arriving.send({ nonce: NONCE });
+  arriving.posted.length = 0;
+
+  settleNavigation(true);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.deepEqual(await settled(asking), { type: VIEW_MESSAGE.openResult, requestId: "r1", opened: true });
+  assert.equal(await settled(arriving), undefined, "the new page never asked, and must not be answered");
+});
+
 test("a host that does not navigate says so, and it is not a refusal", async () => {
   // The author's preview pane: there is no history to push onto, and nothing about the ask was
   // wrong. A page told `no-navigation` has nothing to do about it — which is exactly why it must

@@ -246,9 +246,16 @@ export const viewParent = (ports: ViewParentPorts, config: () => ViewSubmitConfi
   const answerLookup = (requestId: string, found: { known: boolean; found: boolean; record?: Record<string, unknown> }) => {
     post({ type: VIEW_MESSAGE.lookupResult, requestId, ...found });
   };
-  /** The answer to an `open`, on its own message name for `answerLookup`'s reason. */
-  const answerOpen = (requestId: string, done: OpenAnswer) => {
-    post({ type: VIEW_MESSAGE.openResult, requestId, ...done });
+  /** The answer to an `open`, on its own message name for `answerLookup`'s reason — and posted to
+   *  the channel the request ARRIVED on rather than to whatever is open now.
+   *
+   *  That distinction matters more here than anywhere else, which is why this port does not use
+   *  `post`. An `open` is the one ask whose whole purpose is to bring a NEW document: if that
+   *  document completes the handshake before the navigation settles, `open` already points at it,
+   *  and the previous page's answer would be delivered to a page that never asked — leaving the
+   *  original promise pending for ever. `act` captures the channel for the same reason. */
+  const answerOpen = (channel: Channel | null, requestId: string, done: OpenAnswer) => {
+    channel?.post({ type: VIEW_MESSAGE.openResult, requestId, ...done });
   };
 
   const sendState = () => {
@@ -306,9 +313,12 @@ export const viewParent = (ports: ViewParentPorts, config: () => ViewSubmitConfi
    *  A host that throws is a defect of the host's own, and the page is told `no-navigation` — which
    *  is exactly true, and is the one thing it can act on. */
   const go = async (ask: OpenAsk) => {
+    // Captured BEFORE the port runs, which is the whole of the fix above: `open` may have moved on
+    // to the document this very navigation produced by the time the answer is ready.
+    const channel = open;
     const port = ports.navigate;
     if (port === undefined) {
-      answerOpen(ask.requestId, { opened: false, reason: "no-navigation" });
+      answerOpen(channel, ask.requestId, { opened: false, reason: "no-navigation" });
       return;
     }
     const opened = await Promise.resolve()
@@ -317,7 +327,7 @@ export const viewParent = (ports: ViewParentPorts, config: () => ViewSubmitConfi
         ports.defect(error, ask.requestId);
         return false;
       });
-    answerOpen(ask.requestId, opened ? { opened: true } : { opened: false, reason: "no-navigation" });
+    answerOpen(channel, ask.requestId, opened ? { opened: true } : { opened: false, reason: "no-navigation" });
   };
 
   /** A submission the frame sent, once it is known to be one.
@@ -414,8 +424,9 @@ export const viewParent = (ports: ViewParentPorts, config: () => ViewSubmitConfi
     }
     if (wanted.reason !== "not-an-open") {
       // Answered as an OPEN, for the reason a refused lookup is answered as a lookup: the page is
-      // waiting on `view.open`, which settles on `openResult` and reads `{ opened }`.
-      answerOpen(wanted.requestId, { opened: false, reason: wanted.reason });
+      // waiting on `view.open`, which settles on `openResult` and reads `{ opened }`. Nothing has
+      // navigated here, so the channel that carried it is the one that is open.
+      answerOpen(open, wanted.requestId, { opened: false, reason: wanted.reason });
       return;
     }
     if (data.type === VIEW_MESSAGE.submit) {
