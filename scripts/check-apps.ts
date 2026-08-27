@@ -28,7 +28,8 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { parseAuthoredApp, publishProblems, schemaRefProblems } from "../src/index.ts";
+import type { CollectionSchema } from "@mulmoclaude/core/collection";
+import { parseAuthoredApp, publishProblems, schemaRefProblems, type AuthoredApp } from "../src/index.js";
 
 /** The ten in the compatibility baseline (issue #28), by path under the apps checkout. */
 const APPS = ["lunches", "survey", "gym", "live", "tennis.grok", "codex/tennis", "test.rooms", "tennis.muse", "gemini/tennis.g", "mbti"];
@@ -40,42 +41,75 @@ const root = resolve(process.argv[2] ?? "../apps");
 
 /** The publisher, read off the manifest rather than off this laptop: the roster check compares the
  *  two, and which machine runs this script is not what is under test. */
-const publisherOf = (app) => Object.entries(app.members ?? {}).find(([, roles]) => roles["*"] === "owner")?.[0] ?? "";
+const publisherOf = (app: AuthoredApp): string => Object.entries(app.members).find(([, roles]) => roles["*"] === "owner")?.[0] ?? "";
+
+/** The four keys `CollectionSchema` requires. Checked rather than asserted: this value came from
+ *  `JSON.parse` of a file in ANOTHER repository, which is the one place in this script where
+ *  nothing is known, and a predicate that claimed the type from `primaryKey` alone would be a cast
+ *  wearing a guard's clothes.
+ *
+ *  This is the ONE intentional difference from the `.mjs` this replaces, which checked `primaryKey`
+ *  and passed whatever else was there. A schema missing `title`, `icon` or `fields` is not one the
+ *  host would promote, and the header above says an app that cannot be read is a FAILURE rather
+ *  than a skip — so it fails, naming the key that is missing rather than the file. */
+const schemaProblems = (schema: unknown): string[] => {
+  if (typeof schema !== "object" || schema === null) return ["not a JSON object"];
+  const has = (key: string, kind: "string" | "object"): boolean => key in schema && typeof Reflect.get(schema, key) === kind;
+  const absent = [
+    ...(has("title", "string") ? [] : ["title"]),
+    ...(has("icon", "string") ? [] : ["icon"]),
+    ...(has("primaryKey", "string") ? [] : ["primaryKey"]),
+    ...(has("fields", "object") ? [] : ["fields"]),
+  ];
+  return absent.length === 0 ? [] : [`missing ${absent.join(", ")}`];
+};
+
+const isCollectionSchema = (schema: unknown): schema is CollectionSchema => schemaProblems(schema).length === 0;
 
 /** Every collection committed beside the app, with the schema the host would promote. Throws with
  *  the path in the message: a schema that cannot be read is the same failure as an app that cannot,
  *  for the same reason. */
-const collectionsOf = (app) => {
+const collectionsOf = (app: string): { cid: string; schema: CollectionSchema }[] => {
   const dir = resolve(root, app, SKILLS);
   return readdirSync(dir, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => {
       const where = resolve(dir, entry.name, "schema.json");
-      const schema = JSON.parse(readFileSync(where, "utf8"));
-      if (typeof schema.primaryKey !== "string") throw new Error(`${where}: no primaryKey`);
+      const schema: unknown = JSON.parse(readFileSync(where, "utf8"));
+      if (!isCollectionSchema(schema)) throw new Error(`${where}: ${schemaProblems(schema).join("; ")}`);
       return { cid: entry.name, schema };
     })
-    .sort((left, right) => (left.cid < right.cid ? -1 : left.cid > right.cid ? 1 : 0));
+    .sort((left, right) => Number(left.cid > right.cid) - Number(left.cid < right.cid));
 };
 
-const lines = [];
+const lines: string[] = [];
 let failed = 0;
-const fail = (app, why, detail = []) => {
+const fail = (app: string, why: string, detail: readonly string[] = []): void => {
   failed += 1;
   lines.push(`FAIL  ${app} -- ${why}`, ...detail.map((line) => `        ${line}`));
 };
 
-for (const app of APPS) {
-  let raw;
-  let collections;
+/** The app's text and its collections, or the reason neither could be had. Returned rather than
+ *  assigned into two `let`s: untyped ones were implicitly `any`, and `scripts/` holds a type
+ *  coverage floor that says so. */
+type AppOnDisk = { readonly raw: string; readonly collections: { cid: string; schema: CollectionSchema }[] } | { readonly unreadable: string };
+
+const readApp = (app: string): AppOnDisk => {
   try {
-    raw = readFileSync(resolve(root, app, "app.json"), "utf8");
-    collections = collectionsOf(app);
+    return { raw: readFileSync(resolve(root, app, "app.json"), "utf8"), collections: collectionsOf(app) };
   } catch (error) {
+    return { unreadable: error instanceof Error ? error.message : String(error) };
+  }
+};
+
+for (const app of APPS) {
+  const onDisk = readApp(app);
+  if ("unreadable" in onDisk) {
     // NOT a skip. See the header: a missing app makes the claim smaller, silently.
-    fail(app, "could not be read", [String(error?.message ?? error)]);
+    fail(app, "could not be read", [onDisk.unreadable]);
     continue;
   }
+  const { raw, collections } = onDisk;
   const parsed = parseAuthoredApp(raw);
   if (!parsed.ok) {
     fail(app, "does not parse", parsed.problems);
