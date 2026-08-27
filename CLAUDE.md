@@ -7,11 +7,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```
 yarn install        # runs prepare -> tsc
 yarn build          # tsc -p tsconfig.json  (emits dist/)
-yarn typecheck      # src AND test (two tsconfigs — test/ has its own)
+yarn typecheck      # src, test AND scripts — one tsconfig each, and `scripts/` is the one
+                    #   people forget: the release gates live there, so a gate that stopped
+                    #   compiling would otherwise be found by running it at release time
 yarn test           # tsx --test ./test/test_*.ts
-yarn lint
+yarn lint           # src test scripts
 yarn format         # prettier, printWidth 160
 yarn format:check   # what CI runs
+yarn check:pack <tarball>   # every entry point the package DECLARES is in the tarball
+yarn typecheck:summary      # which files each tsconfig sees and how much of what it sees
+                            #   has a real type. It PRINTS a report and it also ENFORCES a
+                            #   per-project type-coverage floor, exiting non-zero below one
 ```
 
 Before a release, against a real apps checkout (NOT in CI — `../apps` is a private working
