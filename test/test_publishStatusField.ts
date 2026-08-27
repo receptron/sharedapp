@@ -159,8 +159,10 @@ function projectable(statusField: string | undefined): ReturnType<typeof Authore
 
 test("a named status field projects the transition, seal, self-delete and self-update parts", () => {
   const write = writeFor(projectable("status"), "member", "bookings");
-  // `notEqual` from `node:assert/strict` narrows, so `write` is not nullable below it.
-  assert.notEqual(write, null);
+  // `assert.ok` carries `asserts value`, so it narrows away the null. `notEqual` does NOT —
+  // only `equal` (which is `strictEqual`) has the narrowing signature, and reaching for the
+  // wrong half of that pair type-checks nowhere and reads as if it does.
+  assert.ok(write);
   assert.equal(write.statusField, "status");
   assert.deepEqual(write.sealed, ["done"]);
 });
