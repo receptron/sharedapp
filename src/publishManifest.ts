@@ -520,6 +520,18 @@ const ViewZ = z
         title: z.string().trim().min(1),
         body: z.string().trim().min(1),
         summary: z.string().trim().min(1).optional(),
+        /** WHO WROTE IT, and the drawn page's only answer to that question.
+         *
+         *  A field the author's page WRITES, not one the rules fill in. The rules do know who
+         *  submitted a row — `emailField` and `uidField` are exactly that — and neither can stand
+         *  here: an address is a thing you must not publish beside every article, and a uid is not
+         *  a name anyone can read. So this is a string somebody typed, and it says what they typed.
+         *  On an app whose writers are all invited that is worth having and worth being plain
+         *  about: it is a BYLINE, not an attestation.
+         *
+         *  Optional, and its absence is a page with no byline rather than an empty line — which is
+         *  most apps, because one person writing under their own masthead does not need one. */
+        byline: z.string().trim().min(1).optional(),
       })
       .strict()
       .optional(),

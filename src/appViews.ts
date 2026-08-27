@@ -75,6 +75,9 @@ export interface ArticleFields {
    *  `exactOptionalPropertyTypes`, under which "absent" and "present and undefined" are different
    *  types — and the zod parse produces the second. */
   summary?: string | undefined;
+  /** The field carrying who wrote it. A byline the author typed — see `ViewZ.article.byline` for
+   *  why it cannot be the identity the rules hold. */
+  byline?: string | undefined;
 }
 
 export interface NormalizedView {
