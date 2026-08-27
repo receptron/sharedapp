@@ -113,7 +113,15 @@ const checkedProblems = (app: AuthoredApp, collections: { cid: string; schema: C
       ...schemaRefProblems(app, collections),
     ];
   } catch (error) {
-    return [`the checks threw on this app's declaration or schemas: ${error instanceof Error ? error.message : String(error)}`];
+    // Deliberately NOT phrased as a verdict on the app. Reaching here means the gate's own code
+    // threw, which is either a defect in `publishChecks` or a schema shape it cannot handle — and
+    // an operator who reads "this app is invalid" goes to the wrong repository. The collection ids
+    // are named because the message alone does not say which schema was in play.
+    const cids = collections.map(({ cid }) => cid).join(", ") || "(none)";
+    const detail = error instanceof Error ? error.message : String(error);
+    return [
+      `INTERNAL: the gate's own checks threw while judging this app — a defect in publishChecks, or a schema shape it cannot handle. Collections read: ${cids}. ${detail}`,
+    ];
   }
 };
 
