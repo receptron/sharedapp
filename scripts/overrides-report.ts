@@ -31,10 +31,14 @@ export type Probe = { readonly files: readonly string[]; readonly rule: string; 
  *  silence — which is the failure this whole check exists to catch. */
 const SILENCED = new Set(["off", "0", "warn", "1"]);
 
-const isStrings = (value: unknown): value is readonly string[] => Array.isArray(value) && value.every((entry) => typeof entry === "string");
+/** `Array.isArray` alone narrows `unknown` to `any[]`, and every element read off it is then an
+ *  `any` that spreads. This says the same thing and keeps the elements `unknown`. */
+const isArray = (value: unknown): value is readonly unknown[] => Array.isArray(value);
+
+const isStrings = (value: unknown): value is readonly string[] => isArray(value) && value.every((entry) => typeof entry === "string");
 
 /** A rule's severity, whether it was written bare (`"warn"`) or with options (`["warn", {...}]`). */
-const severityOf = (setting: unknown): unknown => (Array.isArray(setting) ? setting[0] : setting);
+const severityOf = (setting: unknown): unknown => (isArray(setting) ? setting[0] : setting);
 
 /** SILENCING: it names files and every rule in it is `off` or `warn`. A block that raises a rule,
  *  or sets one with an `error` ceiling, is a gate rather than an exemption — its liveness is a
