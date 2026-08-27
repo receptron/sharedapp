@@ -2,12 +2,12 @@
  *
  *  Everything here is the I/O half: load the flat config, ask ESLint one question per override,
  *  print, and exit non-zero when an override silences nothing or a block could not be read. The
- *  judgement of what counts as an override, where the forced rule has to go, and what the answer
+ *  judgement of what counts as an override, which exemption removing means what, and what the answer
  *  means, lives next door with tests. */
 
 import { ESLint, type Linter } from "eslint";
 
-import { type Override, type Probe, isArray, withoutRule, renderReport, select, failed } from "./overrides-report.js";
+import { type Override, type Probe, isArray, withoutRule, renderReport, select, failed, unexpectedPresets } from "./overrides-report.js";
 
 const CONFIG = new URL("../eslint.config.js", import.meta.url).href;
 
@@ -29,12 +29,12 @@ const reportsFor = async (config: readonly Linter.Config[], probe: Override): Pr
     throw new Error(`removing ${probe.rule} from block ${probe.index} did not leave a config array`);
   }
   const eslint = new ESLint({ overrideConfigFile: true, baseConfig: removed, cwd: process.cwd(), errorOnUnmatchedPattern: false });
-  const results = await eslint.lintFiles([...probe.files]);
+  const results = await eslint.lintFiles([probe.file]);
   const fatal = results.flatMap((result) => result.messages).filter((message) => message.fatal === true);
   if (fatal.length > 0) {
     // A parse failure is the harness breaking, not an override going quiet, and counting its
     // messages as "not this rule" would report the override DEAD for a reason nobody could act on.
-    throw new Error(`probing ${probe.rule} over ${probe.files.join(", ")} failed to parse: ${fatal[0]?.message ?? "unknown"}`);
+    throw new Error(`probing ${probe.rule} over ${probe.file} failed to parse: ${fatal[0]?.message ?? "unknown"}`);
   }
   return results.reduce((total, result) => total + result.messages.filter((message) => message.ruleId === probe.rule).length, 0);
 };
@@ -56,5 +56,10 @@ for (const override of overrides) {
   probes.push({ ...override, reports: await reportsFor(config, override) });
 }
 
+unexpectedPresets(presets).forEach((preset) => {
+  console.error(
+    `UNEXPECTED named block ${preset.index}: ${preset.name} — named blocks are not measured, so add it to EXPECTED_PRESETS only if it really is a preset`,
+  );
+});
 console.log(renderReport(probes, unclassified, presets));
-process.exit(failed(probes, unclassified) ? 1 : 0);
+process.exit(failed(probes, unclassified, presets) ? 1 : 0);

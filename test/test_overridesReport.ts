@@ -1,4 +1,4 @@
-// Which config blocks count as a silencing override, where the forced rule has to go, and what a
+// Which config blocks count as a silencing override, what removing one leaves behind, and what a
 // probe's answer means.
 //
 // The pairing matters as much as it does for the publish gate: a predicate that accepted NOTHING
@@ -13,14 +13,24 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { deadProbes, failed, withoutRule, renderReport, select, type Probe, type Override } from "../scripts/overrides-report.js";
+import {
+  deadProbes,
+  failed,
+  withoutRule,
+  renderReport,
+  select,
+  unexpectedPresets,
+  EXPECTED_PRESETS,
+  type Probe,
+  type Override,
+} from "../scripts/overrides-report.js";
 
 const DEBT = { files: ["src/publishChecks.ts"], rules: { "max-lines": "warn" } };
 
 const rulesOf = (config: readonly unknown[]): string[] => select(config).overrides.map((override) => override.rule);
 
 test("a hand-written silencing block is an override, in both the warn and off forms", () => {
-  assert.deepEqual(select([DEBT]).overrides, [{ index: 0, files: ["src/publishChecks.ts"], rule: "max-lines" }]);
+  assert.deepEqual(select([DEBT]).overrides, [{ index: 0, file: "src/publishChecks.ts", rule: "max-lines" }]);
   assert.deepEqual(rulesOf([{ files: ["test/a.ts"], rules: { "sonarjs/code-eval": "off" } }]), ["sonarjs/code-eval"]);
 });
 
@@ -74,15 +84,15 @@ test("an empty files list names nothing to measure, and says so", () => {
 
 /** A preset ships defaults nobody here maintains — `typescript-eslint/eslint-recommended` turns off
  *  twenty-three core rules the compiler covers — so measuring it produces DEAD rows telling a
- *  maintainer to delete something they do not own. Named blocks are counted instead of dropped, so
- *  "not measured" is a number in the report rather than an absence. */
+ *  maintainer to delete something they do not own. The set of them is PINNED rather than noted: a
+ *  list in a passing log is not a gate, because most green logs are never read. */
 test("named blocks are presets: counted, not measured", () => {
   const chosen = select([{ name: "some/preset", files: ["a.ts"], rules: { x: "off" } }, DEBT]);
   assert.deepEqual(
     chosen.overrides.map((override) => override.rule),
     ["max-lines"],
   );
-  assert.deepEqual(chosen.presets, [0]);
+  assert.deepEqual(chosen.presets, [{ index: 0, name: "some/preset" }]);
   assert.equal(chosen.unclassified.length, 0);
 });
 
@@ -117,7 +127,7 @@ test("withoutRule drops the one rule from the one block, and leaves every other 
     { files: ["a.ts"], rules: { x: "off" } },
     { files: ["b.ts"], rules: { x: "off" } },
   ];
-  const override: Override = { index: 1, files: ["a.ts"], rule: "x" };
+  const override: Override = { index: 1, file: "a.ts", rule: "x" };
   assert.deepEqual(withoutRule(config, override), [
     { files: ["a.ts"], rules: { x: "off", y: "warn" } },
     { files: ["a.ts"], rules: {} },
@@ -127,19 +137,19 @@ test("withoutRule drops the one rule from the one block, and leaves every other 
 
 test("withoutRule keeps everything else in the block — the scripts exemption carries its globals there", () => {
   const scripts = { files: ["scripts/**/*.ts"], languageOptions: { globals: { console: "readonly" } }, rules: { "no-console": "off", "no-eval": "off" } };
-  assert.deepEqual(withoutRule([scripts], { index: 0, files: ["scripts/**/*.ts"], rule: "no-console" }), [
+  assert.deepEqual(withoutRule([scripts], { index: 0, file: "scripts/**/*.ts", rule: "no-console" }), [
     { files: ["scripts/**/*.ts"], languageOptions: { globals: { console: "readonly" } }, rules: { "no-eval": "off" } },
   ]);
 });
 
 test("withoutRule is a no-op where there is nothing to remove", () => {
   const config = [{ files: ["a.ts"], rules: { y: "off" } }];
-  assert.deepEqual(withoutRule(config, { index: 0, files: ["a.ts"], rule: "x" }), config);
-  assert.deepEqual(withoutRule(config, { index: 9, files: ["a.ts"], rule: "y" }), config);
-  assert.deepEqual(withoutRule([{ files: ["a.ts"] }], { index: 0, files: ["a.ts"], rule: "y" }), [{ files: ["a.ts"] }]);
+  assert.deepEqual(withoutRule(config, { index: 0, file: "a.ts", rule: "x" }), config);
+  assert.deepEqual(withoutRule(config, { index: 9, file: "a.ts", rule: "y" }), config);
+  assert.deepEqual(withoutRule([{ files: ["a.ts"] }], { index: 0, file: "a.ts", rule: "y" }), [{ files: ["a.ts"] }]);
 });
 
-const probe = (rule: string, reports: number): Probe => ({ index: 0, files: ["a.ts"], rule, reports });
+const probe = (rule: string, reports: number, file = "a.ts"): Probe => ({ index: 0, file, rule, reports });
 
 test("a probe is dead when the rule it silences reports nothing, and only then", () => {
   assert.deepEqual(deadProbes([probe("x", 0), probe("y", 1), probe("z", 99)]), [probe("x", 0)]);
@@ -168,19 +178,78 @@ test("an unreadable block is in the report and in the verdict, even with nothing
  *  hand-written block that acquired a `name` and dropped out of the measurement can be recognised
  *  by the person reading the report rather than only by whoever wrote this module. */
 test("the unmeasured blocks are always NAMED in the report, in both verdicts", () => {
-  assert.match(renderReport([probe("x", 1)], [], [4, 7]), /not measured: named block\(s\) 4, 7/);
-  assert.match(renderReport([probe("x", 0)], [], [4, 7]), /not measured: named block\(s\) 4, 7/);
+  assert.match(
+    renderReport(
+      [probe("x", 1)],
+      [],
+      [
+        { index: 4, name: "a/one" },
+        { index: 7, name: "b/two" },
+      ],
+    ),
+    /not measured: 4:a\/one, 7:b\/two/,
+  );
+  assert.match(
+    renderReport(
+      [probe("x", 0)],
+      [],
+      [
+        { index: 4, name: "a/one" },
+        { index: 7, name: "b/two" },
+      ],
+    ),
+    /not measured: 4:a\/one, 7:b\/two/,
+  );
   assert.match(renderReport([probe("x", 1)], [], []), /no named blocks/);
 });
 
 test("the run fails on a dead override OR an unreadable block, and passes on neither", () => {
-  assert.equal(failed([probe("x", 1)], []), false);
-  assert.equal(failed([probe("x", 0)], []), true);
-  assert.equal(failed([probe("x", 1)], [{ index: 0, why: "why" }]), true);
-  assert.equal(failed([], []), false);
+  assert.equal(failed([probe("x", 1)], [], []), false);
+  assert.equal(failed([probe("x", 0)], [], []), true);
+  assert.equal(failed([probe("x", 1)], [{ index: 0, why: "why" }], []), true);
+  assert.equal(failed([], [], []), false);
 });
 
 test("the dead rows come last, so a truncated log keeps the actionable half", () => {
   const lines = renderReport([probe("dead", 0), probe("live", 2)], [], []).split("\n");
   assert.ok(lines.indexOf("live  live  <-  a.ts") < lines.indexOf("DEAD  dead  <-  a.ts"));
+});
+
+/** A block naming two files can be HALF dead: with the exemption gone one file still reports and
+ *  the other does not. Summing them let the living half hide the stale one, and four of this
+ *  repository's exemptions name two files or more. */
+test("a block naming several files yields one override per file", () => {
+  const chosen = select([{ files: ["a.ts", "b.ts"], rules: { x: "off", y: "warn" } }]);
+  assert.deepEqual(chosen.overrides, [
+    { index: 0, file: "a.ts", rule: "x" },
+    { index: 0, file: "b.ts", rule: "x" },
+    { index: 0, file: "a.ts", rule: "y" },
+    { index: 0, file: "b.ts", rule: "y" },
+  ]);
+});
+
+test("half of a multi-file exemption going quiet is a failure, not an average", () => {
+  const half = [probe("x", 3, "a.ts"), probe("x", 0, "b.ts")];
+  assert.deepEqual(deadProbes(half), [probe("x", 0, "b.ts")]);
+  assert.equal(failed(half, [], []), true);
+  assert.match(renderReport(half, [], []), /^DEAD {2}x {2}<- {2}b\.ts$/m);
+});
+
+/** A LIST of unmeasured blocks in a passing log is not a gate: most green logs are never read. The
+ *  set is pinned, so a dependency shipping a new named config — or a hand-written block acquiring a
+ *  `name` and dropping out of the measurement — turns the job red once and someone looks. */
+test("an unexpected named block fails the run; an expected one does not", () => {
+  const expected = { index: 4, name: EXPECTED_PRESETS[0] ?? "" };
+  const ours = { index: 9, name: "our/own-block" };
+  assert.deepEqual(unexpectedPresets([expected]), []);
+  assert.deepEqual(unexpectedPresets([expected, ours]), [ours]);
+  assert.equal(failed([probe("x", 1)], [], [expected]), false);
+  assert.equal(failed([probe("x", 1)], [], [expected, ours]), true);
+});
+
+test("EXPECTED_PRESETS names the blocks this repo really has, not an empty ratchet", () => {
+  assert.ok(EXPECTED_PRESETS.length > 0, "an empty list would pin nothing and pass everything that is named");
+  EXPECTED_PRESETS.forEach((name) => {
+    assert.match(name, /\//, `${name} does not look like a package's own config name`);
+  });
 });

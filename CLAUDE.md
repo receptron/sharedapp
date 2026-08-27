@@ -67,10 +67,12 @@ beats whatever ELSE silences the same rule over the same files, so an exemption 
 already covered was reported live. Removing the rule rather than the whole block matters too:
 the `scripts/` exemption carries the node globals in the same block.
 
-**Nothing is dropped without being named.** A block whose shape it cannot read is REPORTED and
-fails the job; the presets it deliberately does not measure — blocks carrying `name`, which ship
-rules nobody here maintains — are listed by index in the footer. Six separate findings landed on
-that predicate before it took this shape, every one of them a real exemption that stopped being
+**Nothing is dropped without failing the job.** A block whose shape it cannot read is REPORTED;
+the presets it deliberately does not measure — blocks carrying `name`, which ship rules nobody
+here maintains — are PINNED to an expected set, because a list in a passing log is not a gate.
+Each exemption is measured per FILE, not per block, since a block naming two files can be half
+dead and a summed answer lets the living half hide the stale one. Nine separate findings landed
+on this module before it took that shape, every one of them a real exemption that stopped being
 measured without anyone noticing: the failure this check exists to catch, wearing the check's own
 uniform.
 

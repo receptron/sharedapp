@@ -19,9 +19,9 @@
  *  check's own uniform. So the rule is inverted: every block naming `files` and `rules` is
  *  classified rule by rule, and a shape this module cannot classify is REPORTED, never skipped.
  *
- *  One population IS left unmeasured, and the report NAMES it rather than dropping it: a block
- *  carrying `name` is a preset, and a preset ships rules nobody here maintains. The footer lists
- *  which blocks those were, so "not measured" is an auditable list instead of an absence.
+ *  One population IS left unmeasured: a block carrying `name` is a preset, and a preset ships
+ *  rules nobody here maintains. That exclusion is PINNED rather than noted — see
+ *  {@link EXPECTED_PRESETS} — because a list in a passing log is not a gate.
  *
  *  The measurement is deliberately NOT "delete the block and re-lint the repo". That is slower,
  *  and it cannot be done at all for the block that supplies the type-aware parser — removing it
@@ -31,16 +31,21 @@
  *  Split from the runner so the decisions have tests: everything here is a function of plain data,
  *  and `scripts/lint-overrides.ts` supplies the linting. */
 
-/** A rule silenced for a set of files, and WHERE in the config array it was silenced. The index is
- *  not decoration — {@link probeConfig} needs it, and an earlier version that discarded it got the
- *  wrong answer whenever two blocks silenced one rule over the same file. */
-export type Override = { readonly index: number; readonly files: readonly string[]; readonly rule: string };
+/** ONE rule silenced for ONE of the patterns a block names, and WHERE in the config array it was
+ *  silenced. The index is not decoration — {@link withoutRule} needs it.
+ *
+ *  Per PATTERN, not per block, because a block naming two files can be half dead: with the
+ *  exemption removed, one file still reports and the other does not, and summing them lets the
+ *  living half hide the stale one. Four of this repository's exemptions name two files or more. */
+export type Override = { readonly index: number; readonly file: string; readonly rule: string };
 
 /** A block this module could not classify. Reported rather than skipped: a shape nobody thought of
  *  is exactly how a real exemption stops being measured without anyone noticing. */
 export type Unclassified = { readonly index: number; readonly why: string };
 
-export type Selection = { readonly overrides: Override[]; readonly unclassified: Unclassified[]; readonly presets: number[] };
+export type Preset = { readonly index: number; readonly name: string };
+
+export type Selection = { readonly overrides: Override[]; readonly unclassified: Unclassified[]; readonly presets: Preset[] };
 
 /** One override's answer: how many reports its rule makes on its files once the exemption is gone.
  *  Zero means removing it changed nothing, so it silences nothing. */
@@ -78,13 +83,14 @@ const asRecord = (value: unknown): Record<string, unknown> | null => (typeof val
 export const select = (config: readonly unknown[]): Selection => {
   const overrides: Override[] = [];
   const unclassified: Unclassified[] = [];
-  const presets: number[] = [];
+  const presets: Preset[] = [];
   config.forEach((element, index) => {
     const block = asRecord(element);
     const rules = block === null ? null : asRecord(block["rules"]);
     if (block === null || block["files"] === undefined || rules === null) return;
-    if (block["name"] !== undefined) {
-      presets.push(index);
+    const name = block["name"];
+    if (name !== undefined) {
+      presets.push({ index, name: typeof name === "string" ? name : JSON.stringify(name) });
       return;
     }
     const files = block["files"];
@@ -97,7 +103,7 @@ export const select = (config: readonly unknown[]): Selection => {
     const named: string[] = files.filter((entry): entry is string => typeof entry === "string");
     Object.entries(rules).forEach(([rule, setting]) => {
       const severity = severityOf(setting);
-      if (SILENCING.has(severity)) overrides.push({ index, files: named, rule });
+      if (SILENCING.has(severity)) named.forEach((file) => overrides.push({ index, file, rule }));
       else if (!ENFORCING.has(severity)) unclassified.push({ index, why: `rule ${rule} has severity ${severity}, which is neither silencing nor enforcing` });
     });
   });
@@ -130,15 +136,16 @@ export const withoutRule = (config: readonly unknown[], override: Override): unk
 
 export const deadProbes = (probes: readonly Probe[]): Probe[] => probes.filter((probe) => probe.reports === 0);
 
-const line = (probe: Probe): string => `${probe.reports === 0 ? "DEAD" : "live"}  ${probe.rule}  <-  ${probe.files.join(", ")}`;
+const line = (probe: Probe): string => `${probe.reports === 0 ? "DEAD" : "live"}  ${probe.rule}  <-  ${probe.file}`;
 
 /** The whole report. Dead entries and unreadable blocks come last, so the actionable half is what a
  *  truncated log keeps. */
-export const renderReport = (probes: readonly Probe[], unclassified: readonly Unclassified[], presets: readonly number[]): string => {
+export const renderReport = (probes: readonly Probe[], unclassified: readonly Unclassified[], presets: readonly Preset[]): string => {
   const dead = deadProbes(probes);
   const lines = [...probes.filter((probe) => probe.reports > 0), ...dead].map(line);
   const unread = unclassified.map((block) => `UNREAD  eslint.config.js element ${block.index}: ${block.why}`);
-  const footer = presets.length === 0 ? "(no named blocks)" : `(not measured: named block(s) ${presets.join(", ")} — presets ship rules nobody here maintains)`;
+  const named = presets.map((preset) => `${preset.index}:${preset.name}`).join(", ");
+  const footer = presets.length === 0 ? "(no named blocks)" : `(not measured: ${named})`;
   if (dead.length === 0 && unclassified.length === 0) {
     return [...lines, `\nall ${probes.length} silencing overrides still suppress something ${footer}`].join("\n");
   }
@@ -147,4 +154,16 @@ export const renderReport = (probes: readonly Probe[], unclassified: readonly Un
   return [...lines, ...unread, verdict].join("\n");
 };
 
-export const failed = (probes: readonly Probe[], unclassified: readonly Unclassified[]): boolean => deadProbes(probes).length > 0 || unclassified.length > 0;
+/** The named blocks this repository expects to find, and therefore does not measure. Presets name
+ *  themselves; nothing written here does.
+ *
+ *  This is a RATCHET rather than a note. Listing the unmeasured blocks in a passing log is not a
+ *  gate — most green logs are never read — so the set is pinned instead: a dependency shipping a
+ *  new named config, or a hand-written block acquiring a `name` and dropping out of the
+ *  measurement, turns this red once and someone looks. */
+export const EXPECTED_PRESETS: readonly string[] = ["typescript-eslint/eslint-recommended"];
+
+export const unexpectedPresets = (presets: readonly Preset[]): Preset[] => presets.filter((preset) => !EXPECTED_PRESETS.includes(preset.name));
+
+export const failed = (probes: readonly Probe[], unclassified: readonly Unclassified[], presets: readonly Preset[]): boolean =>
+  deadProbes(probes).length > 0 || unclassified.length > 0 || unexpectedPresets(presets).length > 0;
