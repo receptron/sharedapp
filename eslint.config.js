@@ -3,23 +3,8 @@ import tseslint from "typescript-eslint";
 import sonarjs from "eslint-plugin-sonarjs";
 import security from "eslint-plugin-security";
 
-// A preset decides WHICH rules to run; this file decides how much they matter. A warning does not
-// fail CI and nothing here reads lint output, so a rule left at warn is a rule that reports a
-// violation and ships it. Every preset rule is raised to error, and a rule that must not fail the
-// build is turned off or downgraded BY NAME, with the reason, in one of the blocks below.
-//
-// Written as a transform rather than a list of rule names because the list is what rots: a preset
-// that adds a warn-level rule in a future release arrives already enforced. Severity only — the
-// preset's own options are preserved, and a rule it ships as `off` stays off (that was its
-// decision, and a different one).
-const raise = (entry) => {
-  const severity = Array.isArray(entry) ? entry[0] : entry;
-  if (severity !== 1 && severity !== "warn") return entry;
-  return Array.isArray(entry) ? ["error", ...entry.slice(1)] : "error";
-};
-
-const enforced = (config) =>
-  config.rules ? { ...config, rules: Object.fromEntries(Object.entries(config.rules).map(([id, entry]) => [id, raise(entry)])) } : config;
+// Severity policy lives in its own file so it can be tested — see its header for what that buys.
+import { enforced } from "./eslint.severity.js";
 
 // Per-file entries further down come in three kinds, and the kind is the point. An `off` says the
 // rule is WRONG about that file and carries the reason. A `warn` is debt: the finding stays on
