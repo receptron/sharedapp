@@ -59,6 +59,30 @@ Consumers never build this — they get `dist/` from the published tarball — s
 `prepublishOnly` regression would ship an empty package and break on `npx mulmoterminal`
 rather than here.
 
+An `overrides` job runs `yarn lint:overrides`, which asks the one question `yarn lint` cannot.
+Lint proves an exemption DELETED from `eslint.config.js` is at zero — the rule is an error
+everywhere else, so it goes red. It says nothing about an exemption still KEPT, and one whose
+findings have since been fixed tells two lies: it reads as "this file still has that problem",
+and it hides that the rule quietly stopped being an error there. Both were live here — a
+`no-nested-conditional` entry outlived the rewrite of the file it named, and the PR that pruned
+the ledger of zeroed entries left that one behind.
+
+It asks the question directly — it removes THAT RULE from THAT BLOCK and re-lints — rather than
+proxying it. Two earlier versions forced the rule to `error` and counted what it reported, which
+beats whatever ELSE silences the same rule over the same files, so an exemption another one
+already covered was reported live. Removing the rule rather than the whole block matters too:
+the `scripts/` exemption carries the node globals in the same block.
+
+**Nothing is dropped without failing the job.** A block whose shape it cannot read is REPORTED;
+the presets it deliberately does not measure — blocks carrying `name`, which ship rules nobody
+here maintains — are PINNED to an expected set, because a list in a passing log is not a gate.
+Each `files` ENTRY is measured on its own — the unit of measurement is the unit of deletion —
+since a block naming two files can be half dead and a summed answer lets the living half hide the
+stale one. A glob stays one entry: it comes out of the config whole, so it is dead only when
+nothing it matches needs it. Ten separate findings landed on this module before it took that
+shape, every one of them a real exemption that stopped being measured without anyone noticing:
+the failure this check exists to catch, wearing the check's own uniform.
+
 Commit messages in this repository are Conventional Commits with a Japanese subject.
 
 ## What this package is

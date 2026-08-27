@@ -44,6 +44,24 @@ jobs:
         if: always() && matrix.node == '22.x'
         run: yarn typecheck:summary
 
+  # `yarn lint` proves an exemption that was DELETED from `eslint.config.js` is at zero — the rule
+  # is an error everywhere else, so it goes red. Nothing proves the opposite, that an exemption
+  # still KEPT silences anything, and one that stopped tells two lies: it reads as "this file still
+  # has that problem", and it hides that the rule quietly stopped being an error there.
+  #
+  # Its own job rather than a step in `check`, for the same reason `consumable` is one: the answer
+  # does not depend on the Node version, so running it in both matrix entries would ask the same
+  # question twice and print the same report twice.
+  overrides:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+      - run: yarn install --frozen-lockfile
+      - run: yarn lint:overrides
+
   # Consumers get `dist/` from the published tarball and never build it, so a
   # `files` list or a `prepublishOnly` that stopped emitting would ship an
   # empty package — MulmoTerminal's `server/` imports this at runtime, so it
