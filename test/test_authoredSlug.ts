@@ -16,7 +16,7 @@ import assert from "node:assert/strict";
 
 import { parseAuthoredApp } from "../src/publishManifest.js";
 import { appSlugDoc, APP_SLUGS_COLLECTION } from "../src/publishProject.js";
-import { byText } from "./helpers.js";
+import { byText } from "../src/byText.js";
 
 const withSlug = (slug: unknown): ReturnType<typeof parseAuthoredApp> =>
   parseAuthoredApp(JSON.stringify({ aid: "3f2b8c1a", name: "Sakura Hair", slug, members: { "owner@example.com": { "*": "owner" } } }));

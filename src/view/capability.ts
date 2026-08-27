@@ -185,17 +185,17 @@ const namesRoles = (write: ProjectedViewWrite): boolean => write.writers !== und
 
 /** Nothing, said explicitly. The staff tier's answer when the projection
  *  carries no roles: see the header for why it is this way round. */
-const NOTHING = {
+const NOTHING: Omit<ViewCapability, "cid"> = {
   transitionAny: false,
   transitionOwn: false,
   assign: false,
-  assignees: [] as string[],
-  withdrawFrom: [] as string[],
+  assignees: [],
+  withdrawFrom: [],
   withdrawAny: false,
-  sealed: [] as string[],
-  correctFrom: {} as Record<string, string[]>,
+  sealed: [],
+  correctFrom: {},
   correctAny: false,
-  frozen: [] as string[],
+  frozen: [],
 };
 
 const has = (addresses: string[] | undefined, address: string): boolean => (addresses ?? []).includes(address);
@@ -298,7 +298,7 @@ export const capabilityOf = (write: ProjectedViewWrite, address: string, tier: W
     assign: assignable && writer,
     ...owned,
     // Sorted for the picker only. The DOCUMENT's order is the compiler's
-    // business (it sorts by code point so a second publish of an unchanged
+    // business (it sorts by code unit so a second publish of an unchanged
     // declaration produces an unchanged document); what a person reads is a
     // different job.
     assignees: [...(write.writers ?? []), ...(write.rowWriters ?? [])].sort((left, right) => left.localeCompare(right)),

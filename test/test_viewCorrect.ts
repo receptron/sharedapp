@@ -18,7 +18,7 @@ import assert from "node:assert/strict";
 
 import { readIntentMessage } from "../src/view/intent.js";
 import { capabilityOf } from "../src/view/capability.js";
-import { byText } from "./helpers.js";
+import { byText } from "../src/byText.js";
 import { VIEW_MESSAGE } from "../src/view/protocol.js";
 import type { ProjectedViewWrite } from "../src/appViews.js";
 

@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { normalizeViews, participantScope, viewDocId, writeFor, PUBLIC_VIEW_ID } from "../src/appViews.js";
 import { projectAppViews } from "../src/publishProject.js";
 import { AuthoredAppZ } from "../src/publishManifest.js";
-import { byText } from "./helpers.js";
+import { byText } from "../src/byText.js";
 
 const OWNER = "owner@salon.jp";
 const STAMP = { publishedAt: 1_700_000_000_000, email: OWNER, uid: "u-owner" };

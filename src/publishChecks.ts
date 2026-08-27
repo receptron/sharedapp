@@ -33,6 +33,7 @@ import { agentCids, AGENT_ID_PATTERN, AGENT_INSTRUCTION_MAX, RESERVED_AGENT_IDS 
 import { APP_PROTOCOL, protocolOf, protocolWithin } from "./appProtocol.js";
 import { writersOf } from "./appViews.js";
 import type { AuthoredAgent, AuthoredApp, AuthoredCollectionConfig, AuthoredSubmit, AuthoredView } from "./publishManifest.js";
+import { byText } from "./byText.js";
 
 /** What publish knows about a shared collection in this repository, as far as
  *  these checks are concerned: its cid and the schema key its records are
@@ -309,7 +310,7 @@ function keyFieldCountProblems(cid: string, submit: AuthoredSubmit): string[] {
  *  missing half denies every write instead of loosening one. */
 function coherenceProblems(app: AuthoredApp, collections: readonly PublishableCollection[]): string[] {
   const known = new Set(collections.map((collection) => collection.cid));
-  const names = known.size > 0 ? [...known].sort().join(", ") : "(none)";
+  const names = known.size > 0 ? [...known].sort(byText).join(", ") : "(none)";
   const fromSubmits = Object.entries(app.public?.submit ?? {}).flatMap(([cid, submit]) => submitCoherenceProblems(app, cid, submit));
   const fromCollections = Object.entries(app.collections ?? {}).flatMap(([cid, collection]) => gateCoherenceProblems(cid, collection, known, names));
   return [...fromSubmits, ...fromCollections];
@@ -533,8 +534,9 @@ function selfDeleteProblems(cid: string, submit: AuthoredSubmit, collection: Aut
   ]);
   const unreachable = states.filter((state) => !reachable.has(state));
   if (unreachable.length === 0) return [];
+  const listed = unreachable.map((state) => `"${state}"`).join(", ");
   return [
-    `public.submit.${cid}.selfDelete names ${unreachable.map((state) => `"${state}"`).join(", ")}, ` +
+    `public.submit.${cid}.selfDelete names ${listed}, ` +
       `which no record ever holds: it is neither public.submit.${cid}.initialStatus nor a status collections.${cid}.transitions names, ` +
       `so the declaration allows nothing.`,
   ];
@@ -670,7 +672,7 @@ function statusWhy(submit: AuthoredSubmit): string {
  *  exists. */
 function idTargetProblems(app: AuthoredApp, collections: readonly PublishableCollection[]): string[] {
   const known = new Set(collections.map((collection) => collection.cid));
-  const names = known.size > 0 ? [...known].sort().join(", ") : "(none)";
+  const names = known.size > 0 ? [...known].sort(byText).join(", ") : "(none)";
   return Object.entries(app.public?.submit ?? {}).flatMap(([cid, submit]) => idInTargetProblems(cid, submit, known, names));
 }
 
@@ -736,8 +738,9 @@ function sealedProblems(app: AuthoredApp): string[] {
     ]);
     const unreachable = states.filter((state) => !reachable.has(state));
     if (unreachable.length === 0) return [];
+    const listed = unreachable.map((state) => `"${state}"`).join(", ");
     return [
-      `collections.${cid}.sealed names ${unreachable.map((state) => `"${state}"`).join(", ")}, which no record ever holds: ` +
+      `collections.${cid}.sealed names ${listed}, which no record ever holds: ` +
         `it is neither an initialStatus nor a status collections.${cid}.transitions names, so the declaration seals nothing.`,
     ];
   });
@@ -759,8 +762,9 @@ function sealedSelfDeleteProblems(app: AuthoredApp): string[] {
     const sealed = new Set(collection.sealed ?? []);
     const clash = (app.public?.submit?.[cid]?.selfDelete ?? []).filter((state) => sealed.has(state));
     if (clash.length === 0) return [];
+    const listed = clash.map((state) => `"${state}"`).join(", ");
     return [
-      `public.submit.${cid}.selfDelete and collections.${cid}.sealed both name ${clash.map((state) => `"${state}"`).join(", ")}: one says the submitter ` +
+      `public.submit.${cid}.selfDelete and collections.${cid}.sealed both name ${listed}: one says the submitter ` +
         "may withdraw their row from that status and the other that nobody may delete it at all. The rules refuse the delete, so the form promises a " +
         "withdrawal it can never perform. Name the status in one of them.",
     ];
@@ -791,7 +795,7 @@ function sealedSelfDeleteProblems(app: AuthoredApp): string[] {
  *  case separately and fail closed; this is the readable refusal. */
 function refInTargetProblems(app: AuthoredApp, collections: readonly PublishableCollection[]): string[] {
   const known = new Set(collections.map((collection) => collection.cid));
-  const names = known.size > 0 ? [...known].sort().join(", ") : "(none)";
+  const names = known.size > 0 ? [...known].sort(byText).join(", ") : "(none)";
   return Object.entries(app.collections ?? {}).flatMap(([cid, collection]) => {
     const target = collection.refIn?.collection;
     if (target === undefined) return [];
@@ -872,7 +876,7 @@ function unknownCidProblems(app: AuthoredApp, collections: readonly PublishableC
       .map(
         (cid) =>
           `${where} names '${cid}', which is not a shared collection in this repository. ` +
-          `Shared collections here: ${known.size > 0 ? [...known].sort().join(", ") : '(none - a schema needs storage.type "firestore")'}.`,
+          `Shared collections here: ${known.size > 0 ? [...known].sort(byText).join(", ") : '(none - a schema needs storage.type "firestore")'}.`,
       ),
   );
 }
@@ -1189,7 +1193,7 @@ function windowBoundProblems(
   if (!known.has(ref.collection)) {
     problems.push(
       `public.submit.${cid}.window.${key}.collection names '${ref.collection}', which is not a shared collection in this repository. ` +
-        `The rules read the ${which} time off a record there, so nothing can ever be submitted. Shared collections here: ${known.size > 0 ? [...known].sort().join(", ") : "(none)"}.`,
+        `The rules read the ${which} time off a record there, so nothing can ever be submitted. Shared collections here: ${known.size > 0 ? [...known].sort(byText).join(", ") : "(none)"}.`,
     );
   }
   if (!submit.createFields.includes(ref.ref)) {
@@ -1217,7 +1221,7 @@ function windowBoundProblems(
  *  own document is simultaneously taken and open. */
 function mirrorProblems(app: AuthoredApp, collections: readonly PublishableCollection[]): string[] {
   const known = new Set(collections.map((collection) => collection.cid));
-  const names = known.size > 0 ? [...known].sort().join(", ") : "(none)";
+  const names = known.size > 0 ? [...known].sort(byText).join(", ") : "(none)";
   return [
     ...Object.entries(app.public?.submit ?? {}).flatMap(([cid, submit]) => mirrorClaimProblems(app, cid, submit, known, names)),
     ...Object.entries(app.collections ?? {}).flatMap(([cid, collection]) => mirrorOfProblems(app, cid, collection, known, names)),
@@ -1335,7 +1339,7 @@ function viewCollectionProblems(app: AuthoredApp, view: NormalizedView, cid: str
   if (!known.has(cid)) {
     return [
       `${view.where}.collections names '${cid}', which is not a shared collection in this repository. ` +
-        `Shared collections here: ${known.size > 0 ? [...known].sort().join(", ") : "(none)"}.`,
+        `Shared collections here: ${known.size > 0 ? [...known].sort(byText).join(", ") : "(none)"}.`,
     ];
   }
   if (view.audience === "public" && !(app.public?.read ?? []).includes(cid)) {
@@ -1803,7 +1807,7 @@ function agentCidProblems(app: AuthoredApp, agent: AuthoredAgent, where: string,
   if (!known.has(cid)) {
     return [
       `${where} names '${cid}', which is not a shared collection in this repository. ` +
-        `Shared collections here: ${known.size > 0 ? [...known].sort().join(", ") : "(none)"}.`,
+        `Shared collections here: ${known.size > 0 ? [...known].sort(byText).join(", ") : "(none)"}.`,
     ];
   }
   const readable = agentCanRead(app, agent.audience, cid);
@@ -1829,8 +1833,9 @@ function agentCidProblems(app: AuthoredApp, agent: AuthoredAgent, where: string,
  *  for; it is not something an app publishes. */
 function agentInertProblems(app: AuthoredApp, agent: AuthoredAgent, where: string, cids: string[], known: ReadonlySet<string>): string[] {
   if (cids.length === 0 || cids.some((cid) => known.has(cid) && agentCanAct(app, agent.audience, cid))) return [];
+  const spelled = cids.map((cid) => `'${cid}'`).join(", ");
   return [
-    `${where} names ${cids.map((cid) => `'${cid}'`).join(", ")}, and an agent reading as '${agent.audience}' can do nothing to any of them: ` +
+    `${where} names ${spelled}, and an agent reading as '${agent.audience}' can do nothing to any of them: ` +
       "no form to submit through, and no transition, assignment or withdrawal this audience carries. A published standing instruction is a JOB — " +
       "the agent would wake up, read the rows and be refused. If the agent is only meant to look and report, that is what the user of the terminal " +
       "asks it for; it is not something the app publishes.",
@@ -1934,7 +1939,7 @@ function articleRefProblems(schemaOf: ReadonlyMap<string, CollectionSchema>, vie
   const schema = cid === undefined ? undefined : schemaOf.get(cid);
   if (view.type !== "article" || article === undefined || schema === undefined) return [];
   const fields = schema.fields ?? {};
-  const known = Object.keys(fields).sort().join(", ") || "(none)";
+  const known = Object.keys(fields).sort(byText).join(", ") || "(none)";
   const drawn: { key: "title" | "body" | "summary"; field: string | undefined; missing: string }[] = [
     { key: "title", field: article.title, missing: "the page falls back to the document id, so the index reads as a list of URL names" },
     { key: "body", field: article.body, missing: "every article renders EMPTY, which looks exactly like one nobody has written yet" },
@@ -1970,7 +1975,7 @@ function mailRefProblems(schemaOf: ReadonlyMap<string, CollectionSchema>, cid: s
   const schema = schemaOf.get(cid);
   if (mail === undefined || schema === undefined) return [];
   const fields = schema.fields ?? {};
-  const known = Object.keys(fields).sort().join(", ") || "(none)";
+  const known = Object.keys(fields).sort(byText).join(", ") || "(none)";
   const problems: string[] = [];
   if (!declaredField(fields, mail.toField)) {
     problems.push(
@@ -2052,7 +2057,7 @@ function refInRefProblems(schemaOf: ReadonlyMap<string, CollectionSchema>, cid: 
             `that field, so a record without it is an evaluation error and NOTHING can be created in '${cid}' — the owner included. ` +
             `Fields on '${cid}': ${
               Object.keys(own.fields ?? {})
-                .sort()
+                .sort(byText)
                 .join(", ") || "(none)"
             }.`,
         ];
@@ -2092,7 +2097,7 @@ function maxBytesRefProblems(schemaOf: ReadonlyMap<string, CollectionSchema>, ci
   const schema = schemaOf.get(cid);
   if (schema === undefined) return [];
   const fields = schema.fields ?? {};
-  const known = Object.keys(fields).sort().join(", ") || "(none)";
+  const known = Object.keys(fields).sort(byText).join(", ") || "(none)";
   return Object.keys(submit.maxBytes ?? {}).flatMap((field) => {
     const where = `public.submit.${cid}.maxBytes.${field}`;
     if (!declaredField(fields, field)) {
@@ -2163,7 +2168,7 @@ function refFieldProblem(schemaOf: ReadonlyMap<string, CollectionSchema>, label:
   const schema = schemaOf.get(target);
   if (schema === undefined || referencedField(schemaOf, target, field) !== undefined) return [];
   const known = Object.keys(schema.fields ?? {})
-    .sort()
+    .sort(byText)
     .join(", ");
   return [
     `${label} names '${field}', which the schema of '${target}' does not declare. ` +
@@ -2196,7 +2201,7 @@ function comparableProblem(
         `(${values.join(", ") || "(none)"}). The comparison can never be true, so every write it guards is refused.`,
     ];
   }
-  const wanted = spec.type === "number" ? "number" : spec.type === "boolean" ? "boolean" : "string";
+  const wanted = spec.type === "number" || spec.type === "boolean" ? spec.type : "string";
   if (typeof where.equals === wanted) return [];
   return [
     `${label}.equals is ${said}, and '${where.field}' on '${String(target)}' is a ${spec.type} field. ` +

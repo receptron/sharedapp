@@ -30,6 +30,7 @@
 //   less, it fails.
 import type { AuthoredApp, AuthoredMail, AuthoredSubmit } from "./publishManifest.js";
 import type { ProjectedAgent } from "./appAgents.js";
+import { byText } from "./byText.js";
 
 /** The audiences a view may be written for. A CLOSED set: each one names a
  *  tier with a rule behind it, so an unknown value has nowhere to be
@@ -598,7 +599,7 @@ function roleOn(app: AuthoredApp, address: string, cid: string): string | undefi
 function holdersOf(app: AuthoredApp, cid: string, roles: readonly string[]): string[] {
   return Object.keys(app.members)
     .filter((address) => roles.includes(roleOn(app, address, cid) ?? ""))
-    .sort();
+    .sort(byText);
 }
 
 /** Who may write every row of `cid`, and who may write only their own.

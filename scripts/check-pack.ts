@@ -14,6 +14,7 @@
 
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { byText } from "../src/byText.js";
 
 /** An object, for walking. Arrays pass too, which is what we want: an `exports` value may be
  *  either, and the walk below treats both the same way. A type guard rather than a cast,
@@ -83,13 +84,6 @@ const satisfied = (path: string): boolean => {
   const pattern = new RegExp(`^${path.split("*").map(escapeRegExp).join(".*")}$`);
   return [...listed].some((entry) => !entry.endsWith("/") && pattern.test(entry));
 };
-
-/** `.sort()`'s own order, spelled out: the rule that asks for a comparator cannot tell a string
- *  array from a number one. The order is OBSERVABLE here — it is the order the ok/MISSING lines
- *  print in — so it has to be the default's, not a locale's. Local rather than shared with the
- *  suite's copy: `scripts/` must not depend on `test/`. */
-const byText = (a: string, b: string): number => Number(a > b) - Number(a < b);
-
 const missing = [...declared].sort(byText).filter((path) => !satisfied(path));
 for (const path of [...declared].sort(byText)) {
   console.log(`${missing.includes(path) ? "MISSING" : "ok     "} ${path}`);

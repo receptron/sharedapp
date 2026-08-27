@@ -55,6 +55,7 @@ import {
 } from "./appViews.js";
 import { agentsFor, agentTierCids, type ProjectedAgent } from "./appAgents.js";
 import type { AuthoredApp, AuthoredSubmit } from "./publishManifest.js";
+import { byText } from "./byText.js";
 
 /** Defined here rather than imported from `@mulmoclaude/common`: one line is not
  *  worth a second dependency on the monorepo this module exists to step out of. */
@@ -248,7 +249,7 @@ function projectSubmit(submit: AuthoredSubmit): Record<string, unknown> {
  *  any order; the test that would notice is the one asserting a second publish
  *  changes nothing but `publishedAt`. */
 function memberEmailsOf(members: AuthoredApp["members"]): string[] {
-  return Object.keys(members).sort();
+  return Object.keys(members).sort(byText);
 }
 
 /** The previous document, kept for rollback, with its OWN `previousPublished`
