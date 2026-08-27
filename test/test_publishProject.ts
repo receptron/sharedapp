@@ -17,7 +17,7 @@ import { AuthoredAppZ, type AuthoredApp } from "../src/publishManifest.js";
 import { projectApp, projectAppViews, type PublishStamp } from "../src/publishProject.js";
 import { APP_PROTOCOL, APP_PROTOCOL_BASE } from "../src/appProtocol.js";
 import type { CollectionSchema } from "@mulmoclaude/core/collection";
-import { byText } from "./helpers.js";
+import { byText } from "../src/byText.js";
 
 const STAMP: PublishStamp = { uid: "uid_owner", email: "owner@salon.jp", publishedAt: 1_760_000_000_000, commit: "abc123def456" };
 

@@ -196,16 +196,18 @@ export default tseslint.config(
     files: ["test/test_viewGesture.ts", "test/test_viewLookup.ts", "test/test_viewNotice.ts"],
     rules: { "sonarjs/code-eval": "off" },
   },
+  {
+    // OFF, because this file's whole purpose is to call the bare `.sort()` this rule forbids and
+    // assert `byText` orders identically. Satisfying the rule here would delete the comparison —
+    // there is no way to check a comparator against the default without invoking the default.
+    files: ["test/test_byText.ts"],
+    rules: { "sonarjs/no-alphabetical-sort": "off" },
+  },
 
   // ---------------------------------------------------------------------------------------------
   // DEBT. Everything below is at `warn` for the files listed and at `error` everywhere else. The
   // number after each file is what it reported when the rule went in.
   // ---------------------------------------------------------------------------------------------
-  {
-    // Two `[] as string[]` on empty literals that an annotation would type instead.
-    files: ["src/view/capability.ts"], // 2
-    rules: { "@typescript-eslint/consistent-type-assertions": "warn" },
-  },
   {
     // A guard the types already prove — defensive reading of a schema the caller supplies. The
     // suite used to hold 66 of these and holds none: `node:assert/strict`'s `equal` narrows, so
@@ -233,28 +235,8 @@ export default tseslint.config(
     rules: { "@typescript-eslint/strict-boolean-expressions": "warn" },
   },
   {
-    // Bare `.sort()` on arrays of strings — correct as written (the default IS lexicographic), but
-    // the rule cannot tell those from the numeric case where the default is a bug. An explicit
-    // comparator retires each entry.
-    files: [
-      "src/appViews.ts", // 1
-      "src/publishChecks.ts", // 8
-      "src/publishProject.ts", // 1
-    ],
-    rules: { "sonarjs/no-alphabetical-sort": "warn" },
-  },
-  {
-    files: [
-      "scripts/check-apps.ts", // 1
-      "src/publishChecks.ts", // 1
-    ],
+    files: ["scripts/check-apps.ts"], // 1
     rules: { "sonarjs/no-nested-conditional": "warn" },
-  },
-  {
-    files: [
-      "src/publishChecks.ts", // 1
-    ],
-    rules: { "sonarjs/no-nested-template-literals": "warn" },
   },
   {
     // `"1.2.3.4"` is not an address here: it is the fixture for "four numbers is not a version",
