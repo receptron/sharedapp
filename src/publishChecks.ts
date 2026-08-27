@@ -79,11 +79,26 @@ export function bindsSubmitterIdentity(submit: AuthoredSubmit): boolean {
  *  the transition machine. An aggregation grouped by anything else is grouped
  *  by a field any submitter may write anything into — so the published
  *  aggregate is whatever the noisiest respondent decided it should be. */
+/** The status field a collection actually names, or undefined where it names none.
+ *
+ *  Absent and `""` are the SAME answer — an empty field name names nothing, and the rules would
+ *  look a status up under a name no record carries. Every check that asks this question has to
+ *  agree on that, or one of them accepts a declaration another refuses.
+ *
+ *  `AuthoredAppZ` parses `statusField` as `.trim().min(1).optional()`, so `""` cannot survive it.
+ *  It is still handled here rather than assumed away: `AuthoredApp` is the zod TYPE, and a caller
+ *  building one in TypeScript never meets the parser. */
+function statusFieldOf(collection: AuthoredCollectionConfig | undefined): string | undefined {
+  const named = collection?.statusField;
+  return named === undefined || named === "" ? undefined : named;
+}
+
 function checkedFields(collection: AuthoredCollectionConfig | undefined, submit: AuthoredSubmit | undefined): Set<string> {
   const fields = new Set<string>();
   for (const keyField of submit?.validate?.keyFields ?? []) fields.add(keyField.field);
   if (submit?.gateOn) fields.add(submit.gateOn.match);
-  if (collection?.statusField) fields.add(collection.statusField);
+  const status = statusFieldOf(collection);
+  if (status !== undefined) fields.add(status);
   return fields;
 }
 
@@ -232,7 +247,7 @@ function collectionMailProblems(cid: string, collection: AuthoredCollectionConfi
   const { mail } = collection;
   if (!mail) return [];
   const problems: string[] = [];
-  if (!collection.statusField) {
+  if (statusFieldOf(collection) === undefined) {
     problems.push(
       `collections.${cid}.mail needs collections.${cid}.statusField: the rules read the status before and after the write to decide the mail is warranted.`,
     );
@@ -320,15 +335,16 @@ function coherenceProblems(app: AuthoredApp, collections: readonly PublishableCo
  *  with `createFields`; miss either and every submission is refused. */
 function statusCoherenceProblems(cid: string, submit: AuthoredSubmit, collection: AuthoredCollectionConfig | undefined): string[] {
   if (submit.initialStatus === undefined) return [];
-  if (!collection?.statusField) {
+  const status = statusFieldOf(collection);
+  if (collection === undefined || status === undefined) {
     return [
       `public.submit.${cid}.initialStatus needs collections.${cid}.statusField: the rules look the status up by that name, and refuse every submission without it.`,
     ];
   }
   const problems: string[] = [];
-  if (!new Set(submit.createFields).has(collection.statusField)) {
+  if (!new Set(submit.createFields).has(status)) {
     problems.push(
-      `public.submit.${cid}.createFields must include "${collection.statusField}": a submission may carry ONLY the createFields, ` +
+      `public.submit.${cid}.createFields must include "${status}": a submission may carry ONLY the createFields, ` +
         "and the rules also require the status field to be present and equal to initialStatus. As written, every submission is refused.",
     );
   }
@@ -434,7 +450,7 @@ function submitCoherenceProblems(app: AuthoredApp, cid: string, submit: Authored
     );
   }
   problems.push(...fieldIdProblems(cid, submit, collection?.statusField));
-  if ((submit.selfUpdate !== undefined || submit.selfTransitions !== undefined || submit.selfDelete !== undefined) && !collection?.statusField) {
+  if ((submit.selfUpdate !== undefined || submit.selfTransitions !== undefined || submit.selfDelete !== undefined) && statusFieldOf(collection) === undefined) {
     problems.push(
       `public.submit.${cid}.selfUpdate / selfTransitions / selfDelete are declared per CURRENT STATUS, but collections.${cid} declares no statusField: ` +
         "the rules read the current status first and refuse every self-edit without it.",
