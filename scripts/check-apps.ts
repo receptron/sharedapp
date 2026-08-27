@@ -82,13 +82,25 @@ const isCollectionSchema = (schema: unknown): schema is CollectionSchema => sche
  *  the checkout is incomplete, which `readApp` labels differently. */
 class UnusableSchema extends Error {}
 
+const parseJson = (where: string, text: string): unknown => {
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    throw new UnusableSchema(`${where}: not JSON — ${error instanceof Error ? error.message : String(error)}`);
+  }
+};
+
 const collectionsOf = (app: string): { cid: string; schema: CollectionSchema }[] => {
   const dir = resolve(root, app, SKILLS);
   return readdirSync(dir, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => {
       const where = resolve(dir, entry.name, "schema.json");
-      const schema: unknown = JSON.parse(readFileSync(where, "utf8"));
+      // `JSON.parse` throwing here means the file WAS read and its content is not JSON, which is
+      // the same kind of failure as a missing key — not the missing-checkout kind. Left as an
+      // ordinary error it would be labelled "could not be read" and send the operator to look for
+      // a file that is sitting right there.
+      const schema: unknown = parseJson(where, readFileSync(where, "utf8"));
       if (!isCollectionSchema(schema)) throw new UnusableSchema(`${where}: ${schemaProblems(schema).join("; ")}`);
       return { cid: entry.name, schema };
     })
