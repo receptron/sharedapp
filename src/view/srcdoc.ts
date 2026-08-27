@@ -114,11 +114,18 @@ const channelScript = (): string => `
     }
     if (data.type === ${JSON.stringify(VIEW_MESSAGE.openResult)}) {
       const settle = pending.get(data.requestId);
-      // Usually never arrives: a host that navigates replaces this document and
-      // the promise goes with it. What settles here is the case where it did
-      // NOT -- so \`opened\` is the honest word, and the page decides whether
-      // \`reason\` is worth showing anyone.
-      if (settle) { pending.delete(data.requestId); settle({ opened: data.opened === true, reason: data.reason }); }
+      // ALWAYS SENT, success included -- a host may navigate within the page,
+      // and one that BELIEVED it navigated and did not leaves a page on screen
+      // that would otherwise wait for ever. \`reason\` is attached only when
+      // there is one: a success carrying \`reason: undefined\` as an own key is
+      // a different shape from the \`{ opened: true }\` the contract documents,
+      // and a page testing \`"reason" in result\` would read it as a failure.
+      if (settle) {
+        pending.delete(data.requestId);
+        const done = { opened: data.opened === true };
+        if (data.reason) done.reason = data.reason;
+        settle(done);
+      }
     }
   };
   window.addEventListener("message", (event) => {
@@ -392,10 +399,12 @@ ${gestureScript()}
      *  the address, so this cannot send anybody anywhere but into an article of
      *  the app they are reading.
      *
-     *  Answers { opened, reason } -- and usually does not answer at all, because
-     *  a navigation that happened took this document with it. \`opened: false\`
-     *  with \`no-navigation\` is a host that does not navigate, such as the
-     *  author's preview pane; there is nothing for a page to do about it. */
+     *  Answers { opened, reason }, always -- including on success, so a page is
+     *  never left on a promise nothing settles. \`opened: false\` with
+     *  \`no-navigation\` is a host that did not go anywhere: the author's
+     *  preview pane, or a router that refused. Do not \`await\` this and then
+     *  carry on -- on the ordinary success this document is being torn down
+     *  while the answer is in flight. Read it to RECOVER, not to continue. */
     open(cid, id) {
       return request({ type: ${JSON.stringify(VIEW_MESSAGE.open)}, cid, id });
     },

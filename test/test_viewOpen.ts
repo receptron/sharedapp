@@ -74,7 +74,63 @@ test("the host is told which record, and builds the address itself", async () =>
   far.send(ask({}));
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.deepEqual(asked, [{ requestId: "r1", cid: "articles", id: "my-first-post" }]);
-  assert.equal(await settled(far), undefined, "a navigation that happened takes the document with it; there is nobody left to answer");
+  // AND ANSWERED, which is this module's rule for every other ask: nothing is dropped. The reply
+  // was left out at first, on the assumption that a navigation takes the document with it — wrong
+  // twice over. A host may navigate WITHIN the page (mulmoserver pushes a route and the frame is
+  // unmounted a tick later), and a host may believe it navigated when the router refused, which
+  // leaves the page on screen waiting for ever on a headline that did nothing.
+  assert.deepEqual(await settled(far), { type: VIEW_MESSAGE.openResult, requestId: "r1", opened: true });
+});
+
+test("and `opened` is the host's own word, not the fact that it was asked", async () => {
+  // The distinction the answer exists to carry. `articleOpener` in mulmoserver returns whether the
+  // ROUTER accepted the push, so a guard that refused it comes back here as a page that did not
+  // move — and the page is told, rather than being left to conclude it from silence.
+  const { far } = opened({ navigate: () => Promise.resolve(false) });
+  far.send(ask({}));
+  assert.deepEqual(await settled(far), { type: VIEW_MESSAGE.openResult, requestId: "r1", opened: false, reason: "no-navigation" });
+});
+
+test("answers the page that ASKED, not the one the navigation brought", async () => {
+  // The failure this shape exists to prevent, and `open` is the one ask that provokes it: its whole
+  // purpose is to bring a NEW document. If that document handshakes before the navigation settles,
+  // a reply sent to "whatever channel is open now" reaches a page that never asked — and the page
+  // that did asks for ever. `act` captures the channel for the same reason.
+  const asking = fakeChannel();
+  const arriving = fakeChannel();
+  const handed = [asking, arriving];
+  let next = 0;
+  let settleNavigation = (_opened: boolean) => {};
+  const cellPack = cells();
+  const bridge = viewBridge(
+    {
+      channel: () => (handed[next++] ?? arriving).channel,
+      submit: async () => ({ ok: true }),
+      state: () => ({}),
+      navigate: () => new Promise<boolean>((resolve) => (settleNavigation = resolve)),
+    },
+    () => CONFIG,
+    () => NONCE,
+    cellPack,
+  );
+
+  bridge.receive(ready);
+  asking.send({ nonce: NONCE });
+  asking.posted.length = 0;
+  asking.send(ask({}));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  // The navigation happens: this frame is torn down and the next document handshakes.
+  bridge.restart();
+  bridge.receive(ready);
+  arriving.send({ nonce: NONCE });
+  arriving.posted.length = 0;
+
+  settleNavigation(true);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.deepEqual(await settled(asking), { type: VIEW_MESSAGE.openResult, requestId: "r1", opened: true });
+  assert.equal(await settled(arriving), undefined, "the new page never asked, and must not be answered");
 });
 
 test("a host that does not navigate says so, and it is not a refusal", async () => {
