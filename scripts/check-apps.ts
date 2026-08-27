@@ -43,24 +43,36 @@ const root = resolve(process.argv[2] ?? "../apps");
  *  two, and which machine runs this script is not what is under test. */
 const publisherOf = (app: AuthoredApp): string => Object.entries(app.members).find(([, roles]) => roles["*"] === "owner")?.[0] ?? "";
 
-/** The keys `CollectionSchema` requires, and NOTHING MORE — this is deliberately not a full
- *  validation, and the paragraph below is why.
+/** A MINIMAL STRUCTURAL CHECK — the keys the TYPE requires, and nothing else. It is not
+ *  validation, and what it lets through is written down here rather than left to be discovered.
  *
- *  The `.mjs` this replaces tested `primaryKey` and passed whatever else was there into functions
- *  that read the rest. A predicate claiming `CollectionSchema` from that asserts what it has not
- *  proved, so this checks the four keys the type requires. It was still shown wrong twice in one
- *  review — `fields: null` and `fields: []` passed its container test, then `fields: {x: null}`
- *  passed the fixed one — because enumerating bad shapes has no last case.
+ *  The `.mjs` this replaces tested `primaryKey` alone and passed whatever else was there into
+ *  functions that read the rest, so a predicate is needed for the type at all. Two shapes got past
+ *  earlier versions of this one in a single review — `fields: null` / `fields: []`, then
+ *  `fields: {x: null}` — because enumerating bad shapes has no last case.
  *
- *  The host's own `CollectionSchemaZ` IS the last case, and it was tried: it also requires
- *  `dataPath` / `dataSource` / `storage`, which turns "the four keys" into "everything the host
- *  demands". That may well be right, but it cannot be shipped from a machine with no apps
- *  checkout to test it against, and this gate's whole job is to say those apps still publish.
+ *  WHAT IT STILL ACCEPTS AND THE HOST DOES NOT: an empty `title`, `icon` or `primaryKey`; a field
+ *  entry that is not a field spec, where no check happens to dereference it. Such an app can print
+ *  PASS here while `@mulmoclaude/core` would refuse to promote its schema.
+ *
+ *  Say that plainly: THIS GATE IS FAIL-OPEN RELATIVE TO THE HOST. A PASS here is not a promise the
+ *  host will accept the schema; it is a statement that `publishProblems` and `schemaRefProblems`
+ *  found nothing. The host stays the enforcement point. That was equally true of the `.mjs` this
+ *  replaces, so it is a standing limit of this gate rather than something introduced here — but a
+ *  limit nobody wrote down is one somebody discovers at a release.
+ *
+ *  FULL VALIDATION WAS TRIED AND IS NOT SHIPPABLE FROM HERE. `CollectionSchemaZ` (exported from
+ *  `@mulmoclaude/core/collection/server`) additionally demands EXACTLY ONE of `dataPath`,
+ *  `dataSource` or `storage` — measured: none is refused, both together are refused — and rejects
+ *  empty required strings; and it is not even the host's last word, because `acceptParsedSchema`
+ *  applies further checks after it. Adopting it turned every fixture in this repository's
+ *  differential harness into a refusal, which cannot be judged from a machine with no apps
+ *  checkout to test against, on a gate whose whole job is to say those apps still publish.
  *
  *  So the shape check stays minimal and the CRASH is contained instead: `checkedProblems` runs the
  *  gate's own checks inside the per-app boundary, so a schema this predicate wrongly admitted
  *  fails ONE app with a message instead of killing the run. That covers every shape, including the
- *  ones nobody has thought of, which is what the enumeration could not do. */
+ *  ones nobody has thought of, which is what an enumeration cannot do. */
 const schemaProblems = (schema: unknown): string[] => {
   if (typeof schema !== "object" || schema === null) return ["not a JSON object"];
   const has = (key: string, kind: "string" | "record"): boolean => {
