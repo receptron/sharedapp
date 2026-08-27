@@ -1591,7 +1591,10 @@ const noLimitProblem = (view: NormalizedView, cid: string): string =>
 function drawnTextFields(view: NormalizedView): string[] {
   const { article } = view;
   if (article === undefined) return [];
-  return [...new Set([article.title, article.body, article.summary].filter((field): field is string => field !== undefined))];
+  // EVERY drawn field, the byline included. A field the index draws is a field the index PAYS for,
+  // and one left out here is one the cost below silently under-counts — the check would then pass a
+  // declaration whose index is over the budget it exists to hold.
+  return [...new Set([article.title, article.body, article.summary, article.byline].filter((field): field is string => field !== undefined))];
 }
 
 /** One collection's submit declaration, read the way `capIn` reads a cap and for the same reason:
@@ -1943,10 +1946,19 @@ function articleRefProblems(schemaOf: ReadonlyMap<string, CollectionSchema>, vie
   if (view.type !== "article" || article === undefined || schema === undefined) return [];
   const fields = schema.fields ?? {};
   const known = Object.keys(fields).sort(byText).join(", ") || "(none)";
-  const drawn: { key: "title" | "body" | "summary"; field: string | undefined; missing: string }[] = [
+  const drawn: { key: "title" | "body" | "summary" | "byline"; field: string | undefined; missing: string }[] = [
     { key: "title", field: article.title, missing: "the page falls back to the document id, so the index reads as a list of URL names" },
     { key: "body", field: article.body, missing: "every article renders EMPTY, which looks exactly like one nobody has written yet" },
     { key: "summary", field: article.summary, missing: "the index quietly shows the article's opening instead, and this declaration does nothing" },
+    {
+      key: "byline",
+      field: article.byline,
+      // The quietest of the four, and the reason it belongs in this list rather than only in the
+      // cost one: a byline the schema does not declare draws NOTHING, and nothing is exactly what
+      // an app with no byline draws. So the author sees the page they would have seen if they had
+      // never written the key, and there is nothing anywhere to tell them the name was wrong.
+      missing: "every article is drawn unsigned, which is indistinguishable from an app that declared no byline at all",
+    },
   ];
   return drawn.flatMap(({ key, field, missing }) => {
     if (field === undefined) return [];
