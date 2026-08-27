@@ -123,7 +123,6 @@ The two release gates are `yarn` scripts too, so there is one way to run them an
 way CI runs them — `yarn check:pack <tarball>` (in CI) and `yarn check:apps [path]` (by hand,
 before a release: it needs the private apps checkout CI cannot have).
 
-
 Design notes live in MulmoTerminal: `plans/refactor-shared-app-module.md`, and the
 decisions behind the shared-app design are `plans/feat-shareable-collections.md` (D1–D10)
 and `docs/shared-app-principles.md`.

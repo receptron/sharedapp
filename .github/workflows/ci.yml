@@ -27,11 +27,15 @@ jobs:
       - run: yarn typecheck
       - run: yarn test
 
-      # A report, not a gate: `yarn typecheck` above decides whether the types are RIGHT, and this
-      # says which files that check even looked at — a file in no `tsconfig` is checked by nobody,
-      # and a green typecheck says nothing about it because it never opened it — plus how much of
-      # what it did see has a real type. Either number alone flatters: an unchecked file cannot
-      # lower a type-coverage percentage, and a file full of `any` counts as checked.
+      # A report AND a gate. `yarn typecheck` above decides whether the types are RIGHT; this says
+      # which files that check even looked at — a file in no `tsconfig` is checked by nobody, and a
+      # green typecheck says nothing about it because it never opened it — plus how much of what it
+      # did see has a real type. Either number alone flatters: an unchecked file cannot lower a
+      # type-coverage percentage, and a file full of `any` counts as checked.
+      #
+      # The gate half is the per-project floor: below one, the step exits non-zero and this job
+      # fails. It has caught a real regression (a helper whose `Array.isArray` narrowed `unknown`
+      # to `any[]`, four `any`s into a project whose floor is 100).
       #
       # `always()`, because a failed typecheck is exactly when the question is worth asking, and
       # the file list survives a type error. One matrix entry, because the job summary is per RUN:

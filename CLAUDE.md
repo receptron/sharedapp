@@ -15,8 +15,9 @@ yarn lint           # src test scripts
 yarn format         # prettier, printWidth 160
 yarn format:check   # what CI runs
 yarn check:pack <tarball>   # every entry point the package DECLARES is in the tarball
-yarn typecheck:summary      # a REPORT, not a gate — which files each tsconfig sees, and
-                            #   how much of what it sees has a real type
+yarn typecheck:summary      # which files each tsconfig sees and how much of what it sees
+                            #   has a real type. It PRINTS a report and it also ENFORCES a
+                            #   per-project type-coverage floor, exiting non-zero below one
 ```
 
 Before a release, against a real apps checkout (NOT in CI — `../apps` is a private working
