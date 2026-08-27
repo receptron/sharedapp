@@ -2,11 +2,11 @@
 // asserting is that it does not change it. The rule cannot tell a string array from a number
 // one; these sorts are all string arrays, where the default is already right.
 //
-// This matters beyond tidiness: the sorts it replaced feed the refusal lines `publishChecks`
-// returns and the `memberEmails` / writer lists `publishProject` and `appViews` publish. A
-// comparator that ordered differently — `localeCompare`, say, which is locale-dependent and
-// puts "a" before "B" — would silently reorder every one of those, and a second publish of an
-// unchanged declaration would produce a changed document.
+// This matters beyond tidiness: EVERY caller's order is observable — `src/byText.ts` has the
+// list, and it is the only place that does, because an enumeration kept in three files is one
+// that goes stale in two of them. A comparator that ordered differently — `localeCompare`, say,
+// which is locale-dependent and puts "a" before "B" — would silently reorder all of them, and a
+// second publish of an unchanged declaration would produce a changed document.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
