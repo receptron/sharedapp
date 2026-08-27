@@ -530,6 +530,17 @@ test("an article view normalizes with its field mapping", () => {
   assert.deepEqual(result.views[0].article, { title: "title", body: "body", summary: "summary" });
 });
 
+test("an article may name the field its byline is in, and most do not", () => {
+  // Optional, and absent rather than empty when it is not declared: a page draws no byline at all
+  // for the app written under one masthead, which is most of them.
+  const withByline = normalizeViews(app({ views: [{ ...ARTICLE, article: { title: "title", body: "body", byline: "writtenBy" } }] }));
+  assert.equal(withByline.ok, true);
+  assert.deepEqual(withByline.views[0]?.article, { title: "title", body: "body", byline: "writtenBy" });
+  const plain = normalizeViews(app({ views: [ARTICLE] }));
+  assert.equal(plain.ok, true);
+  assert.equal("byline" in (plain.views[0]?.article ?? {}), false);
+});
+
 test("refuses a view that declares both a path and a type", () => {
   refuses(problemsOf({ views: [{ ...ARTICLE, path: "views/public.html" }] }), "both `path` and `type`");
 });

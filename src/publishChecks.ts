@@ -1588,7 +1588,10 @@ const noLimitProblem = (view: NormalizedView, cid: string): string =>
 function drawnTextFields(view: NormalizedView): string[] {
   const { article } = view;
   if (article === undefined) return [];
-  return [...new Set([article.title, article.body, article.summary].filter((field): field is string => field !== undefined))];
+  // EVERY drawn field, the byline included. A field the index draws is a field the index PAYS for,
+  // and one left out here is one the cost below silently under-counts — the check would then pass a
+  // declaration whose index is over the budget it exists to hold.
+  return [...new Set([article.title, article.body, article.summary, article.byline].filter((field): field is string => field !== undefined))];
 }
 
 /** One collection's submit declaration, read the way `capIn` reads a cap and for the same reason:

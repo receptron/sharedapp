@@ -1847,6 +1847,37 @@ test("refuses a drawn SUMMARY with no cap, which is the same hole one field over
   );
 });
 
+test("refuses a drawn BYLINE with no cap, and counts it against the index once it has one", () => {
+  // A field the index DRAWS is a field the index PAYS for. Left out of `drawnTextFields`, a byline
+  // would be uncapped where every other drawn field is refused for it, and then uncounted in the
+  // arithmetic below — the check would pass a declaration whose index is over the budget it exists
+  // to hold.
+  refuses(
+    magazinePage(({ view }) => {
+      view.article = { title: "title", body: "prose", byline: "writtenBy" };
+    }),
+    "draws 'writtenBy'",
+  );
+  // Capped, and the sum moves: 15 x (60,000 + 200 + 200) = 906,000, still inside.
+  assert.deepEqual(
+    magazinePage(({ submit, view }) => {
+      submit.maxBytes = { prose: 60_000, title: 200, writtenBy: 200 };
+      submit.createFields = ["slug", "title", "prose", "writtenBy", "status", "publishedAt"];
+      view.article = { title: "title", body: "prose", byline: "writtenBy" };
+    }),
+    [],
+  );
+  // And it is REALLY in the sum: a byline capped at 7,000 pushes the same index over the ceiling.
+  refuses(
+    magazinePage(({ submit, view }) => {
+      submit.maxBytes = { prose: 60_000, title: 200, writtenBy: 7_000 };
+      submit.createFields = ["slug", "title", "prose", "writtenBy", "status", "publishedAt"];
+      view.article = { title: "title", body: "prose", byline: "writtenBy" };
+    }),
+    "costs a reader at least",
+  );
+});
+
 test("names the COLLECTION when it is called after an Object prototype key and has no submit block", () => {
   // Grok on #53, second pass. `app.public?.submit?.["constructor"]` hands back Object's own
   // constructor, which is not undefined — so the "no submit block" refusal was skipped and the
