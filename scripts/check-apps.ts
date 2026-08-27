@@ -43,36 +43,23 @@ const root = resolve(process.argv[2] ?? "../apps");
  *  two, and which machine runs this script is not what is under test. */
 const publisherOf = (app: AuthoredApp): string => Object.entries(app.members).find(([, roles]) => roles["*"] === "owner")?.[0] ?? "";
 
-/** A MINIMAL STRUCTURAL CHECK — the keys the TYPE requires, and nothing else. It is not
- *  validation, and what it lets through is written down here rather than left to be discovered.
+/** A MINIMAL STRUCTURAL CHECK — the keys the TYPE requires, and nothing else.
  *
- *  The `.mjs` this replaces tested `primaryKey` alone and passed whatever else was there into
- *  functions that read the rest, so a predicate is needed for the type at all. Two shapes got past
- *  earlier versions of this one in a single review — `fields: null` / `fields: []`, then
- *  `fields: {x: null}` — because enumerating bad shapes has no last case.
+ *  It is NOT validation. It accepts an empty `title`, `icon` or `primaryKey`, and a field entry
+ *  that is not a field spec where no check dereferences it. So: THIS GATE IS FAIL-OPEN RELATIVE TO
+ *  THE HOST. A PASS here is not a promise the host will accept the schema; it is a report that
+ *  `publishProblems` and `schemaRefProblems` found nothing. The host stays the enforcement point.
+ *  The `.mjs` this replaces accepted the same shapes, so this is a standing limit rather than one
+ *  introduced here — but a limit nobody writes down is one somebody discovers at a release.
  *
- *  WHAT IT STILL ACCEPTS AND THE HOST DOES NOT: an empty `title`, `icon` or `primaryKey`; a field
- *  entry that is not a field spec, where no check happens to dereference it. Such an app can print
- *  PASS here while `@mulmoclaude/core` would refuse to promote its schema.
+ *  Full validation with the host's own `CollectionSchemaZ` was tried and measured unshippable from
+ *  a machine with no apps checkout: it demands exactly one of `dataPath` / `dataSource` /
+ *  `storage`, rejects empty required strings, is not even the host's last word (`acceptParsedSchema`
+ *  follows it), and refused every fixture in this repository's differential harness. The PR
+ *  description carries those measurements.
  *
- *  Say that plainly: THIS GATE IS FAIL-OPEN RELATIVE TO THE HOST. A PASS here is not a promise the
- *  host will accept the schema; it is a statement that `publishProblems` and `schemaRefProblems`
- *  found nothing. The host stays the enforcement point. That was equally true of the `.mjs` this
- *  replaces, so it is a standing limit of this gate rather than something introduced here — but a
- *  limit nobody wrote down is one somebody discovers at a release.
- *
- *  FULL VALIDATION WAS TRIED AND IS NOT SHIPPABLE FROM HERE. `CollectionSchemaZ` (exported from
- *  `@mulmoclaude/core/collection/server`) additionally demands EXACTLY ONE of `dataPath`,
- *  `dataSource` or `storage` — measured: none is refused, both together are refused — and rejects
- *  empty required strings; and it is not even the host's last word, because `acceptParsedSchema`
- *  applies further checks after it. Adopting it turned every fixture in this repository's
- *  differential harness into a refusal, which cannot be judged from a machine with no apps
- *  checkout to test against, on a gate whose whole job is to say those apps still publish.
- *
- *  So the shape check stays minimal and the CRASH is contained instead: `checkedProblems` runs the
- *  gate's own checks inside the per-app boundary, so a schema this predicate wrongly admitted
- *  fails ONE app with a message instead of killing the run. That covers every shape, including the
- *  ones nobody has thought of, which is what an enumeration cannot do. */
+ *  So the check stays minimal and the CRASH is contained instead — see `checkedProblems`. That
+ *  covers every shape, including ones nobody has listed, which an enumeration cannot. */
 const schemaProblems = (schema: unknown): string[] => {
   if (typeof schema !== "object" || schema === null) return ["not a JSON object"];
   const has = (key: string, kind: "string" | "record"): boolean => {
