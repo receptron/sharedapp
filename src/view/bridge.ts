@@ -1,4 +1,4 @@
-import type { LookupAsk, PendingSubmit, ViewDataset, ViewNotice, ViewSubmitConfig } from "./message.js";
+import type { LookupAsk, OpenAsk, PendingSubmit, ViewDataset, ViewNotice, ViewSubmitConfig } from "./message.js";
 import { viewParent } from "./parent.js";
 
 // The parent's side of the conversation with a sandboxed view.
@@ -126,6 +126,12 @@ export interface BridgePorts {
    *  OPTIONAL, and a host without it answers `known: false`. Absence is
    *  "nobody looked", never "you have not answered". */
   lookup?: ((ask: LookupAsk) => Promise<{ found: boolean; record?: Record<string, unknown> }>) | undefined;
+  /** Take the reader to one ARTICLE, which a sandboxed page cannot do for itself — see
+   *  `ViewParentPorts.navigate`. Returns whether it navigated.
+   *
+   *  OPTIONAL, and a host without it answers `no-navigation`: nothing about the ask was wrong, this
+   *  host simply does not go anywhere. */
+  navigate?: ((ask: OpenAsk) => boolean | Promise<boolean>) | undefined;
   /** Somewhere to put what the frame says about itself — an uncaught error, a
    *  rejected promise, a modal the sandbox ignored.
    *
@@ -169,6 +175,7 @@ export const viewBridge = (ports: BridgePorts, config: () => ViewSubmitConfig | 
       // that was never there, and `ViewParentPorts` distinguishes them.
       ...(ports.mine === undefined ? {} : { mine: ports.mine }),
       ...(ports.lookup === undefined ? {} : { lookup: ports.lookup }),
+      ...(ports.navigate === undefined ? {} : { navigate: ports.navigate }),
       ...(ports.notice === undefined ? {} : { notice: ports.notice }),
       submit: ports.submit,
       // The old shape had nowhere to put a defect of the host's own, which is exactly what

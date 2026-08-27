@@ -43,6 +43,7 @@ import {
   normalizeViews,
   participantScope,
   type ArticleFields,
+  articleCid,
   VIEW_CONFIG_ID,
   VIEW_TIER,
   viewDocId,
@@ -150,13 +151,15 @@ export interface PublishedConfigDoc extends Record<string, unknown> {
     collections: string[];
     live?: string[];
     limit?: Record<string, { rows: number; field: string }>;
-    /** A page the RUNTIME draws from the declaration, instead of the HTML this document is paired
-     *  with — `views[].type`. Declared here as well as emitted, because a consumer that has to cast
-     *  to reach a key is a consumer that will read it wrong: this is the type the published
-     *  document actually has. */
-    type?: "article" | undefined;
-    /** Which field of an article is which, for `type: "article"`. */
-    article?: ArticleFields | undefined;
+    /** THE ARTICLE PAGE the runtime draws at `/a/{slug}/{id}` — beside the HTML this document is
+     *  paired with, never instead of it. Declared here as well as emitted, because a consumer that
+     *  has to cast to reach a key is a consumer that will read it wrong: this is the type the
+     *  published document actually has.
+     *
+     *  `collection` is always present here and optional in the manifest: the compiler resolves the
+     *  single-collection case rather than leaving every reader to re-derive it, which is the sort
+     *  of inference two readers eventually disagree about. */
+    article?: (ArticleFields & { collection: string }) | undefined;
     /** The app's own hue, 0-359, for the page the runtime draws — `theme.hue`.
      *
      *  ABSENT IS A REAL STATE and not a missing value: an app that declares no colour is drawn in
@@ -380,20 +383,20 @@ function publicViewProjection(
   collections: string[];
   live?: string[];
   limit?: Record<string, { rows: number; field: string }>;
-  type?: "article" | undefined;
-  article?: ArticleFields | undefined;
+  article?: (ArticleFields & { collection: string }) | undefined;
   hue?: number | undefined;
 } {
   const capped = view.collections.map((cid) => ({ cid, limit: limitFor(app, view, { cid, scope: "all" }).limit }));
   const limit = Object.fromEntries(capped.flatMap((entry) => (entry.limit === undefined ? [] : [[entry.cid, entry.limit]])));
+  const cid = articleCid(view);
   return {
     collections: view.collections,
-    // WHAT DRAWS THE PAGE, when it is not the HTML at `config/view`. A reader
-    // older than this contract does not know these two keys — which is why an
-    // app carrying them is stamped a higher major and refused whole, rather
-    // than drawn as the generated form (`protocolFor`).
-    ...(view.type === undefined ? {} : { type: view.type }),
-    ...(view.article === undefined ? {} : { article: view.article }),
+    // THE SECOND ADDRESS: one article at `/a/{slug}/{id}`, drawn from the declaration rather than
+    // from the HTML at `config/view` — which goes on drawing `/a/{slug}` whatever this says. A
+    // reader older than this contract does not know the key, which is why an app carrying it is
+    // stamped a higher major and refused whole rather than sending every shared link to the index
+    // (`protocolFor`).
+    ...(view.article === undefined || cid === undefined ? {} : { article: { ...view.article, collection: cid } }),
     // The app's hue, projected ONTO THE VIEW rather than beside it. What reads it is the runtime
     // drawing this page, and that runtime is handed the view — a colour parked at the top of the
     // document would be one more thing every reader has to know to look for, for a value that

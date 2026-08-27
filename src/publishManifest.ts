@@ -476,31 +476,47 @@ const ViewZ = z
     audience: z.enum(VIEW_AUDIENCES),
     /** The HTML file this page is drawn from, relative to the repository root.
      *
-     *  Optional since `type` exists, and EXACTLY ONE of the two is required —
-     *  a view is either a page the author wrote or a page the platform draws.
-     *  The pair is refused by `normalizeViews` rather than by zod, so the
-     *  refusal can say which key to delete in the author's own words. */
+     *  REQUIRED — optional here and demanded by `normalizeViews`, so the
+     *  refusal can say what the page is for in the author's own words rather
+     *  than as a missing key. Every view is HTML the author wrote: the platform
+     *  draws ONE page, and it is not a view (see `article` below). */
     path: z.string().trim().min(1).optional(),
-    /** A page the PLATFORM draws from the declaration, instead of HTML.
+    /** REFUSED, and parsed only so that the refusal can be about it.
      *
-     *  `article` is the first and, today, the only one: the collection named in
-     *  `collections` holds articles, `article` below says which field is the
-     *  title and which is the markdown body, and the runtime renders them —
-     *  index at `/a/{slug}`, one article at `/a/{slug}/{id}`.
+     *  `"type": "article"` used to mean "the platform draws this page instead of
+     *  your HTML", and it took TWO addresses with it: the index at `/a/{slug}`
+     *  and one article at `/a/{slug}/{id}`. The first of those was never the
+     *  platform's to take — an index is a list of records, and every hand-written
+     *  public page is handed the same datasets — so an app that published articles
+     *  surrendered its whole public face to get them. See mulmoterminal's
+     *  `plans/feat-shared-app-app-owned-index.md`.
      *
-     *  IT IS NOT A SECOND DRAWING PATH. The prohibition in
-     *  mulmoterminal's `plans/feat-shared-app-platform.md` is against a naive
-     *  rendering of `public.read` living beside declared views; this is a
-     *  DECLARED view, judged by the same gate, published to the same document,
-     *  and an app that wants a bespoke index still writes `path` and gets the
-     *  sandbox. What separates them is which side authored the page, which is
-     *  the distinction that has always decided this.
-     *
-     *  A reader that does not know this key would find no HTML and draw the
-     *  GENERATED FORM in a magazine's place, so it moves the app's protocol
-     *  major — see `protocolFor`. */
+     *  Now `path` draws `/a/{slug}` always, and the `article` block below draws
+     *  `/a/{slug}/{id}`. Nothing is left for this key to say, and it is deleted
+     *  rather than ignored: silently dropped, an author who wrote it would get a
+     *  page they did not ask for and nothing anywhere would mention the key. */
     type: z.literal("article").optional(),
-    /** Which field of an article is which, for `type: "article"`.
+    /** THE ARTICLE PAGE: this collection's records are markdown, drawn by the
+     *  platform at `/a/{slug}/{id}`, and these are the fields it reads.
+     *
+     *  The presence of this block is the whole declaration — there is no
+     *  accompanying switch. What it turns on is a SECOND address under the app's
+     *  public entrance, not a different drawing of `path`'s: an app declaring it
+     *  still writes its own index, and links to an article with `view.open`.
+     *
+     *  Why the platform draws that one page and not the rest: markdown is
+     *  rendered on the host's own origin without a sandbox, so the render is a
+     *  security boundary (mulmoserver's `articleMarkdown.ts`) and cannot be
+     *  handed to a page. It is also the URL that gets shared, which has to draw
+     *  signed out.
+     *
+     *  It carries the app's protocol major, as `type` did before it and for a
+     *  weaker reason: a reader that does not know it draws `path` — the app's own
+     *  page, understood since 1.0.0 — so what it gets wrong is `/a/{slug}/{id}`,
+     *  where it draws the index instead of the article somebody was linked to.
+     *  Every shared link lands on the wrong page. That is a degradation rather
+     *  than a different app, and the major is kept anyway because it costs these
+     *  apps nothing: `idFrom: "slug"` already stamps them 2.0.0. See `protocolFor`.
      *
      *  The DATE is deliberately absent: an article is ordered and dated by
      *  `public.submit[cid].stampField`, the one field the rules pin to the
@@ -517,6 +533,12 @@ const ViewZ = z
         // all legal fields that an author may reasonably want to draw an article from. Narrowing
         // them here would refuse declarations the rules and the runtime both handle, and the
         // refusal would be about a grammar that governs something else entirely.
+        /** WHICH collection holds them — a collection id, and so `NameZ` rather than the
+         *  field-name shape its neighbours have.
+         *
+         *  Optional, and required by `articleCollectionProblems` exactly when `collections` names
+         *  more than one: with a single dataset the count already answers it. */
+        collection: NameZ.optional(),
         title: z.string().trim().min(1),
         body: z.string().trim().min(1),
         summary: z.string().trim().min(1).optional(),

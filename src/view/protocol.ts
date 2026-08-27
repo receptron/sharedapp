@@ -35,6 +35,18 @@ export const VIEW_MESSAGE = {
    *  their uid by the parent, so a page passing somebody else's key learns
    *  nothing about anybody else. */
   lookup: "mc-public-view:lookup",
+  /** A view asking the host to OPEN one article — `/a/{slug}/{id}`.
+   *
+   *  The one thing a sandboxed page cannot do for itself. The frame is
+   *  `sandbox="allow-scripts"` with no `allow-top-navigation` and no
+   *  `allow-popups`, so an `<a href>` out of it is inert; and since the app owns
+   *  its index again, a magazine's front page is nothing but links to articles.
+   *
+   *  IT CARRIES NO URL. The page names a collection and a record; the host holds
+   *  the slug and builds the address. So a page cannot send a visitor anywhere
+   *  except into an article of the app they are already reading — a property of
+   *  the shape rather than of a check. */
+  open: "mc-public-view:open",
   /** The answer to a `submit` OR an `intent` — one name, because the view
    *  settles both from the same map keyed by `requestId`. */
   result: "mc-public-view:submitResult",
@@ -43,6 +55,10 @@ export const VIEW_MESSAGE = {
    *  page that got one where it expected the other would read "not found" as
    *  "refused". */
   lookupResult: "mc-public-view:lookupResult",
+  /** The answer to an `open`. Its own name for `lookupResult`'s reason: it says
+   *  `{ opened }`, and a page told `{ ok: false }` instead would report a refusal
+   *  where the honest answer is "this host does not navigate". */
+  openResult: "mc-public-view:openResult",
   /** The frame reporting something about ITSELF that the browser would
    *  otherwise swallow: an uncaught error, a rejected promise nobody handled,
    *  a modal the sandbox ignores.

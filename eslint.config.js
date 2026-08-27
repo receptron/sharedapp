@@ -182,9 +182,9 @@ export default tseslint.config(
     rules: { "sonarjs/no-try-promise": "off" },
   },
   {
-    // These three run the srcdoc bootstrap under `node:vm` — evaluating the injected script IS the
+    // These four run the srcdoc bootstrap under `node:vm` — evaluating the injected script IS the
     // test, and it is the only way to prove what the frame's own code does with a message.
-    files: ["test/test_viewGesture.ts", "test/test_viewLookup.ts", "test/test_viewNotice.ts"],
+    files: ["test/test_viewGesture.ts", "test/test_viewLookup.ts", "test/test_viewNotice.ts", "test/test_viewOpen.ts"],
     rules: { "sonarjs/code-eval": "off" },
   },
   {
@@ -269,14 +269,18 @@ export default tseslint.config(
   },
   {
     files: ["test/test_publishChecks.ts"],
-    rules: { "max-lines": ["error", { max: 1533, skipBlankLines: true, skipComments: true }] },
+    rules: { "max-lines": ["error", { max: 1535, skipBlankLines: true, skipComments: true }] },
   },
   {
     files: ["src/view/parent.ts"],
-    rules: { "max-lines-per-function": ["error", { max: 181, skipBlankLines: true, skipComments: true, IIFEs: true }] },
+    rules: { "max-lines-per-function": ["error", { max: 208, skipBlankLines: true, skipComments: true, IIFEs: true }] },
   },
   {
+    // The bootstrap is ONE template literal, so `skipComments` does not apply to it: what a page
+    // author reads about `view.open` is string content, and counts. Raising this is what documenting
+    // a verb costs, and it is cheaper than the alternative — a page that cannot get out of the
+    // frame because nobody could see how.
     files: ["src/view/srcdoc.ts"],
-    rules: { "max-lines-per-function": ["error", { max: 96, skipBlankLines: true, skipComments: true, IIFEs: true }] },
+    rules: { "max-lines-per-function": ["error", { max: 115, skipBlankLines: true, skipComments: true, IIFEs: true }] },
   },
 );
