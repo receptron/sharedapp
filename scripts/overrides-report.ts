@@ -85,7 +85,8 @@ const asRecord = (value: unknown): Record<string, unknown> | null => (typeof val
  *  a DEAD row telling a maintainer to delete something they do not own.
  *
  *  The set of them is PINNED, not merely reported: {@link EXPECTED_PRESETS} lists the names this
- *  repository expects, and {@link unexpectedPresets} fails the run on anything else. A list in a
+ *  repository expects, and {@link presetDrift} fails the run on any difference — an unexpected
+ *  name, an expected one gone, or an expected one appearing twice. A list in a
  *  passing log is not a gate — most green logs are never read — so a dependency shipping a new
  *  named config, or a hand-written block acquiring a `name` and dropping out of the measurement,
  *  turns the job red once and someone looks. */
