@@ -29,6 +29,7 @@
 //   participant's page builds a query the rules refuse — it does not render
 //   less, it fails.
 import type { AuthoredApp, AuthoredMail, AuthoredSubmit } from "./publishManifest.js";
+import { statusFieldOf } from "./statusField.js";
 import type { ProjectedAgent } from "./appAgents.js";
 import { byText } from "./byText.js";
 
@@ -640,8 +641,9 @@ export function writersOf(app: AuthoredApp, cid: string): string[] {
 function transitionPart(app: AuthoredApp, audience: ViewAudience, cid: string): Partial<ProjectedViewWrite> {
   const config = app.collections?.[cid];
   const transitions = audience === "member" ? config?.transitions : app.public?.submit?.[cid]?.selfTransitions;
-  if (config?.statusField === undefined || transitions === undefined) return {};
-  const part: Partial<ProjectedViewWrite> = { statusField: config.statusField, transitions };
+  const statusField = statusFieldOf(config);
+  if (config === undefined || statusField === undefined || transitions === undefined) return {};
+  const part: Partial<ProjectedViewWrite> = { statusField, transitions };
   // The rules let only a writer (or the row's own assignee) queue mail, so a
   // participant handed this could only ever be refused.
   if (audience === "member" && config.mail !== undefined) part.mail = config.mail;
@@ -716,13 +718,14 @@ function withdrawPart(app: AuthoredApp, audience: ViewAudience, cid: string): Pa
   const config = app.collections?.[cid];
   const byRole = audience === "member" && config?.writerDelete === true ? { writerDelete: true } : {};
   const selfDelete = app.public?.submit?.[cid]?.selfDelete;
-  const own = selfDelete !== undefined && config?.statusField !== undefined ? { selfDelete, statusField: config.statusField } : {};
+  const statusField = statusFieldOf(config);
+  const own = selfDelete !== undefined && statusField !== undefined ? { selfDelete, statusField } : {};
   if (Object.keys(byRole).length === 0 && Object.keys(own).length === 0) return {};
   // The seal is not one of the two halves — it overrides both — so it is added
   // after the "is there anything to project?" test rather than counting
   // towards it. A collection that seals every status and grants no delete
   // still projects nothing, which is correct: there is no control to draw.
-  const sealed = config?.sealed !== undefined && config.statusField !== undefined ? { sealed: config.sealed, statusField: config.statusField } : {};
+  const sealed = config?.sealed !== undefined && statusField !== undefined ? { sealed: config.sealed, statusField } : {};
   return { ...byRole, ...own, ...sealed, ...withdrawMirrorPart(app, cid) };
 }
 
@@ -746,7 +749,7 @@ function withdrawPart(app: AuthoredApp, audience: ViewAudience, cid: string): Pa
  *  (`selfWriteOk`); this only says what it is. */
 function correctPart(app: AuthoredApp, cid: string): Partial<ProjectedViewWrite> {
   const selfUpdate = app.public?.submit?.[cid]?.selfUpdate;
-  const statusField = app.collections?.[cid]?.statusField;
+  const statusField = statusFieldOf(app.collections?.[cid]);
   if (selfUpdate === undefined || statusField === undefined) return {};
   return { selfUpdate, statusField };
 }

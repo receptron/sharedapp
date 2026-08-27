@@ -33,6 +33,7 @@ import { agentCids, AGENT_ID_PATTERN, AGENT_INSTRUCTION_MAX, RESERVED_AGENT_IDS 
 import { APP_PROTOCOL, protocolOf, protocolWithin } from "./appProtocol.js";
 import { writersOf } from "./appViews.js";
 import type { AuthoredAgent, AuthoredApp, AuthoredCollectionConfig, AuthoredSubmit, AuthoredView } from "./publishManifest.js";
+import { statusFieldOf } from "./statusField.js";
 import { byText } from "./byText.js";
 
 /** What publish knows about a shared collection in this repository, as far as
@@ -79,20 +80,6 @@ export function bindsSubmitterIdentity(submit: AuthoredSubmit): boolean {
  *  the transition machine. An aggregation grouped by anything else is grouped
  *  by a field any submitter may write anything into — so the published
  *  aggregate is whatever the noisiest respondent decided it should be. */
-/** The status field a collection actually names, or undefined where it names none.
- *
- *  Absent and `""` are the SAME answer — an empty field name names nothing, and the rules would
- *  look a status up under a name no record carries. Every check that asks this question has to
- *  agree on that, or one of them accepts a declaration another refuses.
- *
- *  `AuthoredAppZ` parses `statusField` as `.trim().min(1).optional()`, so `""` cannot survive it.
- *  It is still handled here rather than assumed away: `AuthoredApp` is the zod TYPE, and a caller
- *  building one in TypeScript never meets the parser. */
-function statusFieldOf(collection: AuthoredCollectionConfig | undefined): string | undefined {
-  const named = collection?.statusField;
-  return named === undefined || named === "" ? undefined : named;
-}
-
 function checkedFields(collection: AuthoredCollectionConfig | undefined, submit: AuthoredSubmit | undefined): Set<string> {
   const fields = new Set<string>();
   for (const keyField of submit?.validate?.keyFields ?? []) fields.add(keyField.field);
@@ -734,7 +721,7 @@ function sealedProblems(app: AuthoredApp): string[] {
     if (states.length === 0) {
       return [`collections.${cid}.sealed is an empty list, which seals nothing. Name the statuses a record may not be deleted from, or remove the key.`];
     }
-    if (collection.statusField === undefined) {
+    if (statusFieldOf(collection) === undefined) {
       return [
         `collections.${cid}.sealed names statuses but collections.${cid} declares no statusField: the rules read a record's status through it, so nothing ` +
           "is ever sealed and every row stays deletable. Declare the statusField, or remove the key.",
