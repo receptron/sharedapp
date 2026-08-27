@@ -70,11 +70,12 @@ the `scripts/` exemption carries the node globals in the same block.
 **Nothing is dropped without failing the job.** A block whose shape it cannot read is REPORTED;
 the presets it deliberately does not measure — blocks carrying `name`, which ship rules nobody
 here maintains — are PINNED to an expected set, because a list in a passing log is not a gate.
-Each exemption is measured per FILE, not per block, since a block naming two files can be half
-dead and a summed answer lets the living half hide the stale one. Nine separate findings landed
-on this module before it took that shape, every one of them a real exemption that stopped being
-measured without anyone noticing: the failure this check exists to catch, wearing the check's own
-uniform.
+Each `files` ENTRY is measured on its own — the unit of measurement is the unit of deletion —
+since a block naming two files can be half dead and a summed answer lets the living half hide the
+stale one. A glob stays one entry: it comes out of the config whole, so it is dead only when
+nothing it matches needs it. Ten separate findings landed on this module before it took that
+shape, every one of them a real exemption that stopped being measured without anyone noticing:
+the failure this check exists to catch, wearing the check's own uniform.
 
 Commit messages in this repository are Conventional Commits with a Japanese subject.
 

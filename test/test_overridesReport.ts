@@ -30,7 +30,7 @@ const DEBT = { files: ["src/publishChecks.ts"], rules: { "max-lines": "warn" } }
 const rulesOf = (config: readonly unknown[]): string[] => select(config).overrides.map((override) => override.rule);
 
 test("a hand-written silencing block is an override, in both the warn and off forms", () => {
-  assert.deepEqual(select([DEBT]).overrides, [{ index: 0, file: "src/publishChecks.ts", rule: "max-lines" }]);
+  assert.deepEqual(select([DEBT]).overrides, [{ index: 0, pattern: "src/publishChecks.ts", rule: "max-lines" }]);
   assert.deepEqual(rulesOf([{ files: ["test/a.ts"], rules: { "sonarjs/code-eval": "off" } }]), ["sonarjs/code-eval"]);
 });
 
@@ -127,7 +127,7 @@ test("withoutRule drops the one rule from the one block, and leaves every other 
     { files: ["a.ts"], rules: { x: "off" } },
     { files: ["b.ts"], rules: { x: "off" } },
   ];
-  const override: Override = { index: 1, file: "a.ts", rule: "x" };
+  const override: Override = { index: 1, pattern: "a.ts", rule: "x" };
   assert.deepEqual(withoutRule(config, override), [
     { files: ["a.ts"], rules: { x: "off", y: "warn" } },
     { files: ["a.ts"], rules: {} },
@@ -137,19 +137,19 @@ test("withoutRule drops the one rule from the one block, and leaves every other 
 
 test("withoutRule keeps everything else in the block — the scripts exemption carries its globals there", () => {
   const scripts = { files: ["scripts/**/*.ts"], languageOptions: { globals: { console: "readonly" } }, rules: { "no-console": "off", "no-eval": "off" } };
-  assert.deepEqual(withoutRule([scripts], { index: 0, file: "scripts/**/*.ts", rule: "no-console" }), [
+  assert.deepEqual(withoutRule([scripts], { index: 0, pattern: "scripts/**/*.ts", rule: "no-console" }), [
     { files: ["scripts/**/*.ts"], languageOptions: { globals: { console: "readonly" } }, rules: { "no-eval": "off" } },
   ]);
 });
 
 test("withoutRule is a no-op where there is nothing to remove", () => {
   const config = [{ files: ["a.ts"], rules: { y: "off" } }];
-  assert.deepEqual(withoutRule(config, { index: 0, file: "a.ts", rule: "x" }), config);
-  assert.deepEqual(withoutRule(config, { index: 9, file: "a.ts", rule: "y" }), config);
-  assert.deepEqual(withoutRule([{ files: ["a.ts"] }], { index: 0, file: "a.ts", rule: "y" }), [{ files: ["a.ts"] }]);
+  assert.deepEqual(withoutRule(config, { index: 0, pattern: "a.ts", rule: "x" }), config);
+  assert.deepEqual(withoutRule(config, { index: 9, pattern: "a.ts", rule: "y" }), config);
+  assert.deepEqual(withoutRule([{ files: ["a.ts"] }], { index: 0, pattern: "a.ts", rule: "y" }), [{ files: ["a.ts"] }]);
 });
 
-const probe = (rule: string, reports: number, file = "a.ts"): Probe => ({ index: 0, file, rule, reports });
+const probe = (rule: string, reports: number, pattern = "a.ts"): Probe => ({ index: 0, pattern, rule, reports });
 
 test("a probe is dead when the rule it silences reports nothing, and only then", () => {
   assert.deepEqual(deadProbes([probe("x", 0), probe("y", 1), probe("z", 99)]), [probe("x", 0)]);
@@ -221,10 +221,10 @@ test("the dead rows come last, so a truncated log keeps the actionable half", ()
 test("a block naming several files yields one override per file", () => {
   const chosen = select([{ files: ["a.ts", "b.ts"], rules: { x: "off", y: "warn" } }]);
   assert.deepEqual(chosen.overrides, [
-    { index: 0, file: "a.ts", rule: "x" },
-    { index: 0, file: "b.ts", rule: "x" },
-    { index: 0, file: "a.ts", rule: "y" },
-    { index: 0, file: "b.ts", rule: "y" },
+    { index: 0, pattern: "a.ts", rule: "x" },
+    { index: 0, pattern: "b.ts", rule: "x" },
+    { index: 0, pattern: "a.ts", rule: "y" },
+    { index: 0, pattern: "b.ts", rule: "y" },
   ]);
 });
 
@@ -252,4 +252,27 @@ test("EXPECTED_PRESETS names the blocks this repo really has, not an empty ratch
   EXPECTED_PRESETS.forEach((name) => {
     assert.match(name, /\//, `${name} does not look like a package's own config name`);
   });
+});
+
+/** A negated pattern is not a lint TARGET: handing `"!x"` to `lintFiles` matches nothing, so the
+ *  exemption would answer DEAD while doing its job — a false DEAD, which sends someone to delete a
+ *  live exemption. None exist in this repository today; the point is that the day one does, the
+ *  check says so instead of getting it quietly wrong. */
+test("a negated files pattern is REPORTED, never measured as if it were a path", () => {
+  const negated = select([{ files: ["src/**/*.ts", "!src/byText.ts"], rules: { x: "off" } }]);
+  assert.deepEqual(negated.overrides, []);
+  assert.equal(negated.unclassified.length, 1);
+  assert.match(negated.unclassified[0]?.why ?? "", /negated pattern/);
+
+  // the neighbouring shape that must still be measured
+  assert.deepEqual(select([{ files: ["src/**/*.ts"], rules: { x: "off" } }]).overrides, [{ index: 0, pattern: "src/**/*.ts", rule: "x" }]);
+});
+
+/** A GLOB is one line in the config and comes out whole, so it is dead only when nothing it matches
+ *  needs it. Measuring per matched file would report every file under the glob that happens not to
+ *  need the rule — measured here, removing the `require-await` exemption for `test/**` leaves 21
+ *  findings across 4 of the 29 files it matches, so per-file would print 25 DEAD rows for a line
+ *  nobody can delete. The unit is what a person would remove. */
+test("a glob is one override, not one per file it matches", () => {
+  assert.deepEqual(select([{ files: ["test/**/*.ts"], rules: { x: "off" } }]).overrides, [{ index: 0, pattern: "test/**/*.ts", rule: "x" }]);
 });

@@ -34,10 +34,17 @@
 /** ONE rule silenced for ONE of the patterns a block names, and WHERE in the config array it was
  *  silenced. The index is not decoration — {@link withoutRule} needs it.
  *
- *  Per PATTERN, not per block, because a block naming two files can be half dead: with the
- *  exemption removed, one file still reports and the other does not, and summing them lets the
- *  living half hide the stale one. Four of this repository's exemptions name two files or more. */
-export type Override = { readonly index: number; readonly file: string; readonly rule: string };
+ *  THE PATTERN IS THE UNIT, because the pattern is what a person deletes. A block naming two files
+ *  can be half dead — with the exemption removed one file still reports and the other does not —
+ *  and measuring the block whole let the living half hide the stale one. Four of this repository's
+ *  exemptions name two files or more.
+ *
+ *  It is deliberately NOT per matched file. A glob is one line in the config and comes out whole,
+ *  so it is dead only when NOTHING it matches needs it, which is what measuring the pattern asks.
+ *  Measured on this repository: removing the `require-await` exemption for `test/**` reports 21
+ *  findings across 4 of the 29 files it matches. Per matched file that is 25 DEAD rows for a line
+ *  nobody can delete; per pattern it is one live exemption, which is the truth. */
+export type Override = { readonly index: number; readonly pattern: string; readonly rule: string };
 
 /** A block this module could not classify. Reported rather than skipped: a shape nobody thought of
  *  is exactly how a real exemption stops being measured without anyone noticing. */
@@ -77,9 +84,11 @@ const asRecord = (value: unknown): Record<string, unknown> | null => (typeof val
  *  rules because the compiler covers them, every one of which reports nothing and would arrive as
  *  a DEAD row telling a maintainer to delete something they do not own.
  *
- *  They are COUNTED rather than dropped, so "not measured" is a number in the report instead of an
- *  absence. If this repository ever names its own blocks, that count moves and the footer says so
- *  — which is the loud version of the failure this module exists to prevent. */
+ *  The set of them is PINNED, not merely reported: {@link EXPECTED_PRESETS} lists the names this
+ *  repository expects, and {@link unexpectedPresets} fails the run on anything else. A list in a
+ *  passing log is not a gate — most green logs are never read — so a dependency shipping a new
+ *  named config, or a hand-written block acquiring a `name` and dropping out of the measurement,
+ *  turns the job red once and someone looks. */
 export const select = (config: readonly unknown[]): Selection => {
   const overrides: Override[] = [];
   const unclassified: Unclassified[] = [];
@@ -94,6 +103,13 @@ export const select = (config: readonly unknown[]): Selection => {
       return;
     }
     const files = block["files"];
+    if (isArray(files) && files.some((entry) => typeof entry === "string" && entry.startsWith("!"))) {
+      // A negated pattern is not a lint TARGET — handing `"!x"` to `lintFiles` matches nothing and
+      // would answer DEAD for an exemption that is doing its job. None exist here today; the point
+      // is that the day one does, this says so rather than getting it quietly wrong.
+      unclassified.push({ index, why: `files contains a negated pattern (${JSON.stringify(files)}); this check cannot measure one` });
+      return;
+    }
     if (!isArray(files) || files.length === 0 || files.some((entry) => typeof entry !== "string")) {
       // Includes ESLint's AND form, `files: [["src/*", "**/*.ts"]]`. Legal, unsupported here, and
       // reported rather than dropped so nobody has to notice its absence from the count.
@@ -103,7 +119,7 @@ export const select = (config: readonly unknown[]): Selection => {
     const named: string[] = files.filter((entry): entry is string => typeof entry === "string");
     Object.entries(rules).forEach(([rule, setting]) => {
       const severity = severityOf(setting);
-      if (SILENCING.has(severity)) named.forEach((file) => overrides.push({ index, file, rule }));
+      if (SILENCING.has(severity)) named.forEach((pattern) => overrides.push({ index, pattern, rule }));
       else if (!ENFORCING.has(severity)) unclassified.push({ index, why: `rule ${rule} has severity ${severity}, which is neither silencing nor enforcing` });
     });
   });
@@ -136,7 +152,7 @@ export const withoutRule = (config: readonly unknown[], override: Override): unk
 
 export const deadProbes = (probes: readonly Probe[]): Probe[] => probes.filter((probe) => probe.reports === 0);
 
-const line = (probe: Probe): string => `${probe.reports === 0 ? "DEAD" : "live"}  ${probe.rule}  <-  ${probe.file}`;
+const line = (probe: Probe): string => `${probe.reports === 0 ? "DEAD" : "live"}  ${probe.rule}  <-  ${probe.pattern}`;
 
 /** The whole report. Dead entries and unreadable blocks come last, so the actionable half is what a
  *  truncated log keeps. */

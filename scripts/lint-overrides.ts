@@ -17,7 +17,7 @@ const CONFIG = new URL("../eslint.config.js", import.meta.url).href;
 const isFlatConfig = (value: unknown): value is Linter.Config[] => isArray(value) && value.every((entry) => typeof entry === "object" && entry !== null);
 
 /** With this one exemption removed and nothing else changed, how much does its rule still report
- *  over the files it named? Zero means removing it changed nothing, so it silences nothing. The
+ *  over the pattern it named? Zero means removing it changed nothing, so it silences nothing. The
  *  parser, the plugins and the type information all still come from the real config, so a typed
  *  rule answers exactly as it would in `yarn lint`. */
 const reportsFor = async (config: readonly Linter.Config[], probe: Override): Promise<number> => {
@@ -29,12 +29,12 @@ const reportsFor = async (config: readonly Linter.Config[], probe: Override): Pr
     throw new Error(`removing ${probe.rule} from block ${probe.index} did not leave a config array`);
   }
   const eslint = new ESLint({ overrideConfigFile: true, baseConfig: removed, cwd: process.cwd(), errorOnUnmatchedPattern: false });
-  const results = await eslint.lintFiles([probe.file]);
+  const results = await eslint.lintFiles([probe.pattern]);
   const fatal = results.flatMap((result) => result.messages).filter((message) => message.fatal === true);
   if (fatal.length > 0) {
     // A parse failure is the harness breaking, not an override going quiet, and counting its
     // messages as "not this rule" would report the override DEAD for a reason nobody could act on.
-    throw new Error(`probing ${probe.rule} over ${probe.file} failed to parse: ${fatal[0]?.message ?? "unknown"}`);
+    throw new Error(`probing ${probe.rule} over ${probe.pattern} failed to parse: ${fatal[0]?.message ?? "unknown"}`);
   }
   return results.reduce((total, result) => total + result.messages.filter((message) => message.ruleId === probe.rule).length, 0);
 };
