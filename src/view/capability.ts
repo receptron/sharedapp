@@ -298,7 +298,7 @@ export const capabilityOf = (write: ProjectedViewWrite, address: string, tier: W
     assign: assignable && writer,
     ...owned,
     // Sorted for the picker only. The DOCUMENT's order is the compiler's
-    // business (it sorts by code point so a second publish of an unchanged
+    // business (it sorts by code unit so a second publish of an unchanged
     // declaration produces an unchanged document); what a person reads is a
     // different job.
     assignees: [...(write.writers ?? []), ...(write.rowWriters ?? [])].sort((left, right) => left.localeCompare(right)),

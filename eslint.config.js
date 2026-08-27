@@ -235,10 +235,6 @@ export default tseslint.config(
     rules: { "@typescript-eslint/strict-boolean-expressions": "warn" },
   },
   {
-    files: ["scripts/check-apps.ts"], // 1
-    rules: { "sonarjs/no-nested-conditional": "warn" },
-  },
-  {
     // `"1.2.3.4"` is not an address here: it is the fixture for "four numbers is not a version",
     // sitting in a list beside `"1.2"`, `"v1.2.3"` and `"beta"`. Any other quad reads as an address
     // to this rule too, so there is no fixture that both makes the point and passes.

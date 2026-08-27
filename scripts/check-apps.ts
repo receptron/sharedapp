@@ -30,6 +30,7 @@ import { resolve } from "node:path";
 
 import type { CollectionSchema } from "@mulmoclaude/core/collection";
 import { parseAuthoredApp, publishProblems, schemaRefProblems, type AuthoredApp } from "../src/index.js";
+import { byText } from "../src/byText.js";
 
 /** The ten in the compatibility baseline (issue #28), by path under the apps checkout. */
 const APPS = ["lunches", "survey", "gym", "live", "tennis.grok", "codex/tennis", "test.rooms", "tennis.muse", "gemini/tennis.g", "mbti"];
@@ -104,7 +105,7 @@ const collectionsOf = (app: string): { cid: string; schema: CollectionSchema }[]
       if (!isCollectionSchema(schema)) throw new UnusableSchema(`${where}: ${schemaProblems(schema).join("; ")}`);
       return { cid: entry.name, schema };
     })
-    .sort((left, right) => Number(left.cid > right.cid) - Number(left.cid < right.cid));
+    .sort((left, right) => byText(left.cid, right.cid));
 };
 
 /** The gate's own checks, inside the per-app boundary. They read the schema deeply — a field
