@@ -53,6 +53,16 @@ Consumers never build this — they get `dist/` from the published tarball — s
 `prepublishOnly` regression would ship an empty package and break on `npx mulmoterminal`
 rather than here.
 
+An `overrides` job runs `yarn lint:overrides`, which asks the one question `yarn lint` cannot.
+Lint proves an exemption DELETED from `eslint.config.js` is at zero — the rule is an error
+everywhere else, so it goes red. It says nothing about an exemption still KEPT, and one whose
+findings have since been fixed tells two lies: it reads as "this file still has that problem",
+and it hides that the rule quietly stopped being an error there. Both were live here — a
+`no-nested-conditional` entry outlived the rewrite of the file it named, and the PR that pruned
+the ledger of zeroed entries left that one behind. It PROBES rather than deletes: removing the
+block that supplies the type-aware parser crashes every typed rule, which measures the harness
+instead of the config.
+
 Commit messages in this repository are Conventional Commits with a Japanese subject.
 
 ## What this package is

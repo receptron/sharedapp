@@ -30,6 +30,7 @@
     "format": "prettier --write \"{src,test}/**/*.ts\" \"scripts/**/*.{mjs,ts}\" \"*.{json,md}\" \"{scripts,test}/tsconfig.json\"",
     "format:check": "prettier --check \"{src,test}/**/*.ts\" \"scripts/**/*.{mjs,ts}\" \"*.{json,md}\" \"{scripts,test}/tsconfig.json\"",
     "lint": "eslint src test scripts",
+    "lint:overrides": "tsx scripts/lint-overrides.ts",
     "prepare": "tsc -p tsconfig.json",
     "prepublishOnly": "tsc -p tsconfig.json",
     "test": "tsx --test ./test/test_*.ts",
