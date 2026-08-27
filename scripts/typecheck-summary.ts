@@ -2,7 +2,7 @@
  *  what it saw has a real type — and renders the report beside this file.
  *
  *  Every spawn and every read is here, because the report itself is a pure function and stays
- *  testable that way. `--listFiles` rather than a glob over `include`: a project's real file set
+ *  testable that way. `--listFilesOnly` rather than a glob over `include`: a project's real file set
  *  is the transitive import graph, and a file can be pulled in by an import from three
  *  directories away without appearing in any pattern.
  *

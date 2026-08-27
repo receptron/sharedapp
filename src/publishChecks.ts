@@ -33,6 +33,7 @@ import { agentCids, AGENT_ID_PATTERN, AGENT_INSTRUCTION_MAX, RESERVED_AGENT_IDS 
 import { APP_PROTOCOL, protocolOf, protocolWithin } from "./appProtocol.js";
 import { writersOf } from "./appViews.js";
 import type { AuthoredAgent, AuthoredApp, AuthoredCollectionConfig, AuthoredSubmit, AuthoredView } from "./publishManifest.js";
+import { statusFieldOf } from "./statusField.js";
 import { byText } from "./byText.js";
 
 /** What publish knows about a shared collection in this repository, as far as
@@ -83,7 +84,8 @@ function checkedFields(collection: AuthoredCollectionConfig | undefined, submit:
   const fields = new Set<string>();
   for (const keyField of submit?.validate?.keyFields ?? []) fields.add(keyField.field);
   if (submit?.gateOn) fields.add(submit.gateOn.match);
-  if (collection?.statusField) fields.add(collection.statusField);
+  const status = statusFieldOf(collection);
+  if (status !== undefined) fields.add(status);
   return fields;
 }
 
@@ -232,7 +234,7 @@ function collectionMailProblems(cid: string, collection: AuthoredCollectionConfi
   const { mail } = collection;
   if (!mail) return [];
   const problems: string[] = [];
-  if (!collection.statusField) {
+  if (statusFieldOf(collection) === undefined) {
     problems.push(
       `collections.${cid}.mail needs collections.${cid}.statusField: the rules read the status before and after the write to decide the mail is warranted.`,
     );
@@ -320,15 +322,16 @@ function coherenceProblems(app: AuthoredApp, collections: readonly PublishableCo
  *  with `createFields`; miss either and every submission is refused. */
 function statusCoherenceProblems(cid: string, submit: AuthoredSubmit, collection: AuthoredCollectionConfig | undefined): string[] {
   if (submit.initialStatus === undefined) return [];
-  if (!collection?.statusField) {
+  const status = statusFieldOf(collection);
+  if (collection === undefined || status === undefined) {
     return [
       `public.submit.${cid}.initialStatus needs collections.${cid}.statusField: the rules look the status up by that name, and refuse every submission without it.`,
     ];
   }
   const problems: string[] = [];
-  if (!new Set(submit.createFields).has(collection.statusField)) {
+  if (!new Set(submit.createFields).has(status)) {
     problems.push(
-      `public.submit.${cid}.createFields must include "${collection.statusField}": a submission may carry ONLY the createFields, ` +
+      `public.submit.${cid}.createFields must include "${status}": a submission may carry ONLY the createFields, ` +
         "and the rules also require the status field to be present and equal to initialStatus. As written, every submission is refused.",
     );
   }
@@ -434,7 +437,7 @@ function submitCoherenceProblems(app: AuthoredApp, cid: string, submit: Authored
     );
   }
   problems.push(...fieldIdProblems(cid, submit, collection?.statusField));
-  if ((submit.selfUpdate !== undefined || submit.selfTransitions !== undefined || submit.selfDelete !== undefined) && !collection?.statusField) {
+  if ((submit.selfUpdate !== undefined || submit.selfTransitions !== undefined || submit.selfDelete !== undefined) && statusFieldOf(collection) === undefined) {
     problems.push(
       `public.submit.${cid}.selfUpdate / selfTransitions / selfDelete are declared per CURRENT STATUS, but collections.${cid} declares no statusField: ` +
         "the rules read the current status first and refuse every self-edit without it.",
@@ -718,7 +721,7 @@ function sealedProblems(app: AuthoredApp): string[] {
     if (states.length === 0) {
       return [`collections.${cid}.sealed is an empty list, which seals nothing. Name the statuses a record may not be deleted from, or remove the key.`];
     }
-    if (collection.statusField === undefined) {
+    if (statusFieldOf(collection) === undefined) {
       return [
         `collections.${cid}.sealed names statuses but collections.${cid} declares no statusField: the rules read a record's status through it, so nothing ` +
           "is ever sealed and every row stays deletable. Declare the statusField, or remove the key.",

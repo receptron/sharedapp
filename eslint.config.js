@@ -21,10 +21,11 @@ const raise = (entry) => {
 const enforced = (config) =>
   config.rules ? { ...config, rules: Object.fromEntries(Object.entries(config.rules).map(([id, entry]) => [id, raise(entry)])) } : config;
 
-// The DEBT lists further down are per FILE and set a rule to `warn`, not `off`: the finding stays
-// on screen and stays countable, while a file not on the list is held at error. Delete an entry
-// when its file reaches zero — the rule then holds it there. The counts are from the sweep that
-// introduced each list; they are the size of the debt, not a budget to spend.
+// Per-file entries further down come in three kinds, and the kind is the point. An `off` says the
+// rule is WRONG about that file and carries the reason. A `warn` is debt: the finding stays on
+// screen while a file not listed is held at error, and the entry is deleted once its file reaches
+// zero — the rule then holds it there. An `error` with a ceiling is a RATCHET: the file may shrink
+// and may not grow, and the number lives in the rule where CI checks it.
 export default tseslint.config(
   { ignores: ["dist/", "node_modules/"] },
   {
@@ -75,8 +76,13 @@ export default tseslint.config(
       // handled where it actually lives: `Object.hasOwn` / `Map` at the lookups that take a
       // caller-supplied key (see `publishChecks.ts`), which the rule cannot tell apart from the rest.
       "security/detect-object-injection": "off",
-      // The only fs in this repository is in `scripts/` and one test, and every path is one they
-      // compute from a checkout root that was handed to them.
+      // Every path here is one this repository's own tooling produced — argv, an env var CI sets,
+      // `git ls-files`, `tsc --listFilesOnly`, `import.meta.url`, or a directory listing. None is
+      // taken from the CONTENTS of a document being processed, and that is the property worth
+      // holding: an `app.json` or a `schema.json` must never be able to steer a read. Stated as
+      // the invariant rather than as a list of the call sites, because the list was falsified
+      // twice by call sites that were perfectly safe, while the invariant only goes false when a
+      // genuinely dangerous read is written.
       "security/detect-non-literal-fs-filename": "off",
       // One finding, in `check-pack.ts`'s `satisfied`. `collect` walks the VALUES of `exports`, so
       // what reaches the regexp is an export TARGET (`"dist/view/*.js"`), never the subpath key
@@ -205,17 +211,27 @@ export default tseslint.config(
   },
 
   // ---------------------------------------------------------------------------------------------
-  // DEBT. Everything below is at `warn` for the files listed and at `error` everywhere else. The
-  // number after each file is what it reported when the rule went in.
+  // DEBT AND RATCHETS. `warn` entries are debt: the rule is at `error` for every file not listed,
+  // and the entry goes when its file reaches zero. `error` entries with a ceiling are ratchets —
+  // see the note on the size guards below. No entry carries a count: the count of the day is what
+  // `yarn lint` prints, and one written here is a number nothing checks.
   // ---------------------------------------------------------------------------------------------
   {
-    // A guard the types already prove — defensive reading of a schema the caller supplies. The
-    // suite used to hold 66 of these and holds none: `node:assert/strict`'s `equal` narrows, so
-    // every `if (!read.ok) return;` written after one was dead code the compiler already knew about.
-    files: [
-      "src/publishChecks.ts", // 2
-      "src/view/parent.ts", // 2
-    ],
+    // NOT debt, in the sense that paying it would be a bug — kept at `warn` rather than `off` only
+    // so a genuinely redundant condition written later is still visible. In both files the rule is
+    // right about the TYPES and wrong about the values:
+    //
+    // `publishChecks.ts` — every finding is `schema.fields ?? {}` or its optional chain.
+    // `CollectionSchema` declares `fields` present, and these schemas are JSON read off disk from
+    // an app repository. One with `fields: null` reached this gate and killed the whole run, which
+    // is the crash `scripts/check-apps.ts` now contains per app. The type is a claim about the
+    // data and the data has already broken it. Removing the `??` reinstates the crash.
+    //
+    // `parent.ts` — `closed` is set inside `written()`, a callback the HOST calls when the record
+    // is written. TypeScript's control flow does not follow a mutation made through a callback it
+    // handed elsewhere, so it reads `closed` as still false after the await; the host contract says
+    // otherwise, and the suite drives that path. Deleting the branch would drop a real case.
+    files: ["src/publishChecks.ts", "src/view/parent.ts"],
     rules: { "@typescript-eslint/no-unnecessary-condition": "warn" },
   },
   {
@@ -227,12 +243,6 @@ export default tseslint.config(
     // never awaits is worth knowing about.
     files: ["test/**/*.ts"],
     rules: { "@typescript-eslint/require-await": "off" },
-  },
-  {
-    // Four conditionals on a nullable string, where "" and absent take the same branch on purpose.
-    // Worth spelling out one at a time, since an empty field name is a real authored mistake.
-    files: ["src/publishChecks.ts"], // 4
-    rules: { "@typescript-eslint/strict-boolean-expressions": "warn" },
   },
   {
     // `"1.2.3.4"` is not an address here: it is the fixture for "four numbers is not a version",
@@ -249,22 +259,29 @@ export default tseslint.config(
     files: ["test/test_viewSelfContained.ts"],
     rules: { "sonarjs/super-linear-regex": "off" },
   },
+  // The four size guards below are RATCHETS, not exemptions. Each is an `error` whose ceiling is
+  // what the file measures today, so the file may shrink and may not grow — and the number is the
+  // rule's own `max`, which CI checks, rather than a count in a comment that nothing checks. The
+  // previous form carried `// 863` and `// 1479` beside files that measured 1301 and 1500.
+  //
+  // Splitting any of these is a real change rather than a move: `publishChecks.ts`'s refusals come
+  // in families, its suite keeps each assertion beside the family it belongs to, and both arrows
+  // are one sequence with the reasoning written between the steps. The ratchet says so without
+  // pretending the split is imminent.
   {
-    // Over the 600-line file guard. `publishChecks.ts` is 863 and the biggest single file here;
-    // its refusals come in families, so a split is a real change rather than a move.
-    files: [
-      "src/publishChecks.ts", // 863
-      "test/test_publishChecks.ts", // 1479 — the gate's suite; splitting it moves assertions away from the family they belong to
-    ],
-    rules: { "max-lines": "warn" },
+    files: ["src/publishChecks.ts"],
+    rules: { "max-lines": ["error", { max: 1301, skipBlankLines: true, skipComments: true }] },
   },
   {
-    // One arrow of 181 lines (`parent.ts`'s message handler) and one of 81 (`srcdoc.ts`'s
-    // bootstrap builder). Both are a single sequence with the reasoning written between the steps.
-    files: [
-      "src/view/parent.ts", // 181
-      "src/view/srcdoc.ts", // 81
-    ],
-    rules: { "max-lines-per-function": "warn" },
+    files: ["test/test_publishChecks.ts"],
+    rules: { "max-lines": ["error", { max: 1500, skipBlankLines: true, skipComments: true }] },
+  },
+  {
+    files: ["src/view/parent.ts"],
+    rules: { "max-lines-per-function": ["error", { max: 181, skipBlankLines: true, skipComments: true, IIFEs: true }] },
+  },
+  {
+    files: ["src/view/srcdoc.ts"],
+    rules: { "max-lines-per-function": ["error", { max: 96, skipBlankLines: true, skipComments: true, IIFEs: true }] },
   },
 );
