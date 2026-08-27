@@ -43,21 +43,26 @@ const root = resolve(process.argv[2] ?? "../apps");
  *  two, and which machine runs this script is not what is under test. */
 const publisherOf = (app: AuthoredApp): string => Object.entries(app.members).find(([, roles]) => roles["*"] === "owner")?.[0] ?? "";
 
-/** The four keys `CollectionSchema` requires. Checked rather than asserted: this value came from
- *  `JSON.parse` of a file in ANOTHER repository, which is the one place in this script where
- *  nothing is known, and a predicate that claimed the type from `primaryKey` alone would be a cast
- *  wearing a guard's clothes.
+/** The keys `CollectionSchema` requires, and NOTHING MORE — this is deliberately not a full
+ *  validation, and the paragraph below is why.
  *
- *  This is the ONE intentional difference from the `.mjs` this replaces, which checked `primaryKey`
- *  and passed whatever else was there. A schema missing `title`, `icon` or `fields` is not one the
- *  host would promote, and the header above says an app that cannot be read is a FAILURE rather
- *  than a skip — so it fails, naming the key that is missing rather than the file. */
+ *  The `.mjs` this replaces tested `primaryKey` and passed whatever else was there into functions
+ *  that read the rest. A predicate claiming `CollectionSchema` from that asserts what it has not
+ *  proved, so this checks the four keys the type requires. It was still shown wrong twice in one
+ *  review — `fields: null` and `fields: []` passed its container test, then `fields: {x: null}`
+ *  passed the fixed one — because enumerating bad shapes has no last case.
+ *
+ *  The host's own `CollectionSchemaZ` IS the last case, and it was tried: it also requires
+ *  `dataPath` / `dataSource` / `storage`, which turns "the four keys" into "everything the host
+ *  demands". That may well be right, but it cannot be shipped from a machine with no apps
+ *  checkout to test it against, and this gate's whole job is to say those apps still publish.
+ *
+ *  So the shape check stays minimal and the CRASH is contained instead: `checkedProblems` runs the
+ *  gate's own checks inside the per-app boundary, so a schema this predicate wrongly admitted
+ *  fails ONE app with a message instead of killing the run. That covers every shape, including the
+ *  ones nobody has thought of, which is what the enumeration could not do. */
 const schemaProblems = (schema: unknown): string[] => {
   if (typeof schema !== "object" || schema === null) return ["not a JSON object"];
-  /** `typeof null` and `typeof []` are both `"object"`, so a container check that stops there
-   *  admits `fields: null` and `fields: []` — and a predicate that returns `true` for those is
-   *  claiming `CollectionSchema` without having proved it, which is the same unsoundness that
-   *  ruled out checking `primaryKey` alone. `fields` is a record of field specs. */
   const has = (key: string, kind: "string" | "record"): boolean => {
     if (!(key in schema)) return false;
     const value: unknown = Reflect.get(schema, key);
@@ -74,9 +79,6 @@ const schemaProblems = (schema: unknown): string[] => {
 
 const isCollectionSchema = (schema: unknown): schema is CollectionSchema => schemaProblems(schema).length === 0;
 
-/** Every collection committed beside the app, with the schema the host would promote. Throws with
- *  the path in the message: a schema that cannot be read is the same failure as an app that cannot,
- *  for the same reason. */
 /** Thrown where the file was READ and its shape is wrong — distinct from the fs errors that mean
  *  the checkout is incomplete, which `readApp` labels differently. */
 class UnusableSchema extends Error {}
@@ -92,6 +94,27 @@ const collectionsOf = (app: string): { cid: string; schema: CollectionSchema }[]
       return { cid: entry.name, schema };
     })
     .sort((left, right) => Number(left.cid > right.cid) - Number(left.cid < right.cid));
+};
+
+/** The gate's own checks, inside the per-app boundary. They read the schema deeply — a field
+ *  spec's `type`, an enum's values — so a shape the predicate above wrongly admitted throws in
+ *  `publishChecks` rather than here. Uncaught, that killed the run: measured on the `.mjs` this
+ *  replaces, `fields: null` took the whole gate down at `Object.hasOwn(fields, field)` with no
+ *  report and the remaining apps unchecked. Caught, it is one app's problem, which is what the
+ *  header means by a failure rather than a skip. */
+const checkedProblems = (app: AuthoredApp, collections: { cid: string; schema: CollectionSchema }[]): string[] => {
+  try {
+    return [
+      ...publishProblems(
+        app,
+        collections.map(({ cid, schema }) => ({ cid, primaryKey: schema.primaryKey })),
+        publisherOf(app),
+      ),
+      ...schemaRefProblems(app, collections),
+    ];
+  } catch (error) {
+    return [`the checks threw on this app's declaration or schemas: ${error instanceof Error ? error.message : String(error)}`];
+  }
 };
 
 const lines: string[] = [];
@@ -133,14 +156,7 @@ for (const app of APPS) {
     fail(app, "does not parse", parsed.problems);
     continue;
   }
-  const problems = [
-    ...publishProblems(
-      parsed.app,
-      collections.map(({ cid, schema }) => ({ cid, primaryKey: schema.primaryKey })),
-      publisherOf(parsed.app),
-    ),
-    ...schemaRefProblems(parsed.app, collections),
-  ];
+  const problems = checkedProblems(parsed.app, collections);
   if (problems.length > 0) {
     fail(app, `${problems.length} problem(s)`, problems);
     continue;
