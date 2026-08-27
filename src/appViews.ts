@@ -803,23 +803,6 @@ function assignPart(app: AuthoredApp, audience: ViewAudience, cid: string): Part
   return { assigneeField, rowWriters: holdersOf(app, cid, ["assignee"]) };
 }
 
-/** What `audience` may change about `cid`, or null when the answer is nothing.
- *
- *  The audiences differ in WHICH transition table applies, in whether
- *  assignment exists at all, and in whether the roster's answer travels with
- *  it; they agree that the status field is the collection's, since the rules
- *  read one field either way.
- *
- *  `public` AND `participant` ARE THE SAME ANSWER, and that is a statement about the rules rather
- *  than a shortcut here. Both are `ownRow` in `firestore.rules` — which asks for `authed()` and
- *  nothing else: no role, no tier, an anonymous uid will do — and both read their moves out of
- *  `public.submit[cid]` (`selfTransitions`, `selfDelete`). So the visitor on `/a` who booked a slot
- *  and the participant on `/p` who booked the same slot may do exactly the same things to it, and
- *  projecting for one and not the other is how the public page ended up unable to offer a
- *  cancellation the rules would have allowed. The page could ask; nothing could answer.
- *
- *  What `public` never gets is the staff half — no `writers`, no assignment — for the same reason
- *  `participant` does not. */
 /** Does the DECLARATION say anything about changing `cid` from this audience?
  *
  *  `writeFor` answers a wider question — it keeps an entry alive for the blanket "a writer may
@@ -843,6 +826,23 @@ export function declaresMoves(app: AuthoredApp, audience: ViewAudience, cid: str
   return Object.keys(write).length > 1;
 }
 
+/** What `audience` may change about `cid`, or null when the answer is nothing.
+ *
+ *  The audiences differ in WHICH transition table applies, in whether
+ *  assignment exists at all, and in whether the roster's answer travels with
+ *  it; they agree that the status field is the collection's, since the rules
+ *  read one field either way.
+ *
+ *  `public` AND `participant` ARE THE SAME ANSWER, and that is a statement about the rules rather
+ *  than a shortcut here. Both are `ownRow` in `firestore.rules` — which asks for `authed()` and
+ *  nothing else: no role, no tier, an anonymous uid will do — and both read their moves out of
+ *  `public.submit[cid]` (`selfTransitions`, `selfDelete`). So the visitor on `/a` who booked a slot
+ *  and the participant on `/p` who booked the same slot may do exactly the same things to it, and
+ *  projecting for one and not the other is how the public page ended up unable to offer a
+ *  cancellation the rules would have allowed. The page could ask; nothing could answer.
+ *
+ *  What `public` never gets is the staff half — no `writers`, no assignment — for the same reason
+ *  `participant` does not. */
 export function writeFor(app: AuthoredApp, audience: ViewAudience, cid: string): ProjectedViewWrite | null {
   const write: ProjectedViewWrite = {
     cid,

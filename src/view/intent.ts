@@ -56,8 +56,10 @@ import { mailFor, type QueuedMail } from "./intentMail.js";
  *  that from being the general patch. */
 export type IntentKind = "transition" | "assign" | "withdraw" | "correct";
 
-/** What the view asked, once it has survived judgement: one field, one value,
- *  and the record they belong to. */
+/** What the view asked, once it has survived judgement: the record it belongs
+ *  to, plus EITHER the one field a `transition` or an `assign` moves (`field`
+ *  and `to`) OR the map of fields a `correct` rewrites (`values`) — never both.
+ *  A `withdraw` carries neither, because it moves nothing. */
 export interface JudgedIntent {
   requestId: string;
   kind: IntentKind;
