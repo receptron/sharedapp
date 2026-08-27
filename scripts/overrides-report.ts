@@ -179,7 +179,39 @@ export const renderReport = (probes: readonly Probe[], unclassified: readonly Un
  *  measurement, turns this red once and someone looks. */
 export const EXPECTED_PRESETS: readonly string[] = ["typescript-eslint/eslint-recommended"];
 
-export const unexpectedPresets = (presets: readonly Preset[]): Preset[] => presets.filter((preset) => !EXPECTED_PRESETS.includes(preset.name));
+/** How the named blocks found differ from the ones expected — as a MULTISET, which is the whole
+ *  point.
+ *
+ *  An allowlist ("is this name permitted?") is not a ratchet, and the difference is exploitable:
+ *  a hand-written block naming itself `typescript-eslint/eslint-recommended` is waved through as
+ *  preset material and never probed, so a dead exemption inside it passes silently. Measured on
+ *  this repository before the multiset check went in: planting exactly that block left the run at
+ *  exit 0.
+ *
+ *  A missing expected name matters for the opposite reason — the preset stopped being applied at
+ *  all, so rules this repository believes are handled by a dependency may now be reporting or
+ *  silent for reasons nobody chose. */
+export const presetDrift = (presets: readonly Preset[]): { unexpected: Preset[]; missing: string[]; duplicated: string[] } => {
+  const remaining = [...EXPECTED_PRESETS];
+  const unexpected: Preset[] = [];
+  const duplicated: string[] = [];
+  presets.forEach((preset) => {
+    const at = remaining.indexOf(preset.name);
+    if (at >= 0) remaining.splice(at, 1);
+    else if (EXPECTED_PRESETS.includes(preset.name)) duplicated.push(preset.name);
+    else unexpected.push(preset);
+  });
+  return { unexpected, missing: remaining, duplicated: [...new Set(duplicated)] };
+};
+
+export const presetDriftLines = (presets: readonly Preset[]): string[] => {
+  const { unexpected, missing, duplicated } = presetDrift(presets);
+  return [
+    ...unexpected.map((preset) => `UNEXPECTED named block ${preset.index}: ${preset.name} — named blocks are never probed, so a hand-written one hides here`),
+    ...missing.map((name) => `MISSING named block: ${name} was expected and is not in the config — the preset it stands for is no longer being applied`),
+    ...duplicated.map((name) => `DUPLICATE named block: ${name} appears more than once — one of them is not the preset`),
+  ];
+};
 
 export const failed = (probes: readonly Probe[], unclassified: readonly Unclassified[], presets: readonly Preset[]): boolean =>
-  deadProbes(probes).length > 0 || unclassified.length > 0 || unexpectedPresets(presets).length > 0;
+  deadProbes(probes).length > 0 || unclassified.length > 0 || presetDriftLines(presets).length > 0;

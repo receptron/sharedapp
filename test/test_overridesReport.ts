@@ -19,7 +19,8 @@ import {
   withoutRule,
   renderReport,
   select,
-  unexpectedPresets,
+  presetDrift,
+  presetDriftLines,
   EXPECTED_PRESETS,
   type Probe,
   type Override,
@@ -204,10 +205,11 @@ test("the unmeasured blocks are always NAMED in the report, in both verdicts", (
 });
 
 test("the run fails on a dead override OR an unreadable block, and passes on neither", () => {
-  assert.equal(failed([probe("x", 1)], [], []), false);
-  assert.equal(failed([probe("x", 0)], [], []), true);
-  assert.equal(failed([probe("x", 1)], [{ index: 0, why: "why" }], []), true);
-  assert.equal(failed([], [], []), false);
+  const present = [{ index: 4, name: EXPECTED_PRESETS[0] ?? "" }];
+  assert.equal(failed([probe("x", 1)], [], present), false);
+  assert.equal(failed([probe("x", 0)], [], present), true);
+  assert.equal(failed([probe("x", 1)], [{ index: 0, why: "why" }], present), true);
+  assert.equal(failed([], [], present), false);
 });
 
 test("the dead rows come last, so a truncated log keeps the actionable half", () => {
@@ -231,20 +233,45 @@ test("a block naming several files yields one override per file", () => {
 test("half of a multi-file exemption going quiet is a failure, not an average", () => {
   const half = [probe("x", 3, "a.ts"), probe("x", 0, "b.ts")];
   assert.deepEqual(deadProbes(half), [probe("x", 0, "b.ts")]);
-  assert.equal(failed(half, [], []), true);
+  assert.equal(failed(half, [], [{ index: 4, name: EXPECTED_PRESETS[0] ?? "" }]), true);
   assert.match(renderReport(half, [], []), /^DEAD {2}x {2}<- {2}b\.ts$/m);
 });
 
 /** A LIST of unmeasured blocks in a passing log is not a gate: most green logs are never read. The
  *  set is pinned, so a dependency shipping a new named config — or a hand-written block acquiring a
  *  `name` and dropping out of the measurement — turns the job red once and someone looks. */
-test("an unexpected named block fails the run; an expected one does not", () => {
+/** The expected names are matched as a MULTISET, not checked against an allowlist, and the
+ *  difference is exploitable rather than academic. An allowlist asks "is this name permitted",
+ *  so a hand-written block naming itself `typescript-eslint/eslint-recommended` is waved through
+ *  as preset material and never probed — a dead exemption inside it passes silently. Planted in
+ *  the real config against the allowlist version, the run stayed at exit 0. */
+test("a named block impersonating an expected preset fails the run", () => {
+  const expected = { index: 4, name: EXPECTED_PRESETS[0] ?? "" };
+  const impostor = { index: 9, name: EXPECTED_PRESETS[0] ?? "" };
+  assert.deepEqual(presetDrift([expected, impostor]).duplicated, [EXPECTED_PRESETS[0]]);
+  assert.equal(failed([probe("x", 1)], [], [expected, impostor]), true);
+  assert.match(presetDriftLines([expected, impostor]).join("\n"), /DUPLICATE named block/);
+});
+
+/** The opposite direction: an expected preset that is GONE means the dependency stopped applying
+ *  it, so rules this repository believes a preset handles may now be reporting, or silent, for
+ *  reasons nobody chose. */
+test("an expected preset going missing fails the run", () => {
+  assert.deepEqual(presetDrift([]).missing, [...EXPECTED_PRESETS]);
+  assert.equal(failed([probe("x", 1)], [], []), true);
+  assert.match(presetDriftLines([]).join("\n"), /MISSING named block/);
+});
+
+test("an unexpected named block fails the run; the exact expected set does not", () => {
   const expected = { index: 4, name: EXPECTED_PRESETS[0] ?? "" };
   const ours = { index: 9, name: "our/own-block" };
-  assert.deepEqual(unexpectedPresets([expected]), []);
-  assert.deepEqual(unexpectedPresets([expected, ours]), [ours]);
+  assert.deepEqual(presetDrift([expected]), { unexpected: [], missing: [], duplicated: [] });
+  assert.deepEqual(presetDriftLines([expected]), []);
   assert.equal(failed([probe("x", 1)], [], [expected]), false);
+
+  assert.deepEqual(presetDrift([expected, ours]).unexpected, [ours]);
   assert.equal(failed([probe("x", 1)], [], [expected, ours]), true);
+  assert.match(presetDriftLines([expected, ours]).join("\n"), /UNEXPECTED named block/);
 });
 
 test("EXPECTED_PRESETS names the blocks this repo really has, not an empty ratchet", () => {

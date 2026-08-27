@@ -7,7 +7,7 @@
 
 import { ESLint, type Linter } from "eslint";
 
-import { type Override, type Probe, isArray, withoutRule, renderReport, select, failed, unexpectedPresets } from "./overrides-report.js";
+import { type Override, type Probe, isArray, withoutRule, renderReport, select, failed, presetDriftLines } from "./overrides-report.js";
 
 const CONFIG = new URL("../eslint.config.js", import.meta.url).href;
 
@@ -56,10 +56,8 @@ for (const override of overrides) {
   probes.push({ ...override, reports: await reportsFor(config, override) });
 }
 
-unexpectedPresets(presets).forEach((preset) => {
-  console.error(
-    `UNEXPECTED named block ${preset.index}: ${preset.name} — named blocks are not measured, so add it to EXPECTED_PRESETS only if it really is a preset`,
-  );
+presetDriftLines(presets).forEach((drift) => {
+  console.error(drift);
 });
 console.log(renderReport(probes, unclassified, presets));
 process.exit(failed(probes, unclassified, presets) ? 1 : 0);
