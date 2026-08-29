@@ -51,6 +51,12 @@ not use.
   reader did before the key existed — expensive, never wrong).
 - **PATCH** — neither.
 
+A key can also be none of the three. `views[].ownRead` adds nothing to a projection: it changes
+which value an EXISTING key takes (`scope`, from `all` to `own`, with the selector readers have
+built a `where` from since the first release). There is nothing for an older reader to ignore,
+because there is nothing it has not already been reading — so the contract does not move, and the
+package version does.
+
 **Every projection is stamped `APP_PROTOCOL`, which is still 1.0.0** — the contract has not moved,
 and `uidField` is the reason that is worth saying. It went out as 2.0.0, then 1.1.0, then as nothing
 at all, because nothing anywhere reads the difference:
