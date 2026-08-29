@@ -41,6 +41,7 @@ import { protocolFor } from "./appProtocol.js";
 import {
   limitFor,
   normalizeViews,
+  ownScope,
   participantScope,
   type ArticleFields,
   articleCid,
@@ -563,10 +564,19 @@ export interface AppViewTier {
 function scopeFor(
   authored: AuthoredApp,
   audience: Exclude<ViewAudience, "public">,
+  view: NormalizedView,
   cid: string,
   participantRead: readonly string[],
 ): ProjectedViewCollection | null {
-  return audience === "member" ? { cid, scope: "all" } : participantScope(authored, cid, participantRead);
+  if (audience === "member") return { cid, scope: "all" };
+  // THE VIEW'S OWN ANSWER FIRST. `ownRead` is per view rather than per app
+  // because two participant pages of one app can legitimately want different
+  // things — a writers' desk showing what you published, a directory showing
+  // everyone — and the app-level `participantRead` cannot express both. The
+  // gate has already refused an opt-in with nothing to fall to, so a null here
+  // is the same programming error `tierViews` documents for the widened path.
+  if (view.ownRead?.includes(cid) === true) return ownScope(authored, cid);
+  return participantScope(authored, cid, participantRead);
 }
 
 /** Project the declaration into the per-audience documents.
@@ -595,7 +605,7 @@ export function tierWrites(authored: AuthoredApp, audience: Exclude<ViewAudience
 export function tierViews(authored: AuthoredApp, audience: Exclude<ViewAudience, "public">, views: NormalizedView[], participantRead: readonly string[]) {
   return views.map((view) => {
     const collections = view.collections
-      .map((cid) => scopeFor(authored, audience, cid, participantRead))
+      .map((cid) => scopeFor(authored, audience, view, cid, participantRead))
       .filter((scope): scope is ProjectedViewCollection => scope !== null)
       .map((scope) => limitFor(authored, view, scope));
     // Narrowed to what this tier is actually handed, for the reason the scopes
