@@ -28,7 +28,16 @@
 
 import type { CollectionFieldSpec, CollectionSchema } from "@mulmoclaude/core/collection";
 import { isSafeCustomViewPath } from "@mulmoclaude/core/collection/server";
-import { articleCid, declaresMoves, normalizeViews, participantScope, type NormalizedView, type ViewAudience } from "./appViews.js";
+import {
+  articleCid,
+  declaresMoves,
+  normalizeViews,
+  ownScope,
+  participantScope,
+  type NormalizedView,
+  type ProjectedViewCollection,
+  type ViewAudience,
+} from "./appViews.js";
 import { agentCids, AGENT_ID_PATTERN, AGENT_INSTRUCTION_MAX, RESERVED_AGENT_IDS } from "./appAgents.js";
 import { APP_PROTOCOL, protocolOf, protocolWithin } from "./appProtocol.js";
 import { writersOf } from "./appViews.js";
@@ -1433,6 +1442,62 @@ function viewLiveProblems(app: AuthoredApp, view: NormalizedView): string[] {
   return problems;
 }
 
+/** What ONE VIEW is actually given for a collection, opt-in included.
+ *
+ *  The same question `scopeFor` answers when projecting, asked here so the gate judges the
+ *  declaration that will be written rather than the one it would have been without the key. Kept
+ *  to the participant audience because that is the only tier either branch describes. */
+function scopeOfView(app: AuthoredApp, view: NormalizedView, cid: string): ProjectedViewCollection | null {
+  if (view.ownRead?.includes(cid) === true) return ownScope(app, cid);
+  return participantScope(app, cid, app.participantRead ?? []);
+}
+
+/** `ownRead`: the opt-in that narrows one participant page to the reader's own rows.
+ *
+ *  Three refusals, and each one is a page that would look broken rather than smaller.
+ *
+ *  NOT IN `collections` is `live`'s arithmetic: the page is handed no query for that dataset, so
+ *  there is nothing to narrow.
+ *
+ *  NOT A PARTICIPANT PAGE. `member` reads every collection whole because that is what the tier is
+ *  for, and `public` has no reader to be the owner of anything — an anonymous visitor's "own rows"
+ *  is not a smaller answer, it is no answer. Both would be honoured by nothing in the projection
+ *  and leave the author wondering why the key did nothing.
+ *
+ *  NOTHING TO FALL TO is the one worth the longest message. `ownScope` needs a field carrying the
+ *  reader's identity — `emailField`, `uidField`, or an id built from `auth.uid` — and a declaration
+ *  with none has no way to say which rows are this reader's. Left to the projection, the collection
+ *  is DROPPED rather than narrowed (`tierViews` filters out a null scope), so the page is handed no
+ *  dataset at all: strictly less than the whole collection it asked to trim, and silent. */
+function viewOwnReadProblems(app: AuthoredApp, view: NormalizedView): string[] {
+  const problems: string[] = [];
+  for (const cid of view.ownRead ?? []) {
+    if (!view.collections.includes(cid)) {
+      problems.push(
+        `${view.where}.ownRead names '${cid}', which is not in ${view.where}.collections. A view narrows a subset of the datasets it is handed — ` +
+          "the page is given no query for this one, so there is nothing to narrow.",
+      );
+      continue;
+    }
+    if (view.audience !== "participant") {
+      problems.push(
+        `${view.where}.ownRead names '${cid}' on an audience of "${view.audience}", and only "participant" has an owner to narrow to. The member ` +
+          "tier reads a collection whole because that is what it is for, and a public page's reader may be nobody at all. Drop the key, or move " +
+          "this page to the participant audience.",
+      );
+      continue;
+    }
+    if (ownScope(app, cid) === null) {
+      problems.push(
+        `${view.where}.ownRead names '${cid}', and nothing in public.submit.${cid} says which rows are the reader's: it declares no emailField, no ` +
+          'uidField and no idFrom "auth.uid". There is no query to narrow to, so the dataset would be dropped from the projection entirely and the ' +
+          "page handed nothing — less than the whole collection it asked to trim. Declare one of those, or drop the key.",
+      );
+    }
+  }
+  return problems;
+}
+
 /** The most a view may be capped to and still be a cap worth declaring.
  *
  *  Arbitrary, and deliberately generous: what the key exists to stop is the
@@ -1491,7 +1556,11 @@ function viewLimitProblems(app: AuthoredApp, view: NormalizedView): string[] {
       );
       continue;
     }
-    if (view.audience === "participant" && participantScope(app, cid, app.participantRead ?? [])?.scope === "own") {
+    // THE VIEW'S SCOPE, not the app's. `ownRead` makes one page's read own-scoped while another
+    // participant page of the same app still reads the collection whole, so asking `participantScope`
+    // alone would now answer about a different page than the one being capped — passing the pair
+    // that fails, and refusing one that is fine.
+    if (view.audience === "participant" && scopeOfView(app, view, cid)?.scope === "own") {
       problems.push(
         `${view.where}.limit caps '${cid}', which a participant reads as their OWN ROWS: the query already carries a where on the field that makes ` +
           "it readable, so ordering it as well needs a composite index, and the deployment declares none — the read would FAIL rather than return " +
@@ -1686,6 +1755,7 @@ function viewProblems(app: AuthoredApp, collections: readonly PublishableCollect
       ...viewPathProblems(view),
       ...view.collections.flatMap((cid) => viewCollectionProblems(app, view, cid, known)),
       ...viewLiveProblems(app, view),
+      ...viewOwnReadProblems(app, view),
       ...viewLimitProblems(app, view),
       ...articleCostProblems(app, view),
     ]),

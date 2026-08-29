@@ -102,6 +102,13 @@ export interface NormalizedView {
    *  same page, and the projection of an app with no `live` must be byte-for-
    *  byte what it was before this key existed. */
   live?: string[];
+  /** The subset of `collections` a PARTICIPANT reads as their own rows rather
+   *  than whole. See `ViewZ.ownRead`.
+   *
+   *  Absent, not empty, when the author declared nothing — `live`'s reason: an
+   *  app that never asked for this must project byte-for-byte what it did
+   *  before the key existed. */
+  ownRead?: string[];
   /** `{ <cid>: <rows> }` over a subset of `collections`: read only the LATEST
    *  `rows` records of that dataset. See `ViewZ.limit` for why it is the
    *  latest and never the first.
@@ -163,6 +170,7 @@ function declaredViews(app: AuthoredApp): NormalizedViewsResult {
     ...(view.article === undefined ? {} : { article: view.article }),
     collections: view.collections,
     ...(view.live === undefined ? {} : { live: view.live }),
+    ...(view.ownRead === undefined ? {} : { ownRead: view.ownRead }),
     ...(view.limit === undefined ? {} : { limit: view.limit }),
     where: `views[${index}]`,
   }));
@@ -373,6 +381,22 @@ export interface ProjectedViewCollection {
 export function participantScope(app: AuthoredApp, cid: string, participantRead: readonly string[]): ProjectedViewCollection | null {
   if (participantRead.includes(cid)) return { cid, scope: "all" };
   if (app.public?.enabled === true && (app.public.read ?? []).includes(cid)) return { cid, scope: "all" };
+  return ownScope(app, cid);
+}
+
+/** The OWN-ROW branches on their own — how the rules would hand a submitter
+ *  their own records, with the two widening branches above skipped.
+ *
+ *  Split out of `participantScope` rather than duplicated, so the widened and
+ *  the narrowed answer can never disagree about what "own" means: the query a
+ *  page is given by `views[].ownRead` has to be the same query the rules grant,
+ *  and a second copy of these three lines is where that stops being true.
+ *
+ *  Null where the declaration names no way to find the reader's rows. That is a
+ *  refusal at the gate rather than something to paper over here: dropped
+ *  silently, the collection would vanish from the projection and the page would
+ *  be handed no dataset at all — less than the "all" it asked to narrow. */
+export function ownScope(app: AuthoredApp, cid: string): ProjectedViewCollection | null {
   const submit: AuthoredSubmit | undefined = app.public?.submit?.[cid];
   if (submit?.emailField !== undefined) return { cid, scope: "own", emailField: submit.emailField };
   if (submit?.uidField !== undefined) return { cid, scope: "own", uidField: submit.uidField };

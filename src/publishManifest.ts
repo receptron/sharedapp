@@ -573,6 +573,36 @@ const ViewZ = z
      *  view is handed are still declared once, and `live` only says which of
      *  them keep moving. */
     live: z.array(NameZ).min(1).optional(),
+    /** The subset of `collections` this page reads as the READER'S OWN ROWS
+     *  rather than whole — `audience: "participant"` only.
+     *
+     *  WHAT IT IS FOR. A participant's scope is worked out from the app
+     *  (`participantScope`), and a collection the app publishes to the world
+     *  resolves to `all` before the own-row branches are ever reached: the
+     *  rows are public, so a page that showed the reader less would be hiding
+     *  what a stranger can read. That is the right default and it is not
+     *  always what the page is for. A magazine's writers' desk lists what YOU
+     *  published so you can correct it, and handing it every article the app
+     *  has ever published — bodies included, since a rule cannot project a
+     *  field away — is a read that grows with the archive to draw a list that
+     *  does not.
+     *
+     *  IT IS NOT A PERMISSION AND MUST NOT BE READ AS ONE. The rows stay
+     *  exactly as readable as they were; this narrows one page's QUERY. On a
+     *  collection outside `public.read` the participant already read their own
+     *  rows and this key changes nothing. Anything private is private because
+     *  the rules say so.
+     *
+     *  It projects no new vocabulary: the result is `scope: "own"` with the
+     *  same `emailField` / `uidField` / `ownDocId` every reader has honoured
+     *  since the first release, so an older host narrows the query correctly
+     *  without knowing this key exists. That is why it does not move
+     *  `APP_PROTOCOL`.
+     *
+     *  A SUBSET of `collections`, like `live`, and refused on a collection
+     *  with no own-row branch to fall to — there the page would be handed
+     *  nothing at all rather than less. */
+    ownRead: z.array(NameZ).min(1).optional(),
     /** The most recent N records of a dataset, instead of every record there
      *  is: `{ <cid>: <rows> }`, over a subset of `collections`.
      *
