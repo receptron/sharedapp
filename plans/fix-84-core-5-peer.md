@@ -73,12 +73,19 @@ core が `parseAppManifest` に軽い置き場を与えたとき、`server` を�
 
 ## core の API は変わっていないか
 
-変わっていない — sharedapp が触る範囲では。読んで判断せず、三通りに回した:
+**振る舞いは変わっていない。型は追加だけ変わった。** sharedapp が壊れることは無い。読んで判断せず、実際に回した:
 
-1. **型宣言**: 使う記号（`isValidCollectionName` / `isSafeCustomViewPath` / `parseAppManifest` /
-   `AppManifestResult` / `CollectionSchema` / `CollectionFieldSpec`）を宣言しているファイルを、4.0.0 と
-   5.4.0 の tarball で突き合わせた。違いは `CollectionSummary` に省略可能な `color?` が増えたことだけで、
-   sharedapp はこの型を使っていない。
+1. **型宣言**: `CollectionSchema` と `CollectionFieldSpec` は、`schema.d.ts` では
+   `z.infer<typeof CollectionSchemaZ>` / `z.infer<typeof FieldSpecZ>` と書かれているだけで、形の実体は
+   `schemaZ.d.ts` にある。こちらは 4.0.0 → 5.4.0 で**変わっている** — すべて追加:
+   - 列挙フィールドに `default?`
+   - カスタムビューに `allowSendChat?`
+   - `propagateDeletes?` と `color`
+   - カレンダーの取り込み元フィールドの列挙が広がった
+
+   それ以外に使う記号（`isValidCollectionName` / `isSafeCustomViewPath` / `parseAppManifest` /
+   `AppManifestResult`）の宣言は同じ。最初は `schema.d.ts` だけを比べて「同じ」と書いていた —
+   `z.infer` の先を見ていなかった。
 2. **振る舞い**: `isValidCollectionName` / `isSafeCustomViewPath` / `parseAppManifest` を生成した入力で
    各版に呼び、答えを丸ごと比べた。
 3. **sharedapp 自身**: このブランチのコードで `typecheck` と `test` を各版に対して回した。
@@ -92,7 +99,18 @@ core が `parseAppManifest` に軽い置き場を与えたとき、`server` を�
 | 5.4.0 | この変更 | OK | OK | — |
 
 2 と 3 は、`firebase` の問題が API の違いを隠さないよう、どの版でも `firebase` を入れて回した。
-版の間で本当に違うのは API ではなく、`collection/server` を `firebase` 無しで読めるかどうかだけ。
+
+### 追加されたキーの影響
+
+- sharedapp は追加されたキーを一つも名指ししていない。検査も射影も、これらに反応しない。
+- ただし `schemaDoc` は schema を**そのまま** `publishedSchema` に入れて公開する（ビューがどこを使うかを
+  推測しない、という設計）。schema を読むのは利用側で、zod のオブジェクトは知らないキーを既定で落とす
+  ので、利用側が core 4 で読めば新しいキーは消え、core 5.4 で読めば残って公開される。
+- mulmoserver の `firestore.rules` では、schema 文書（`apps/{aid}/collections/{cid}`）の書き込み条件は
+  owner であることだけで、キーを縛らない。rules は `publishedSchema` を読まない。公開が拒まれることも、
+  何かを許すことも無く、クライアントに見えるようになるだけ。
+- 追加されたキーのうち、公開前の検査が要るものがあるかもしれない（列挙の `default` と `initialStatus` /
+  `transitions.initial` の食い違い、公開コレクションでの `propagateDeletes`）。#84 の外の新しい機能の話。
 
 ## peer は `^5.4.0` にする（core の最新を下限にする）
 
@@ -120,9 +138,8 @@ sharedapp は core の最新に追従する、という判断。下限を、こ�
 
 ## 検証
 
-`format:check` / `lint` / `typecheck` / `test` / `lint:overrides` / `typecheck:summary` を core 5.4.0 で
-回す。加えて接触面の試験を `test/test_coreCompat.ts` に置いた: 呼んで期待どおり答えるところまで見る
-（「resolve できる」では、落ちたのが実行時の話だったので足りないことが今回はっきりした）。
+`format:check` / `lint` / `build` / `typecheck` / `test` / `lint:overrides` / `typecheck:summary` を core 5.4.0 で
+回す。加えて接触面の試験を `test/test_coreCompat.ts` に置いた: 呼んで期待どおり答えるところまで見る。
 
 固定したもの:
 
@@ -133,16 +150,35 @@ sharedapp は core の最新に追従する、という判断。下限を、こ�
 - `parseAppManifest` — `ok` / `kind` / `detail` の形。`detail` は `missing` 以外の枝にしか無く、
   その非対称こそ `parseAuthoredApp` が符号化しているもの。`detail` を持たない枝が増えれば
   あの一行が壊れる
-- **import 元の集合そのもの**。値として引く subpath を並べて固定したので、`collection/server` への
-  依存が増えれば赤くなる
+- **subpath ごとに、引いている名前そのもの。** 実行時に読み込むもの（値・副作用だけの import・動的
+  `import()`）と、型だけのものを分けて固定した。`server` から二つ目の名前を引いても、新しい subpath に
+  触れても赤くなる。型も固定するのは、公開シグネチャに出る型は `.d.ts` に書き出され、利用側の
+  コンパイラが自分の core に対して解決するから
+- **`firebase` が入っていないこと。** `src` を読む試験が通ること自体が「下限で `collection/server` は
+  `firebase` 無しに読める」の証拠で、`firebase` が別の理由で入った瞬間にその証拠は空になる
 
-最後のものは源文走査なので、黙って素通りする形になっていないことを変異で確かめた:
-import を `paths` から `server` に戻すと当該の試験が赤くなり、走査が `src/` を見失う変異でも赤くなる
-（何も見つけられなかった走査は「見つけなかったこと」について何を主張しても通るので、
-走査自身が獲物を捉えていることを先に主張させてある）。
+import の読み取りは、文字列の照合ではなく構文木（`ts.createSourceFile`）で行う。コメントや文字列の中の
+「import らしきもの」は数えず、複数行にまたがる句も同じ句として読み、副作用だけの `import "…"` と動的
+`import()` も拾う。`verbatimModuleSyntax` の下では `import type` / `export type` の句だけが消え、
+`import { type A } from` は `import {} from` として残ってモジュールを読み込む（実際にコンパイルして
+確かめた）ので、そのとおりに数える。読み取り自身も、拾うべき形と拾ってはいけない形の両方を、人工の
+入力で確かめている。
 
-`firebase` を外した後の試験が通ること自体が、下限 5.4.0 で `collection/server` が `firebase` 無しに
-読めることの証明になっている — `firebase` が要るなら、`src` を読み込む試験がすべて落ちる。
+壊して確かめたこと（壊す前と戻した後に、ファイルが元どおりかを毎回確かめた）:
+
+| 壊し方 | 結果 |
+|---|---|
+| `server` から二つ目の名前を引く | 実行時の固定が赤 |
+| 呼ばれない関数の中で `collection/firestore` を動的 `import()` | 実行時の固定が赤 |
+| 新しい subpath から型だけ引く | 型の固定が赤 |
+| コメントに core の import を書く | 緑のまま（数えない） |
+| 「型だけか」の判定を壊す | 読み取りの自己試験・実行時の固定・型の固定が赤 |
+| `firebase` を解決できる状態にする | `firebase` の試験が赤 |
+
+CI に `core-floor` を足した。peer が名乗る**下限**そのものを入れて `typecheck` と `test` を回す。ほかの
+仕事は lockfile が持つ版で回り、最初の定期更新で下限より上へずれるので、この仕事が無いと宣言した下限は
+誰も回していない主張に戻る。下限は `package.json` から読み取り、`^X.Y.Z` 一つとして読めない範囲なら
+別の版を試験せずに失敗する。
 
 依存を入れ替えたので、`node_modules` を消して `yarn install --frozen-lockfile` からの
 クリーン install で上のゲートを回し直してある。warm な `node_modules` は、lockfile が落とした
@@ -150,6 +186,9 @@ import を `paths` から `server` に戻すと当該の試験が赤くなり、
 
 ## 残課題
 
-今は下限と開発依存がどちらも 5.4.0 を指すので、CI が回しているのは宣言範囲の中の唯一の版そのもの。
-lockfile が 5.4.0 より先へ進んだ時点で、下限はまた誰も回していない主張に戻る。そのときは下限を
-入れて回す CI の仕事を足すか、下限を上げる。
+- **view 側の守りの誤り。** `test/test_viewSelfContained.ts` の `runtimeSpecifiers` は、
+  `import { type A, type B } from` を「丸ごと消える」と扱っているが、`verbatimModuleSyntax` の下では
+  `import {} from` として残り、`dist/view` の外を読み込む。今は `src/view` にその形が無いので壊れては
+  いない。こちらの構文木の読み取りに寄せれば、この誤りと読み取りの重複が同時に消える。守る不変条件が
+  別なので、別の変更にする。
+- **追加されたキーの公開前検査**（上記「追加されたキーの影響」）。

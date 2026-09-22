@@ -62,6 +62,11 @@ Consumers never build this — they get `dist/` from the published tarball — s
 `prepublishOnly` regression would ship an empty package and break on `npx mulmoterminal`
 rather than here.
 
+A `core-floor` job installs the FLOOR of the `@mulmoclaude/core` peer range — read out of
+`package.json`, never written in the workflow — and runs `typecheck` and `test` against it.
+The other jobs run whatever the lockfile holds, which drifts above the floor at the first
+routine upgrade; without this job the declared minimum is a claim nothing runs.
+
 An `overrides` job runs `yarn lint:overrides`, which asks the one question `yarn lint` cannot.
 Lint proves an exemption DELETED from `eslint.config.js` is at zero — the rule is an error
 everywhere else, so it goes red. It says nothing about an exemption still KEPT, and one whose
