@@ -33,6 +33,18 @@ const runtimeSpecifiers = (source: string): string[] =>
     .filter((reach) => reach.runtime)
     .map((reach) => reach.specifier);
 
+// The allow-list is built with one `readdir` of `dist/view`, filtered to `.js` — it does NOT
+// recurse. So a module in a SUBDIRECTORY 404s even when it imports nothing outside it, and the
+// directory staying FLAT is a separate requirement from what its files import. Asserted rather
+// than assumed: the import check below reads one directory, so a nested module would otherwise be
+// unguarded in both ways at once.
+test("`view/` has no subdirectories — the preview serves one directory, not a tree", () => {
+  const nested = readdirSync(viewDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name);
+  assert.deepEqual(nested, [], "a module under one of these 404s in the headless preview whatever it imports, because the allow-list is one level deep");
+});
+
 test("nothing under `view/` imports anything outside it at runtime", () => {
   const offenders: string[] = [];
   for (const name of readdirSync(viewDir).filter((entry) => entry.endsWith(".ts"))) {
