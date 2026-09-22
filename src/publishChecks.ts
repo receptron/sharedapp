@@ -27,7 +27,8 @@
 // safety.
 
 import type { CollectionFieldSpec, CollectionSchema } from "@mulmoclaude/core/collection";
-import { isSafeCustomViewPath } from "@mulmoclaude/core/collection/server";
+// `paths`, not `server`: `server` is core's server half, and only `parseAppManifest` — which has no lighter home — reaches for it.
+import { isSafeCustomViewPath } from "@mulmoclaude/core/collection/paths";
 import {
   articleCid,
   declaresMoves,

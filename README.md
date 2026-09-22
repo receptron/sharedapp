@@ -96,9 +96,10 @@ stays in `@mulmoclaude/core`, because MulmoClaude does use those. The line is
 *declaration to document*: anything that reads or writes a live collection is on the other
 side of it.
 
-`@mulmoclaude/core` is a **peer** dependency, for three things that have other users over
+`@mulmoclaude/core` is a **peer** dependency, for the parts that have other users over
 there and would circle back if they moved: `isValidCollectionName`,
-`isSafeCustomViewPath`, and the `CollectionSchema` types. Depending on core does not undo
+`isSafeCustomViewPath`, `parseAppManifest` (the one statement of the `aid` rule), and the
+`CollectionSchema` types. Depending on core does not undo
 the point — those parts do not change, so they do not ask for a release.
 
 ## Who uses it

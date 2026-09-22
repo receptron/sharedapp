@@ -62,6 +62,11 @@ Consumers never build this — they get `dist/` from the published tarball — s
 `prepublishOnly` regression would ship an empty package and break on `npx mulmoterminal`
 rather than here.
 
+A `core-floor` job installs the FLOOR of the `@mulmoclaude/core` peer range — read out of
+`package.json`, never written in the workflow — and runs `typecheck` and `test` against it.
+The other jobs run whatever the lockfile holds, which drifts above the floor at the first
+routine upgrade; without this job the declared minimum is a claim nothing runs.
+
 An `overrides` job runs `yarn lint:overrides`, which asks the one question `yarn lint` cannot.
 Lint proves an exemption DELETED from `eslint.config.js` is at zero — the rule is an error
 everywhere else, so it goes red. It says nothing about an exemption still KEPT, and one whose
@@ -98,8 +103,8 @@ order) and MulmoServer (rules-emulator round trip) — own all writes.
 
 The line against `@mulmoclaude/core` is *declaration to document*. The collection **runtime**
 (discovery, store, Firestore backend, host seam) stays in core. Core is a **peer** dependency
-for exactly three things: `isValidCollectionName`, `isSafeCustomViewPath`, and the
-`CollectionSchema` types.
+for exactly these: `isValidCollectionName`, `isSafeCustomViewPath`, `parseAppManifest`, and the
+`CollectionSchema` types — `test/test_coreCompat.ts` pins the set of subpaths they come from.
 
 **Nothing here grants anything.** `firestore.rules` (in MulmoServer) is the authority. These
 documents tell a page what exists so it can draw controls that work, and let a refusal name
