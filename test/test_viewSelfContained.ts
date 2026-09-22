@@ -10,7 +10,10 @@
 // this package imports these modules directly, where a `../` resolves perfectly well; the only
 // thing that could see the fault was a browser, and it saw it as somebody else's bug.
 //
-// A TYPE import may cross the line, because it is erased. Nothing else may.
+// An `import type` / `export type` CLAUSE may cross the line, because it is erased. Nothing else
+// may — and `import { type A } from` is NOT that clause: under `verbatimModuleSyntax` it compiles
+// to `import {} from`, which still loads the module and so still 404s. This test said otherwise
+// until #87, and the form it waved through is the one nobody had written yet.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -18,22 +21,17 @@ import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
+import { reachesIn } from "./importScan.js";
+
 const viewDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src", "view");
 
-/** Every `import`/`export ... from` that is NOT type-only, with its specifier. */
-const runtimeSpecifiers = (source: string): string[] => {
-  const found: string[] = [];
-  for (const line of source.split("\n")) {
-    const match = /^\s*(?:import|export)\s+(?!type\s)([^;]*?)from\s+"([^"]+)"/u.exec(line);
-    if (match === null) continue;
-    // `import { type A, type B } from` is erased whole; `import { a, type B }` is not.
-    const named = match[1] ?? "";
-    const inner = /^\s*\{([^}]*)\}\s*$/u.exec(named)?.[1];
-    if (inner !== undefined && inner.split(",").every((part) => part.trim() === "" || part.trim().startsWith("type "))) continue;
-    found.push(match[2] ?? "");
-  }
-  return found;
-};
+/** Every specifier this file LOADS. `reachesIn` is shared with `test_coreCompat.ts` and has its
+ *  own tests in `test_importScan.ts`; a specifier it could not read comes back as a reach whose
+ *  specifier is not relative, so it lands here as an offender rather than being waved through. */
+const runtimeSpecifiers = (source: string): string[] =>
+  reachesIn("view.ts", source)
+    .filter((reach) => reach.runtime)
+    .map((reach) => reach.specifier);
 
 test("nothing under `view/` imports anything outside it at runtime", () => {
   const offenders: string[] = [];
@@ -50,13 +48,20 @@ test("nothing under `view/` imports anything outside it at runtime", () => {
 
 test("the check can actually see an offender", () => {
   // Otherwise the test above passes by matching nothing, which is how it would look on the day the
-  // regex stops recognising an import.
+  // scan stops recognising an import.
   assert.deepEqual(runtimeSpecifiers('import { thing } from "../elsewhere.js";'), ["../elsewhere.js"]);
   assert.deepEqual(runtimeSpecifiers('export { thing } from "../elsewhere.js";'), ["../elsewhere.js"]);
   assert.deepEqual(runtimeSpecifiers('import { zod } from "zod";'), ["zod"]);
-  // And that it lets an erased one through.
+  // The forms a line-based regex used to miss: no clause at all, a dynamic one, and a clause the
+  // author broke over several lines.
+  assert.deepEqual(runtimeSpecifiers('import "../elsewhere.js";'), ["../elsewhere.js"]);
+  assert.deepEqual(runtimeSpecifiers('const load = () => import("../elsewhere.js");'), ["../elsewhere.js"]);
+  assert.deepEqual(runtimeSpecifiers('import {\n  thing,\n} from "../elsewhere.js";'), ["../elsewhere.js"]);
+  // Only the CLAUSE-level `type` is erased.
   assert.deepEqual(runtimeSpecifiers('import type { A } from "../appViews.js";'), []);
-  assert.deepEqual(runtimeSpecifiers('import { type A, type B } from "../appViews.js";'), []);
-  // A mixed one is NOT erased, so it counts.
+  assert.deepEqual(runtimeSpecifiers('export type { A } from "../appViews.js";'), []);
+  // `import { type A }` is NOT: it compiles to `import {} from`, which loads the module. This is
+  // the rule this test had backwards (#87).
+  assert.deepEqual(runtimeSpecifiers('import { type A, type B } from "../appViews.js";'), ["../appViews.js"]);
   assert.deepEqual(runtimeSpecifiers('import { a, type B } from "../appViews.js";'), ["../appViews.js"]);
 });

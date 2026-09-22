@@ -236,14 +236,6 @@ export default tseslint.config(
     files: ["test/test_appProtocol.ts"],
     rules: { "sonarjs/no-hardcoded-ip": "off" },
   },
-  {
-    // The scanner this flags reads THIS repository's own `src/view/*.ts`, line by line, at test
-    // time. Backtracking is a statement about untrusted input, and there is none — while the regexp
-    // decides which imports count toward the view runtime being self-contained, so rewriting it
-    // would need the whole differential proof for a property nothing here is exposed to.
-    files: ["test/test_viewSelfContained.ts"],
-    rules: { "sonarjs/super-linear-regex": "off" },
-  },
   // The four size guards below are RATCHETS, not exemptions. Each is an `error` whose ceiling is
   // what the file measures today, so the file may shrink and may not grow — and the number is the
   // rule's own `max`, which CI checks, rather than a count in a comment that nothing checks. The
