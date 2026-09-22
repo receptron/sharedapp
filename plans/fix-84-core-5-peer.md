@@ -22,8 +22,10 @@ core 5 の `@mulmoclaude/core/collection/server` の入口が、discovery の塊
 (`peerDependenciesMeta.firebase.optional = true`) ので、入れていない利用者がいて当然であり、
 その利用者はこの subpath を読めなかった。
 
-**core 4 ではそうではなかった。** 4.0.0 の dist で `firebase` に届くのは `collection/firestore`
-だけ — 名前が要求を言っている subpath だけだった。core 5 の退行であり、mulmoclaude#3263 に上げた。
+**core 4.0.0 ではそうではなかった。** 4.0.0 の dist で `firebase` に届くのは `collection/firestore`
+だけ — 名前が要求を言っている subpath だけだった。ただし 4 系の後半（4.9.2 / 4.10.0）では既に同じ
+問題が出ており、退行は 4 系の途中で入っている。以前の CI は 4.0.0 固定だったので、ここも見えて
+いなかった。mulmoclaude#3263 に上げた。
 
 ## 上流が 5.4.0 で直した
 
@@ -69,24 +71,52 @@ core が `parseAppManifest` に軽い置き場を与えたとき、`server` を�
 `parseAppManifest` は `aid` の規則を一箇所に保つために共有しているもので（CLAUDE.md に明記）、
 こちらで書き直せば規則が二箇所になる。だから `server` に残す。
 
-## peer は `^5.4.0` にする
+## core の API は変わっていないか
 
-**`^5.0.0` にしない理由** — 上のとおり、5.0.0〜5.3.x は `firebase` 無しでは `collection/server` を
-読めない。それを含む範囲を宣言すると、`firebase` を持たない利用者に対して偽の主張になる。
+変わっていない — sharedapp が触る範囲では。読んで判断せず、三通りに回した:
 
-**`^4 || ^5` にしない理由**:
+1. **型宣言**: 使う記号（`isValidCollectionName` / `isSafeCustomViewPath` / `parseAppManifest` /
+   `AppManifestResult` / `CollectionSchema` / `CollectionFieldSpec`）を宣言しているファイルを、4.0.0 と
+   5.4.0 の tarball で突き合わせた。違いは `CollectionSummary` に省略可能な `color?` が増えたことだけで、
+   sharedapp はこの型を使っていない。
+2. **振る舞い**: `isValidCollectionName` / `isSafeCustomViewPath` / `parseAppManifest` を生成した入力で
+   各版に呼び、答えを丸ごと比べた。
+3. **sharedapp 自身**: このブランチのコードで `typecheck` と `test` を各版に対して回した。
 
-- 利用者は core 5 で動いている。
-- 両方を宣言するなら、両方に対して CI を回さなければ**同じ盲点が逆向きに戻る** — 片方だけの
-  devDependency は、二つの主張のうち一方を誰も検査していない状態そのもの。
+| core | 使われている場所 | typecheck | test | 振る舞いの食い違い（5.4.0 と） |
+|---|---|---|---|---|
+| 4.0.0 | 以前の CI | OK | OK | 無し |
+| 4.9.2 | mulmoserver | OK | OK | 無し |
+| 4.10.0 | mulmoterminal | OK | OK | 無し |
+| 5.3.0 | mulmoterminal#2209 | OK | OK | 無し |
+| 5.4.0 | この変更 | OK | OK | — |
 
-使われていない版を宣言し続ける代わりに、**動かして確かめられる範囲だけを宣言する。**
+2 と 3 は、`firebase` の問題が API の違いを隠さないよう、どの版でも `firebase` を入れて回した。
+版の間で本当に違うのは API ではなく、`collection/server` を `firebase` 無しで読めるかどうかだけ。
+
+## peer は `^5.4.0` にする（core の最新を下限にする）
+
+sharedapp は core の最新に追従する、という判断。下限を、この変更の時点での core の最新版に置く。
+
+- **4 系を外すのは API の都合ではない。** 上のとおり、コードは 4.0.0 でもそのまま動く。外すのは、
+  古い major を宣言し続けるならその major にも CI を回し続けなければならないから — 片方だけの
+  devDependency で二つを宣言する状態こそ、二つの主張のうち一方を誰も検査していない状態。
+- **5.0〜5.3 を外すのは `firebase` のため。** その範囲の `collection/server` は `firebase` 無しでは
+  読めない。5.4.0 を下限にすれば、範囲内のどの版でも `firebase` が要らない。
 
 ### 利用側への影響
 
-MulmoTerminal は receptron/mulmoterminal#2209 で core 5.3.0 に上がったところなので、この変更の後は
-**`^5.4.0` の範囲の外になる**。5.4.0 へ上げれば戻る（上げれば 5.3.0 の `firebase` 問題も一緒に消える）。
-他の利用者の core の版は、この変更の時点では確かめていない。
+どちらの利用側も、main の時点では core 4 にいる。この変更を取り込んだ sharedapp に上げると、両方とも
+`^5.4.0` の範囲の外になり、core を 5.4.0 以上へ上げるまで peer が合わない。
+
+| 利用側 | 今の core | 範囲に戻るには |
+|---|---|---|
+| mulmoterminal | `^4.10.0` | 5.4.0 以上へ。core 5 へ移す receptron/mulmoterminal#2209 は未マージで、5.3.0 を狙っているので 5.4.0 に合わせる |
+| mulmoserver | `4.9.2`（固定） | 5.4.0 以上へ（major を上げる） |
+
+**公開は 0.36.0 として行う。** 利用側の宣言は `^0.35.0` で、0.x の caret は 0.36.0 を拾わないので、
+利用側が明示的に上げるまで今の組み合わせはそのまま動く。0.35.1 として出すと、`^0.35.0` の利用側が
+新規 install で自動的に拾い、core 4 のまま範囲外の peer を抱えることになる。
 
 ## 検証
 
@@ -117,3 +147,9 @@ import を `paths` から `server` に戻すと当該の試験が赤くなり、
 依存を入れ替えたので、`node_modules` を消して `yarn install --frozen-lockfile` からの
 クリーン install で上のゲートを回し直してある。warm な `node_modules` は、lockfile が落とした
 推移的依存をまだ持っているので嘘をつく。
+
+## 残課題
+
+今は下限と開発依存がどちらも 5.4.0 を指すので、CI が回しているのは宣言範囲の中の唯一の版そのもの。
+lockfile が 5.4.0 より先へ進んだ時点で、下限はまた誰も回していない主張に戻る。そのときは下限を
+入れて回す CI の仕事を足すか、下限を上げる。

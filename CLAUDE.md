@@ -98,8 +98,8 @@ order) and MulmoServer (rules-emulator round trip) — own all writes.
 
 The line against `@mulmoclaude/core` is *declaration to document*. The collection **runtime**
 (discovery, store, Firestore backend, host seam) stays in core. Core is a **peer** dependency
-for exactly three things: `isValidCollectionName`, `isSafeCustomViewPath`, and the
-`CollectionSchema` types.
+for exactly these: `isValidCollectionName`, `isSafeCustomViewPath`, `parseAppManifest`, and the
+`CollectionSchema` types — `test/test_coreCompat.ts` pins the set of subpaths they come from.
 
 **Nothing here grants anything.** `firestore.rules` (in MulmoServer) is the authority. These
 documents tell a page what exists so it can draw controls that work, and let a refusal name
