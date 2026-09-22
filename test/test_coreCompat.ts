@@ -13,12 +13,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import ts from "typescript";
 
 import { isValidCollectionName } from "@mulmoclaude/core/collection";
 import { isSafeCustomViewPath } from "@mulmoclaude/core/collection/paths";
 import { parseAppManifest, type AppManifestResult } from "@mulmoclaude/core/collection/server";
 
+import { reachesIn, UNRESOLVED, type ModuleReach } from "./importScan.js";
 import { parseAuthoredApp } from "../src/publishManifest.js";
 import { byText } from "../src/byText.js";
 
@@ -85,70 +85,11 @@ test("firebase is not installed, so loading collection/server shows it needs non
   assert.throws(() => createRequire(import.meta.url).resolve("firebase"), { code: "MODULE_NOT_FOUND" });
 });
 
-/** One reach from a source file into core. `runtime` is whether the module loads when the file
- *  does: under `verbatimModuleSyntax` only an `import type` / `export type` clause is erased, and
- *  `import { type A } from` survives as `import {} from`, loading its module all the same. */
-type CoreReach = { specifier: string; runtime: boolean; values: string[]; types: string[] };
-
 const CORE = "@mulmoclaude/core";
-
-/** A dynamic `import()` whose argument is not a string literal could reach anything, so it counts
- *  as a reach of its own — the pins then go red instead of the scan looking away. */
-const UNRESOLVED = "<import() of a non-literal>";
-
-const specifierOf = (node: ts.Expression | undefined): string => (node !== undefined && ts.isStringLiteral(node) ? node.text : UNRESOLVED);
-
-const splitNamed = (elements: readonly (ts.ImportSpecifier | ts.ExportSpecifier)[], allTypes: boolean): Pick<CoreReach, "values" | "types"> => ({
-  values: elements.filter((element) => !allTypes && !element.isTypeOnly).map((element) => (element.propertyName ?? element.name).text),
-  types: elements.filter((element) => allTypes || element.isTypeOnly).map((element) => (element.propertyName ?? element.name).text),
-});
-
-const reachOf = (specifier: string, allTypes: boolean, whole: string[], named: Pick<CoreReach, "values" | "types">): CoreReach =>
-  allTypes
-    ? { specifier, runtime: false, values: [], types: [...whole, ...named.types] }
-    : { specifier, runtime: true, values: [...whole, ...named.values], types: named.types };
-
-const reachOfImport = (node: ts.ImportDeclaration): CoreReach => {
-  const specifier = specifierOf(node.moduleSpecifier);
-  const clause = node.importClause;
-  if (clause === undefined) return { specifier, runtime: true, values: [], types: [] };
-  // `import defer` still loads its module, so only the `type` phase counts as erased.
-  const typeOnly = clause.phaseModifier === ts.SyntaxKind.TypeKeyword;
-  const bindings = clause.namedBindings;
-  const whole = [...(clause.name === undefined ? [] : ["default"]), ...(bindings !== undefined && ts.isNamespaceImport(bindings) ? ["*"] : [])];
-  return reachOf(specifier, typeOnly, whole, splitNamed(bindings !== undefined && ts.isNamedImports(bindings) ? bindings.elements : [], typeOnly));
-};
-
-const reachOfExport = (node: ts.ExportDeclaration): CoreReach => {
-  const clause = node.exportClause;
-  const whole = clause === undefined || ts.isNamespaceExport(clause) ? ["*"] : [];
-  return reachOf(
-    specifierOf(node.moduleSpecifier),
-    node.isTypeOnly,
-    whole,
-    splitNamed(clause !== undefined && ts.isNamedExports(clause) ? clause.elements : [], node.isTypeOnly),
-  );
-};
-
-/** Every reach into core from one file, read off the syntax tree rather than the text, so a
- *  comment or a string that merely spells an import is not one, and a clause over several lines
- *  is the same clause. */
-const reachesIn = (fileName: string, source: string): CoreReach[] => {
-  const found: CoreReach[] = [];
-  const visit = (node: ts.Node): void => {
-    if (ts.isImportDeclaration(node)) found.push(reachOfImport(node));
-    else if (ts.isExportDeclaration(node) && node.moduleSpecifier !== undefined) found.push(reachOfExport(node));
-    else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword)
-      found.push({ specifier: specifierOf(node.arguments[0]), runtime: true, values: ["*"], types: [] });
-    ts.forEachChild(node, visit);
-  };
-  visit(ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true));
-  return found.filter((reach) => reach.specifier.startsWith(CORE) || reach.specifier === UNRESOLVED);
-};
 
 /** subpath → the names reached through it, over every reach `pick` counts. A counted reach with no
  *  names still makes its subpath a key: a bare `import "…"` loads a module all the same. */
-const namesBySubpath = (reaches: readonly CoreReach[], pick: (reach: CoreReach) => readonly string[] | undefined): Record<string, string[]> => {
+const namesBySubpath = (reaches: readonly ModuleReach[], pick: (reach: ModuleReach) => readonly string[] | undefined): Record<string, string[]> => {
   const bySubpath = new Map<string, Set<string>>();
   reaches.forEach((reach) => {
     const names = pick(reach);
@@ -160,34 +101,6 @@ const namesBySubpath = (reaches: readonly CoreReach[], pick: (reach: CoreReach) 
   return Object.fromEntries([...bySubpath].map(([subpath, names]) => [subpath, [...names].sort(byText)]));
 };
 
-const X = `${CORE}/x`;
-
-/** The pins below are only as good as the scan, and a scan that misses a form passes every
- *  assertion about what it did not find. So it is held in both directions: the shapes it must see,
- *  and the near-misses it must not count. */
-const SCAN_CASES: [string, CoreReach[]][] = [
-  [`import { a, type B } from "${X}";`, [{ specifier: X, runtime: true, values: ["a"], types: ["B"] }]],
-  [`import { type A } from "${X}";`, [{ specifier: X, runtime: true, values: [], types: ["A"] }]],
-  [`import type { A } from "${X}";`, [{ specifier: X, runtime: false, values: [], types: ["A"] }]],
-  [`import d, * as ns from "${X}";`, [{ specifier: X, runtime: true, values: ["default", "*"], types: [] }]],
-  [`import "${X}";`, [{ specifier: X, runtime: true, values: [], types: [] }]],
-  [`const load = () => import("${X}");`, [{ specifier: X, runtime: true, values: ["*"], types: [] }]],
-  [`export { a } from "${X}";`, [{ specifier: X, runtime: true, values: ["a"], types: [] }]],
-  [`export * from "${X}";`, [{ specifier: X, runtime: true, values: ["*"], types: [] }]],
-  [`export type { A } from "${X}";`, [{ specifier: X, runtime: false, values: [], types: ["A"] }]],
-  [`import {\n  a,\n  b,\n} from "${X}";`, [{ specifier: X, runtime: true, values: ["a", "b"], types: [] }]],
-  [`const load = (path: string) => import(path);`, [{ specifier: UNRESOLVED, runtime: true, values: ["*"], types: [] }]],
-  [`// import { a } from "${X}";`, []],
-  [`const text = 'import { a } from "${X}"';`, []],
-  [`import { a } from "zod";`, []],
-];
-
-test("the scan sees every form that reaches a module, and counts nothing that does not", () => {
-  SCAN_CASES.forEach(([source, expected]) => {
-    assert.deepEqual(reachesIn("probe.ts", source), expected, source);
-  });
-});
-
 const SRC_DIR = new URL("../src/", import.meta.url);
 
 const tsFilesUnder = (dir: URL): URL[] =>
@@ -196,7 +109,11 @@ const tsFilesUnder = (dir: URL): URL[] =>
     return entry.name.endsWith(".ts") ? [new URL(entry.name, dir)] : [];
   });
 
-const SRC_REACHES = tsFilesUnder(SRC_DIR).flatMap((file) => reachesIn(file.pathname, readFileSync(file, "utf8")));
+// `test_importScan.ts` holds the scan's own tests, in both directions. What is pinned here is what
+// `src` reaches THROUGH it.
+const SRC_REACHES = tsFilesUnder(SRC_DIR)
+  .flatMap((file) => reachesIn(file.pathname, readFileSync(file, "utf8")))
+  .filter((reach) => reach.specifier.startsWith(CORE) || reach.specifier === UNRESOLVED);
 
 // Which names load from which subpath is a runtime cost and a contract, not a style question.
 // `collection/server` is core's server half, and reaching one name from it loads all of it, so the
@@ -219,6 +136,9 @@ test("src reaches core at runtime through exactly these names", () => {
 test("src reaches core's types through exactly these names", () => {
   assert.deepEqual(
     namesBySubpath(SRC_REACHES, (reach) => (reach.types.length > 0 ? reach.types : undefined)),
-    { [`${CORE}/collection`]: ["CollectionFieldSpec", "CollectionSchema"], [`${CORE}/collection/server`]: ["AppManifestResult"] },
+    {
+      [`${CORE}/collection`]: ["CollectionFieldSpec", "CollectionSchema"],
+      [`${CORE}/collection/server`]: ["AppManifestResult"],
+    },
   );
 });
