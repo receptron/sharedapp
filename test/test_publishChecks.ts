@@ -993,8 +993,8 @@ test("an app declaring a contract newer than this publisher writes is refused", 
   // The floor. Compiled anyway, the app would be published as documents stamped with a version they
   // do not honour — and the page that reads them believes the stamp, which is worse than a refusal
   // the author can act on. The refusal names both versions.
-  const problems = problemsFor({ protocol: "3.0.0" });
-  refuses(problems, 'This app declares `protocol: "3.0.0"`');
+  const problems = problemsFor({ protocol: "4.0.0" });
+  refuses(problems, 'This app declares `protocol: "4.0.0"`');
   // Both versions, so the author can see which side to move.
   refuses(problems, `this publisher writes ${APP_PROTOCOL}`);
 });
@@ -1325,14 +1325,15 @@ test("declaring uidField needs no protocol floor, because a build that lacks the
   // And the floor mechanism is still there for the change a schema cannot see — a key whose
   // MEANING moves. Naming a contract this build does not implement is refused, floor or no floor.
   //
-  // The example moved from 1.1.0 to 2.1.0 when article views made this build emit 2.0.0: a floor is
+  // The example moved from 1.1.0 to 2.1.0 when article views made this build emit 2.0.0, and to 3.1.0
+  // when pseudonym ids made it emit 3.0.0: a floor is
   // a statement about the PUBLISHER, so 1.1.0 is now a contract this build can honour and refusing
   // it would be wrong. What must still be refused is one above the newest it implements.
   refuses(
     board((draft) => {
-      draft.protocol = "2.1.0";
+      draft.protocol = "3.1.0";
     }),
-    "this publisher writes 2.0.0",
+    "this publisher writes 3.0.0",
   );
 });
 

@@ -51,7 +51,12 @@
  *  publish a floor this build cannot honour, and if the reader must understand it, the major goes
  *  up and older readers refuse the app. That day the stamp becomes per-app again, so that the
  *  refusal lands on the apps that need it rather than on everything published afterwards. */
-export const APP_PROTOCOL = "2.0.0";
+export const APP_PROTOCOL = "3.0.0";
+
+/** MAJOR 2: article pages and `idFrom: "slug"` — what a reader must draw (`views[].article`) or
+ *  build (a slug id) to be correct. Still what those apps are stamped, so a reader that knows major 2
+ *  keeps drawing them after major 3 exists. */
+export const APP_PROTOCOL_ARTICLE = "2.0.0";
 
 /** The contract MOST apps are still stamped with, and the one every deployed reader knows.
  *
@@ -100,8 +105,14 @@ export function protocolFor(app: {
   // or publish an article index over records with generated ids. So this asks both rather than
   // making one imply the other — and publish does NOT require an article view beside a slug id,
   // which would couple two features that have no reason to travel together.
-  const namedBySlug = Object.values(app.public?.submit ?? {}).some((submit) => submit?.idFrom === "slug");
-  return drawnHere || namedBySlug ? APP_PROTOCOL : APP_PROTOCOL_BASE;
+  const submits = Object.values(app.public?.submit ?? {});
+  const namedBySlug = submits.some((submit) => submit?.idFrom === "slug");
+  // MAJOR 3 for the same reason as a slug id, one major up because a reader that knows major 2 does
+  // not know it: an older `recordId` builds a random id where the rules require the pseudonym, and
+  // an older member page cannot find the reader's own row by `ownDocId: "pseudonym"`.
+  const pseudonymous = submits.some((submit) => submit?.idFrom === "pseudonym" || submit?.idFrom === "pseudonym+field");
+  if (pseudonymous) return APP_PROTOCOL;
+  return drawnHere || namedBySlug ? APP_PROTOCOL_ARTICLE : APP_PROTOCOL_BASE;
 }
 
 const SHAPE = /^(?<major>\d+)\.(?<minor>\d+)\.(?<patch>\d+)$/u;

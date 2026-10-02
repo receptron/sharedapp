@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { APP_PROTOCOL, APP_PROTOCOL_BASE, protocolFor, protocolOf, protocolWithin } from "../src/appProtocol.js";
+import { APP_PROTOCOL, APP_PROTOCOL_ARTICLE, APP_PROTOCOL_BASE, protocolFor, protocolOf, protocolWithin } from "../src/appProtocol.js";
 
 test("an ordinary app is still stamped the contract every deployed reader knows", () => {
   // THE COMPATIBILITY ASSERTION, and it survived the arrival of a second contract because that one
@@ -57,7 +57,8 @@ test("a floor above what this build emits is not within it", () => {
   // One narrowing assert, then three live ones. Repeating `emitted !== null` in each conjunct was
   // dead after the first `assert.ok`, which narrows the whole expression it was given.
   assert.ok(emitted !== null, "the build's own protocol must read as a version");
-  assert.ok(!protocolWithin({ major: 2, minor: 1, patch: 0 }, emitted));
+  assert.ok(!protocolWithin({ major: 3, minor: 1, patch: 0 }, emitted));
+  assert.ok(protocolWithin({ major: 3, minor: 0, patch: 0 }, emitted));
   assert.ok(protocolWithin({ major: 2, minor: 0, patch: 0 }, emitted));
   assert.ok(protocolWithin({ major: 1, minor: 0, patch: 0 }, emitted));
 });
@@ -90,10 +91,25 @@ test("a slug id moves the major on its own, with no article view anywhere", () =
   // submission is then refused with a bare permission error, on a page that drew itself perfectly.
   //
   // Stamped 1.0.0, that older reader would have gone ahead and done it.
-  assert.equal(protocolFor({ public: { submit: { articles: { idFrom: "slug" } } } }), APP_PROTOCOL);
+  assert.equal(protocolFor({ public: { submit: { articles: { idFrom: "slug" } } } }), APP_PROTOCOL_ARTICLE);
   // And the two are INDEPENDENT: neither implies the other, so both are asked. An app may name its
   // records by slug and publish no articles, or publish articles over generated ids.
-  assert.equal(protocolFor({ views: [{ article: { title: "title", body: "body" } }], public: { submit: { notes: { idFrom: "auto" } } } }), APP_PROTOCOL);
+  assert.equal(
+    protocolFor({ views: [{ article: { title: "title", body: "body" } }], public: { submit: { notes: { idFrom: "auto" } } } }),
+    APP_PROTOCOL_ARTICLE,
+  );
   assert.equal(protocolFor({ public: { submit: { bookings: { idFrom: "field" }, notes: {} } } }), APP_PROTOCOL_BASE);
   assert.equal(protocolFor({ public: { submit: {} } }), APP_PROTOCOL_BASE);
+});
+
+test("a pseudonym id moves to major 3, which a reader that only knows articles does not draw", () => {
+  // An older `recordId` builds a random id where the rules require the pseudonym, and an older member
+  // page cannot find the reader's own row by `ownDocId: "pseudonym"` — so a major-2 reader must refuse.
+  assert.equal(protocolFor({ public: { submit: { votes: { idFrom: "pseudonym" } } } }), APP_PROTOCOL);
+  assert.equal(protocolFor({ public: { submit: { votes: { idFrom: "pseudonym+field" } } } }), APP_PROTOCOL);
+  assert.equal(protocolFor({ views: [{ article: { title: "t", body: "b" } }], public: { submit: { votes: { idFrom: "pseudonym" } } } }), APP_PROTOCOL);
+  assert.equal(protocolOf(APP_PROTOCOL)?.major, 3);
+  assert.equal(protocolOf(APP_PROTOCOL_ARTICLE)?.major, 2);
+  // An app on the uid keeps the contract it had.
+  assert.equal(protocolFor({ public: { submit: { votes: { idFrom: "auth.uid" } } } }), APP_PROTOCOL_BASE);
 });

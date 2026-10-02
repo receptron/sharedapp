@@ -261,6 +261,8 @@ export default tseslint.config(
   // participant pages of one app can be scoped differently.
   // 1344 -> 1347 for `public.readPublished`: the public-view reachability check and the unknown-cid
   // list learn the key, and its refusals live in their own module (`publishReadPublished.ts`).
+  // 1370 -> 1378 for #104: the identity checks import the shared `pseudonym` predicates, and a
+  // `uidField` beside a pseudonym is refused (it would write the hidden uid into the row).
   // 1366 -> 1370 for #98: the selfUpdate guard covers every window ref (`fromField` / `untilField`), not
   // only the cancellation deadline's.
   // 1347 -> 1366 for `window.withdrawUntilField`: the window checks learn the third bound, a deadline
@@ -268,7 +270,7 @@ export default tseslint.config(
   // rewrite the field the deadline is read from.
   {
     files: ["src/publishChecks.ts"],
-    rules: { "max-lines": ["error", { max: 1370, skipBlankLines: true, skipComments: true }] },
+    rules: { "max-lines": ["error", { max: 1378, skipBlankLines: true, skipComments: true }] },
   },
   {
     files: ["test/test_publishChecks.ts"],

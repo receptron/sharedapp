@@ -15,7 +15,7 @@ import assert from "node:assert/strict";
 
 import { AuthoredAppZ, type AuthoredApp } from "../src/publishManifest.js";
 import { projectApp, projectAppViews, type PublishStamp } from "../src/publishProject.js";
-import { APP_PROTOCOL, APP_PROTOCOL_BASE } from "../src/appProtocol.js";
+import { APP_PROTOCOL_ARTICLE, APP_PROTOCOL_BASE } from "../src/appProtocol.js";
 import type { CollectionSchema } from "@mulmoclaude/core/collection";
 import { byText } from "../src/byText.js";
 
@@ -331,8 +331,8 @@ test("an app with an article view is stamped the newer contract, and it alone", 
     public: { enabled: true, read: ["articles"], submit: {} },
     views: [{ id: "public", audience: "public", path: "views/home.html", collections: ["articles"], article: { title: "title", body: "body" } }],
   });
-  assert.equal(projectApp(app, [], STAMP, null).config.protocol, APP_PROTOCOL);
-  assert.notEqual(APP_PROTOCOL, APP_PROTOCOL_BASE);
+  assert.equal(projectApp(app, [], STAMP, null).config.protocol, APP_PROTOCOL_ARTICLE);
+  assert.notEqual(APP_PROTOCOL_ARTICLE, APP_PROTOCOL_BASE);
   // The app next to it in the same deployment is untouched. This is the whole reason the stamp is
   // computed per app rather than bumped as a constant.
   assert.equal(projectApp(authored(), [], STAMP, null).config.protocol, APP_PROTOCOL_BASE);
@@ -353,7 +353,7 @@ test("the app's hue reaches the drawn page, and leaves the protocol alone", () =
   // article in its own colours, which is still the article. One too old to know `article` sends
   // every shared link to the index instead, which is not — so that one moves the major and this
   // does not. Pinned here because the two keys arrive on the same document.
-  assert.equal(config.protocol, APP_PROTOCOL);
+  assert.equal(config.protocol, APP_PROTOCOL_ARTICLE);
 });
 
 test("the projected article names its collection, whether or not the author had to", () => {
