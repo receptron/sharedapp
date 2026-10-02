@@ -57,9 +57,12 @@ built a `where` from since the first release). There is nothing for an older rea
 because there is nothing it has not already been reading — so the contract does not move, and the
 package version does.
 
-**Every projection is stamped `APP_PROTOCOL`, which is still 1.0.0** — the contract has not moved,
-and `uidField` is the reason that is worth saying. It went out as 2.0.0, then 1.1.0, then as nothing
-at all, because nothing anywhere reads the difference:
+**Each projection is stamped the contract that app needs** (`protocolFor`): `APP_PROTOCOL_BASE`
+(1.0.0) for most, `APP_PROTOCOL_ARTICLE` (2.0.0) for an article view or a slug id, `APP_PROTOCOL`
+(3.0.0) for a pseudonym id — each a thing an older reader would draw or build wrongly, so the major
+moves and that reader refuses the app. Adding a key does not, and `uidField` is the reason that is
+worth saying. It went out as 2.0.0, then 1.1.0, then as nothing at all, because nothing anywhere
+reads the difference:
 
 - the reader's gate compares the MAJOR only, so a minor is a number it does not act on;
 - a reader's behaviour switch would read one, and there is no such switch yet;
