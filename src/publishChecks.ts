@@ -1190,7 +1190,7 @@ function windowRefProblems(app: AuthoredApp, collections: readonly PublishableCo
     ...windowBoundProblems(cid, submit, known, "untilField", submit.window?.untilField, "closing"),
     ...windowBoundProblems(cid, submit, known, "withdrawUntilField", submit.window?.withdrawUntilField, "cancellation deadline"),
     ...unboundWithdrawDeadline(cid, submit),
-    ...movableWithdrawRef(cid, submit),
+    ...movableWindowRefs(cid, submit),
   ]);
 }
 
@@ -1202,17 +1202,23 @@ const unboundWithdrawDeadline = (cid: string, submit: AuthoredSubmit): string[] 
       ]
     : [];
 
-/** The deadline is read off the STORED row's `ref`, so a submitter who may rewrite that field can point
- *  their booking at a record with a later deadline and cancel past their own. */
-const movableWithdrawRef = (cid: string, submit: AuthoredSubmit): string[] => {
-  const ref = submit.window?.withdrawUntilField?.ref;
-  if (ref === undefined) return [];
-  return Object.entries(submit.selfUpdate ?? {})
-    .filter(([, fields]) => fields.includes(ref))
-    .map(
-      ([status]) => `public.submit.${cid}.selfUpdate.${status} includes '${ref}', the withdrawUntilField ref: rewriting it moves the cancellation deadline.`,
-    );
-};
+/** Each window bound is read off a field of the submitter's own row — the post-update value for an
+ *  edit, the stored one for a cancellation — so a submitter who may rewrite that field can point their
+ *  row at a record whose window is open, and write (or cancel) outside their own. */
+const WINDOW_REFS = [
+  ["fromField", "opening time"],
+  ["untilField", "closing time"],
+  ["withdrawUntilField", "cancellation deadline"],
+] as const;
+
+const movableWindowRefs = (cid: string, submit: AuthoredSubmit): string[] =>
+  WINDOW_REFS.flatMap(([key, what]) => {
+    const ref = submit.window?.[key]?.ref;
+    if (ref === undefined) return [];
+    return Object.entries(submit.selfUpdate ?? {})
+      .filter(([, fields]) => fields.includes(ref))
+      .map(([status]) => `public.submit.${cid}.selfUpdate.${status} includes '${ref}', the ${key} ref: rewriting it moves the ${what}.`);
+  });
 
 /** Both bounds, checked identically. `untilField` arrived with the booking
  *  desk and reads exactly like its twin, so a check that knew only about
