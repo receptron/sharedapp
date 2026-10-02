@@ -93,6 +93,24 @@ test("refuses a selfUpdate that rewrites the field a pseudonym+field id was buil
   );
 });
 
+test("refuses a uidField beside a pseudonym: it would write the uid the pseudonym hides into the row", () => {
+  refuses(publishProblems(poll({ uidField: "voterUid", createFields: ["choice", "voterUid", "status"] }), CIDS, OWNER), "names uidField 'voterUid'");
+  refuses(
+    publishProblems(
+      poll({ idFrom: "pseudonym+field", idField: "pollId", uidField: "voterUid", createFields: ["pollId", "choice", "voterUid", "status"] }),
+      CIDS,
+      OWNER,
+    ),
+    "names uidField 'voterUid'",
+  );
+  assert.deepEqual(
+    publishProblems(poll({ idFrom: "auth.uid", uidField: "voterUid", createFields: ["choice", "voterUid", "status"] }), CIDS, OWNER).filter((line) =>
+      line.includes("names uidField"),
+    ),
+    [],
+  );
+});
+
 test("projects the reader's own row by pseudonym for a member page", () => {
   assert.deepEqual(ownScope(poll(), "votes"), { cid: "votes", scope: "own", ownDocId: "pseudonym" });
 });
