@@ -105,6 +105,9 @@ export interface PublishedSchemaDoc extends Record<string, unknown> {
    *  document — staff with a role on this collection alone — can still order it newest first.
    *  Absent when the collection has none. */
   stampField?: string;
+  /** `collections[cid].publishField`, for the same readers: a writer with a role on this collection
+   *  alone draws the publish switch from it. Absent when the collection has none. */
+  publishField?: string;
 }
 
 /** The public settings document (`apps/{aid}/config/public`).
@@ -385,7 +388,14 @@ export function projectApp(
   };
   if (authored.name !== undefined) config.name = authored.name;
 
-  return { app, schemas: schemas.map(({ cid, schema }) => ({ cid, doc: schemaDoc(schema, stamp, authored.public?.submit?.[cid]?.stampField) })), config };
+  return {
+    app,
+    schemas: schemas.map(({ cid, schema }) => ({
+      cid,
+      doc: schemaDoc(schema, stamp, { stampField: authored.public?.submit?.[cid]?.stampField, publishField: authored.collections?.[cid]?.publishField }),
+    })),
+    config,
+  };
 }
 
 /** The public page's declaration, as the world-readable document carries it.
@@ -493,10 +503,15 @@ export function projectPublish(
 /** One published schema document. Written key by key rather than through
  *  `compact`, so the declared type is the type — an optional commit is the
  *  only variable part. */
-function schemaDoc(schema: CollectionSchema, stamp: PublishStamp, stampField: string | undefined): PublishedSchemaDoc {
+function schemaDoc(
+  schema: CollectionSchema,
+  stamp: PublishStamp,
+  fields: { stampField: string | undefined; publishField: string | undefined },
+): PublishedSchemaDoc {
   const doc: PublishedSchemaDoc = { publishedSchema: schema, publishedAt: stamp.publishedAt, publishedBy: stamp.email };
   if (stamp.commit !== undefined) doc.publishedCommit = stamp.commit;
-  if (stampField !== undefined) doc.stampField = stampField;
+  if (fields.stampField !== undefined) doc.stampField = fields.stampField;
+  if (fields.publishField !== undefined) doc.publishField = fields.publishField;
   return doc;
 }
 
