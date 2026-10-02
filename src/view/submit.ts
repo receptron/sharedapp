@@ -32,6 +32,8 @@
 //
 // Design: mulmoterminal `plans/feat-shared-app-preview.md` section 5.
 
+import { idFromSubmitter, idFromSubmitterAndField } from "./idStrategy.js";
+
 /** What this needs from the signed-in account, and nothing more. */
 export interface Submitter {
   uid: string;
@@ -280,7 +282,7 @@ export class SubmitRefused extends Error {
  *  again, which is the collision this refusal exists to prevent. What is JUDGED is trimmed; what
  *  the id is BUILT from is not, so an id whose spaces are part of it is unchanged. */
 export const missingIdField = (submit: SubmitSpec, record: Record<string, unknown>): string | undefined => {
-  if (submit.idFrom !== "field" && submit.idFrom !== "auth.uid+field" && submit.idFrom !== "slug") return undefined;
+  if (submit.idFrom !== "field" && !idFromSubmitterAndField(submit.idFrom) && submit.idFrom !== "slug") return undefined;
   if (submit.idField === undefined) return undefined;
   return stringAt(record, submit.idField).trim() === "" ? submit.idField : undefined;
 };
@@ -304,7 +306,8 @@ export const badSlugField = (submit: SubmitSpec, record: Record<string, unknown>
 /** The record id the declaration asks for.
  *
  *  `auth.uid` is "one answer per person"; `auth.uid+field` is "one per person per thing", and for
- *  that one the rules require EXACTLY `uid + "_" + data[idField]`. Built from the RECORD rather
+ *  that one the rules require EXACTLY `uid + "_" + data[idField]`. The `pseudonym` pair is the same
+ *  with the per-app pseudonym in place of the uid — `owner` is whichever `idOwnerOf` returned. Built from the RECORD rather
  *  than from what was typed, because the document carries fields the form never showed.
  *
  *  `unique` is passed in rather than generated: this module has no clock and no randomness, and a
@@ -317,10 +320,10 @@ export const badSlugField = (submit: SubmitSpec, record: Record<string, unknown>
  *  document and the second looks like it took something. Falling back to a random id would be a
  *  third silent failure and a worse one: the id IS the claim, so the rules would compare it to
  *  something else and refuse, or accept a booking that took nothing. */
-export const recordId = (submit: SubmitSpec, uid: string, record: Record<string, unknown>, unique: string): string => {
+export const recordId = (submit: SubmitSpec, owner: string, record: Record<string, unknown>, unique: string): string => {
   const missing = missingIdField(submit, record);
   if (missing !== undefined) throw new SubmitRefused(MISSING_ID_FIELD, `The submission has no value for "${missing}", which its id is built from.`);
-  if (submit.idFrom === "auth.uid") return uid;
+  if (idFromSubmitter(submit.idFrom)) return owner;
   // The name the record is published under. Refused here rather than sent,
   // because the rules refuse it too and a write that cannot land should not
   // reach the network with the field it was wrong about left unnamed.
@@ -334,7 +337,7 @@ export const recordId = (submit: SubmitSpec, uid: string, record: Record<string,
   }
   if (submit.idFrom === "slug" && submit.idField !== undefined) return stringAt(record, submit.idField);
   if (submit.idFrom === "field" && submit.idField !== undefined) return stringAt(record, submit.idField);
-  if (submit.idFrom === "auth.uid+field" && submit.idField !== undefined) return `${uid}_${stringAt(record, submit.idField)}`;
+  if (idFromSubmitterAndField(submit.idFrom) && submit.idField !== undefined) return `${owner}_${stringAt(record, submit.idField)}`;
   return unique;
 };
 

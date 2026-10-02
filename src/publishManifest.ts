@@ -349,7 +349,7 @@ const SubmitZ = z
      *  Both are frozen after create (`idHeld`), and for `slug` that is what
      *  keeps a published link resolving: the id is the URL, and the id cannot
      *  follow a renamed field. */
-    idFrom: z.enum(["auto", "auth.uid", "auth.uid+field", "field", "slug"]).optional(),
+    idFrom: z.enum(["auto", "auth.uid", "auth.uid+field", "pseudonym", "pseudonym+field", "field", "slug"]).optional(),
     idField: z.string().trim().min(1).optional(),
     /** Required by `idFrom: "field"`, and meaningless for every other mode
      *  including `slug` — see {@link IdInZ}. */

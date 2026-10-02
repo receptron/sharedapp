@@ -334,8 +334,9 @@ export interface ProjectedViewCollection {
    *  know this key sees `scope: "own"` with neither of the other two and must
    *  refuse the view rather than draw it unnarrowed. */
   uidField?: string;
-  /** `scope: "own"` — the row is the document whose id is the reader's uid. */
-  ownDocId?: "auth.uid";
+  /** `scope: "own"` — the row is the document whose id is the reader's uid, or their per-app
+   *  pseudonym (`pseudonymOf`). A reader that does not know `"pseudonym"` must refuse the view. */
+  ownDocId?: "auth.uid" | "pseudonym";
   /** Read only the LATEST `rows` records, ordered by `field` DESCENDING.
    *
    *  Both halves or neither, and the reader is bound by both: `rows` without
@@ -401,6 +402,7 @@ export function ownScope(app: AuthoredApp, cid: string): ProjectedViewCollection
   if (submit?.emailField !== undefined) return { cid, scope: "own", emailField: submit.emailField };
   if (submit?.uidField !== undefined) return { cid, scope: "own", uidField: submit.uidField };
   if (submit?.idFrom === "auth.uid") return { cid, scope: "own", ownDocId: "auth.uid" };
+  if (submit?.idFrom === "pseudonym") return { cid, scope: "own", ownDocId: "pseudonym" };
   return null;
 }
 

@@ -46,6 +46,7 @@ import type { AuthoredAgent, AuthoredApp, AuthoredCollectionConfig, AuthoredSubm
 import { statusFieldOf } from "./statusField.js";
 import { byText } from "./byText.js";
 import { publicReadable, readPublishedProblems } from "./publishReadPublished.js";
+import { idFromSubmitter, idFromSubmitterAndField } from "./view/idStrategy.js";
 
 /** What publish knows about a shared collection in this repository, as far as
  *  these checks are concerned: its cid and the schema key its records are
@@ -72,8 +73,8 @@ export interface PublishableCollection {
  *  branch carries the same shape and none of that meaning. */
 export function bindsSubmitterIdentity(submit: AuthoredSubmit): boolean {
   return (
-    submit.idFrom === "auth.uid" ||
-    submit.idFrom === "auth.uid+field" ||
+    idFromSubmitter(submit.idFrom) ||
+    idFromSubmitterAndField(submit.idFrom) ||
     submit.emailField !== undefined ||
     // The same meaning as `emailField` with no address in it: the row says
     // whose it is, and the rules read it. Missing here, an app that identifies
@@ -117,7 +118,7 @@ function submitOnlyProblems(app: AuthoredApp): string[] {
 
 function identityBindings(submit: AuthoredSubmit): string[] {
   const bindings: string[] = [];
-  if (submit.idFrom === "auth.uid" || submit.idFrom === "auth.uid+field") bindings.push(`idFrom: "${submit.idFrom}"`);
+  if (idFromSubmitter(submit.idFrom) || idFromSubmitterAndField(submit.idFrom)) bindings.push(`idFrom: "${submit.idFrom ?? ""}"`);
   if (submit.emailField !== undefined) bindings.push(`emailField: "${submit.emailField}"`);
   // Kept in step with `bindsSubmitterIdentity` above, and the pair is easy to split: this one only
   // WORDS the refusal, so a binding missing here does not change which declarations are refused —
@@ -442,9 +443,9 @@ function createFieldProblems(cid: string, submit: AuthoredSubmit): string[] {
 function submitCoherenceProblems(app: AuthoredApp, cid: string, submit: AuthoredSubmit): string[] {
   const collection = app.collections?.[cid];
   const problems = [...statusCoherenceProblems(cid, submit, collection), ...createFieldProblems(cid, submit)];
-  if (submit.idFrom === "auth.uid+field" && submit.idField === undefined) {
+  if (idFromSubmitterAndField(submit.idFrom) && submit.idField === undefined) {
     problems.push(
-      `public.submit.${cid}.idFrom is "auth.uid+field" but no idField is declared: the rules rebuild the document id from that field and refuse every create.`,
+      `public.submit.${cid}.idFrom is "${submit.idFrom ?? ""}" but no idField is declared: the rules rebuild the document id from that field and refuse every create.`,
     );
   }
   problems.push(...fieldIdProblems(cid, submit, collection?.statusField));
@@ -492,7 +493,7 @@ function selfWriteOwnerProblems(cid: string, submit: AuthoredSubmit): string[] {
     submit.selfDelete === undefined ? null : "selfDelete",
   ].filter((key): key is string => key !== null);
   if (declared.length === 0) return [];
-  if (submit.idFrom === "auth.uid" || submit.idFrom === "auth.uid+field" || submit.emailField !== undefined || submit.uidField !== undefined) {
+  if (idFromSubmitter(submit.idFrom) || idFromSubmitterAndField(submit.idFrom) || submit.emailField !== undefined || submit.uidField !== undefined) {
     return [];
   }
   const named = declared.map((key) => `public.submit.${cid}.${key}`).join(", ");
@@ -561,7 +562,7 @@ function selfDeleteProblems(cid: string, submit: AuthoredSubmit, collection: Aut
  *  One list because three checks ask the same question — is this field the
  *  rules' business, is it frozen, may it appear in `selfUpdate` — and a mode
  *  added to two of the three is the silent half of a permissive declaration. */
-const ID_FROM_FIELD_MODES: readonly string[] = ["auth.uid+field", "field", "slug"];
+const ID_FROM_FIELD_MODES: readonly string[] = ["auth.uid+field", "pseudonym+field", "field", "slug"];
 
 /** `idFrom: "field"` makes the document id a CLAIM ABOUT ANOTHER RECORD, and
  *  the claim is only worth what is checked.

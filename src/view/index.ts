@@ -70,6 +70,7 @@ export {
   type Who,
 } from "./intent.js";
 export { mailFor, type QueuedMail } from "./intentMail.js";
+export { idFromSubmitter, idFromSubmitterAndField, idOwnerOf, pseudonymOf, usesPseudonym } from "./idStrategy.js";
 export { portChannel, asIs, type Cloneable } from "./channel.js";
 export {
   MIRROR_OPEN,
