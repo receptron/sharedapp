@@ -103,6 +103,14 @@ test("refuses a deadline whose ref the stored row never carries", () => {
   );
 });
 
+test("refuses a selfUpdate that could move the row the deadline is read from", () => {
+  refuses(publishProblems(booking({ selfUpdate: { booked: ["seat"] } }), CIDS, OWNER), "selfUpdate.booked includes 'seat', the withdrawUntilField ref");
+  assert.deepEqual(
+    publishProblems(booking({ selfUpdate: { booked: ["email"] } }), CIDS, OWNER).filter((line) => line.includes("withdrawUntilField ref")),
+    [],
+  );
+});
+
 test("refuses a deadline with no selfDelete for it to bind", () => {
   refuses(publishProblems(booking({ selfDelete: undefined }), CIDS, OWNER), "withdrawUntilField is declared but selfDelete is not");
 });
