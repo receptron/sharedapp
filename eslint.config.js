@@ -261,9 +261,12 @@ export default tseslint.config(
   // participant pages of one app can be scoped differently.
   // 1344 -> 1347 for `public.readPublished`: the public-view reachability check and the unknown-cid
   // list learn the key, and its refusals live in their own module (`publishReadPublished.ts`).
+  // 1347 -> 1366 for `window.withdrawUntilField`: the window checks learn the third bound, a deadline
+  // declared without `selfDelete` (which it would bind) is refused, and so is a `selfUpdate` that could
+  // rewrite the field the deadline is read from.
   {
     files: ["src/publishChecks.ts"],
-    rules: { "max-lines": ["error", { max: 1347, skipBlankLines: true, skipComments: true }] },
+    rules: { "max-lines": ["error", { max: 1366, skipBlankLines: true, skipComments: true }] },
   },
   {
     files: ["test/test_publishChecks.ts"],

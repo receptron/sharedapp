@@ -218,6 +218,7 @@ function windowMillis(
         until?: string | undefined;
         fromField?: Record<string, string> | undefined;
         untilField?: Record<string, string> | undefined;
+        withdrawUntilField?: Record<string, string> | undefined;
       }
     | undefined,
 ): Record<string, unknown> | undefined {
@@ -237,6 +238,7 @@ function windowMillis(
     ...out,
     ...(window.fromField === undefined ? {} : { fromField: window.fromField }),
     ...(window.untilField === undefined ? {} : { untilField: window.untilField }),
+    ...(window.withdrawUntilField === undefined ? {} : { withdrawUntilField: window.withdrawUntilField }),
   };
   return Object.keys(projected).length > 0 ? projected : undefined;
 }
