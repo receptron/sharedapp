@@ -101,6 +101,10 @@ export interface PublishedSchemaDoc extends Record<string, unknown> {
   publishedAt: number;
   publishedBy: string;
   publishedCommit?: string;
+  /** `public.submit[cid].stampField`, so a reader who may list this collection but not open the app
+   *  document — staff with a role on this collection alone — can still order it newest first.
+   *  Absent when the collection has none. */
+  stampField?: string;
 }
 
 /** The public settings document (`apps/{aid}/config/public`).
@@ -381,7 +385,7 @@ export function projectApp(
   };
   if (authored.name !== undefined) config.name = authored.name;
 
-  return { app, schemas: schemas.map(({ cid, schema }) => ({ cid, doc: schemaDoc(schema, stamp) })), config };
+  return { app, schemas: schemas.map(({ cid, schema }) => ({ cid, doc: schemaDoc(schema, stamp, authored.public?.submit?.[cid]?.stampField) })), config };
 }
 
 /** The public page's declaration, as the world-readable document carries it.
@@ -489,9 +493,10 @@ export function projectPublish(
 /** One published schema document. Written key by key rather than through
  *  `compact`, so the declared type is the type — an optional commit is the
  *  only variable part. */
-function schemaDoc(schema: CollectionSchema, stamp: PublishStamp): PublishedSchemaDoc {
+function schemaDoc(schema: CollectionSchema, stamp: PublishStamp, stampField: string | undefined): PublishedSchemaDoc {
   const doc: PublishedSchemaDoc = { publishedSchema: schema, publishedAt: stamp.publishedAt, publishedBy: stamp.email };
   if (stamp.commit !== undefined) doc.publishedCommit = stamp.commit;
+  if (stampField !== undefined) doc.stampField = stampField;
   return doc;
 }
 
