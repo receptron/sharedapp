@@ -259,9 +259,11 @@ export default tseslint.config(
   // 1303 -> 1344 for `views[].ownRead`, which arrives as its own family: three refusals of the key
   // itself, and one existing refusal re-pointed from the app's scope to the view's now that two
   // participant pages of one app can be scoped differently.
+  // 1344 -> 1347 for `public.readPublished`: the public-view reachability check and the unknown-cid
+  // list learn the key, and its refusals live in their own module (`publishReadPublished.ts`).
   {
     files: ["src/publishChecks.ts"],
-    rules: { "max-lines": ["error", { max: 1344, skipBlankLines: true, skipComments: true }] },
+    rules: { "max-lines": ["error", { max: 1347, skipBlankLines: true, skipComments: true }] },
   },
   {
     files: ["test/test_publishChecks.ts"],

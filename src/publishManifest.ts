@@ -167,6 +167,10 @@ const CollectionConfigZ = z
      *  It needs no `statusField`: a writer may delete a row that has no status,
      *  which is the ordinary case for a roster of names. */
     writerDelete: z.boolean().optional(),
+    /** The field that marks a row PUBLISHED, for a collection in `public.readPublished`: visitors read
+     *  only the rows where it is `true`, and only a writer may set it — the rules hold it against the
+     *  submitter on create and on every non-writer update. */
+    publishField: z.string().trim().min(1).optional(),
     /** The field naming the member a row belongs to, for the `assignee` role.
      *
      *  Holds an ADDRESS, because that is the only thing the rules can compare
@@ -432,6 +436,9 @@ const PublicZ = z
      *  well as its own declaration. */
     enabled: z.boolean().optional(),
     read: z.array(NameZ).optional(),
+    /** Collections whose PUBLISHED rows a visitor may read (`collections[cid].publishField`). Not a
+     *  smaller `read`: a cid in `read` hands every row to the world, so the gate refuses both. */
+    readPublished: z.array(NameZ).optional(),
     /** The page the public sees, instead of the generated form.
      *
      *  A form is enough to ANSWER something and not enough to CHOOSE from

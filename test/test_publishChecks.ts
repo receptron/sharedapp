@@ -823,7 +823,7 @@ test("refuses a view fed a collection the visitor may not read", () => {
     viewed((view) => {
       view.collections = ["slots", "bookings"];
     }),
-    "not in public.read",
+    "in neither public.read nor public.readPublished",
   );
 });
 
