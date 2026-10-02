@@ -118,6 +118,9 @@ export interface PublishedConfigDoc extends Record<string, unknown> {
   name?: string;
   enabled: boolean;
   read: string[];
+  /** `{ <cid>: <publishField> }` — the collections whose published rows a visitor reads, and the field
+   *  the page filters on (the rules admit the listing only with that filter). Absent when none. */
+  readPublished?: Record<string, string>;
   submit: Record<string, Record<string, unknown>>;
   /** What a VISITOR may change about their own row here — the same shape every tier config carries,
    *  and for the same purpose: it tells the page which buttons exist, so a control is drawn where
@@ -283,6 +286,18 @@ function previousOf(existing: Record<string, unknown> | null): Record<string, un
  *
  *  Pure: no clock, no filesystem, no Firestore. Everything variable arrives as
  *  a parameter, which is what makes the conversion table testable as a table. */
+/** `config/public.readPublished`: each declared cid with its `publishField`. A cid without one is a
+ *  declaration the gate refuses, and is left out here rather than projected as a filter on nothing. */
+function readPublishedProjection(authored: AuthoredApp): Pick<PublishedConfigDoc, "readPublished"> {
+  const entries = (authored.public?.readPublished ?? []).flatMap((cid) => {
+    const field = authored.collections?.[cid]?.publishField;
+    if (field === undefined) return [];
+    const entry: [string, string] = [cid, field];
+    return [entry];
+  });
+  return entries.length === 0 ? {} : { readPublished: Object.fromEntries(entries) };
+}
+
 export function projectApp(
   authored: AuthoredApp,
   schemas: { cid: string; schema: CollectionSchema }[],
@@ -295,6 +310,7 @@ export function projectApp(
     ? compact({
         enabled: authored.public.enabled,
         read: authored.public.read,
+        readPublished: authored.public.readPublished,
         submit: Object.keys(submit).length > 0 ? submit : undefined,
       })
     : undefined;
@@ -338,6 +354,8 @@ export function projectApp(
     protocol: protocolFor(authored),
     enabled: authored.public?.enabled === true,
     read: authored.public?.read ?? [],
+    // Absent rather than empty, so an app that declares none publishes the document it did before.
+    ...readPublishedProjection(authored),
     submit,
     // The submit cids and only those: a self-write is declared inside `public.submit[cid]`, so a
     // collection nobody may submit to has nothing here to say. Absent rather than empty for the

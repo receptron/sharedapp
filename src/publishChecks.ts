@@ -45,6 +45,7 @@ import { writersOf } from "./appViews.js";
 import type { AuthoredAgent, AuthoredApp, AuthoredCollectionConfig, AuthoredSubmit, AuthoredView } from "./publishManifest.js";
 import { statusFieldOf } from "./statusField.js";
 import { byText } from "./byText.js";
+import { publicReadable, readPublishedProblems } from "./publishReadPublished.js";
 
 /** What publish knows about a shared collection in this repository, as far as
  *  these checks are concerned: its cid and the schema key its records are
@@ -875,6 +876,7 @@ function unknownCidProblems(app: AuthoredApp, collections: readonly PublishableC
   const mentions: [string, string[]][] = [
     ["collections", Object.keys(app.collections ?? {})],
     ["public.read", app.public?.read ?? []],
+    ["public.readPublished", app.public?.readPublished ?? []],
     ["public.submit", Object.keys(app.public?.submit ?? {})],
     ["participantRead", app.participantRead ?? []],
     // A member's per-collection keys are cids too, and a typo there is the
@@ -945,6 +947,7 @@ export function publishProblems(app: AuthoredApp, collections: readonly Publisha
     ...sealedProblems(app),
     ...sealedSelfDeleteProblems(app),
     ...mirrorProblems(app, collections),
+    ...readPublishedProblems(app),
     ...viewProblems(app, collections),
     ...agentProblems(app, collections),
   ];
@@ -1355,9 +1358,9 @@ function viewCollectionProblems(app: AuthoredApp, view: NormalizedView, cid: str
         `Shared collections here: ${known.size > 0 ? [...known].sort(byText).join(", ") : "(none)"}.`,
     ];
   }
-  if (view.audience === "public" && !(app.public?.read ?? []).includes(cid)) {
+  if (view.audience === "public" && !publicReadable(app, cid)) {
     return [
-      `${view.where}.collections names '${cid}', which is not in public.read: the page reads these with the VISITOR's permissions, so the rules refuse the ` +
+      `${view.where}.collections names '${cid}', which is in neither public.read nor public.readPublished: the page reads these with the VISITOR's permissions, so the rules refuse the ` +
         "read and the view draws an empty page. Nothing errors — this is the failure that looks like a working view with no data.",
     ];
   }
