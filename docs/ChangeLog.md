@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.39.0 — 2026-10-03
+
+### Per-app pseudonym ids: `idFrom: "pseudonym"` / `"pseudonym+field"` (#105, closes #104)
+
+A public row whose id is the anonymous uid can be joined to the same person's rows in another app of
+the project — the uid is shared across them (receptron/mulmoserver#325). Two new id strategies hide it:
+the id is `sha256(uid + ":" + aid)` in lowercase hex, or that joined to `idField` with `"_"`. One row
+per person per app still holds. MulmoServer's rules accept them (receptron/mulmoserver#326).
+
+- `@receptron/sharedapp/view`: `pseudonymOf(uid, aid)` (Web Crypto), `idOwnerOf(idFrom, uid, aid)`,
+  and the predicates `idFromSubmitter` / `idFromSubmitterAndField` / `usesPseudonym`. **`recordId`'s
+  second argument is now the id owner** — pass `await idOwnerOf(...)`, which is the uid for every
+  other strategy, so existing callers that pass the uid are unchanged for them
+- Publish checks treat the pseudonym strategies exactly as the uid ones (submitter binding →
+  `submitOnly`, `idField` required for `+field`, self-write owner, `idField` refused in `selfUpdate`),
+  and refuse a `uidField` beside a pseudonym — it would write the hidden uid into the row
+- Projection: `ownDocId: "pseudonym"` for a member page's own row
+
+### Protocol: three stamps
+
+- `APP_PROTOCOL` is now **3.0.0** and is stamped only on apps with a pseudonym id. An older reader
+  builds a random id where the rules require the pseudonym, so it must refuse the app.
+- Article views and slug ids keep **2.0.0**, now named `APP_PROTOCOL_ARTICLE`.
+- Everything else keeps `APP_PROTOCOL_BASE` (1.0.0).
+
+**Readers ship first.** MulmoServer must draw major 3 before an app with a pseudonym id is
+published. A consumer that compared article templates to `APP_PROTOCOL` should compare them to
+`APP_PROTOCOL_ARTICLE`.
+
 ## 0.38.1 — 2026-10-02
 
 ### Refuse a `selfUpdate` that can rewrite any window ref (#100, closes #98)
