@@ -278,6 +278,27 @@ test("a collection's document names its stamp field, for staff who cannot open t
   assert.equal(Object.hasOwn(docOf("notes") ?? {}, "stampField"), false);
 });
 
+test("a collection's document names its publish field, for writers who cannot open the app document", () => {
+  const app = AuthoredAppZ.parse({
+    aid: "app_box",
+    members: { "owner@salon.jp": { "*": "owner" } },
+    collections: { questions: { submitOnly: true, publishField: "published" } },
+    public: { enabled: true, readPublished: ["questions"], submit: { questions: { auth: "anonymous", createFields: ["text"] } } },
+  });
+  const { schemas: docs } = projectApp(
+    app,
+    [
+      { cid: "questions", schema: SCHEMA },
+      { cid: "notes", schema: SCHEMA },
+    ],
+    STAMP,
+    null,
+  );
+  const docOf = (cid: string) => docs.find((entry) => entry.cid === cid)?.doc;
+  assert.equal(docOf("questions")?.publishField, "published");
+  assert.equal(Object.hasOwn(docOf("notes") ?? {}, "publishField"), false);
+});
+
 test("the public config document carries no roster", () => {
   // `apps/{aid}/config/{docId}` is `allow read: if true`. It exists so a
   // public form can render itself; the roster is the reason `apps/{aid}`
