@@ -44,11 +44,12 @@ const booking = (submit: Record<string, unknown> = {}) =>
     },
   });
 
-const refuses = (problems: string[], fragment: string) =>
+const refuses = (problems: string[], fragment: string): void => {
   assert.ok(
     problems.some((line) => line.includes(fragment)),
     `expected a problem mentioning ${JSON.stringify(fragment)}, got:\n${problems.join("\n") || "(none)"}`,
   );
+};
 
 const at = (value: unknown, key: string): unknown => (typeof value === "object" && value !== null ? Reflect.get(value, key) : undefined);
 
