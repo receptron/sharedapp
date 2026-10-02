@@ -1,5 +1,51 @@
 # Changelog
 
+## 0.37.0 — 2026-10-02
+
+### Selective publish: `collections[cid].publishField` + `public.readPublished` (#94, closes #93)
+
+An owner can now show visitors only the rows they chose to publish — a question box whose answered
+questions appear on the public page, while everything else stays private.
+
+- `collections[cid].publishField` names the boolean that marks a row published.
+- `public.readPublished: [cid]` makes those rows world-readable. MulmoServer's rules list only
+  `where(publishField == true)` queries, open only published rows, refuse a submitter writing the
+  flag on create or update, and leave publishing to the owner (and writers) alone.
+- Projection: the app document carries `public.readPublished` and each collection's `publishField`;
+  `config/public.readPublished` maps each cid to its field so a page view knows which filter to apply.
+  Omitted entirely when unused, so existing apps project exactly as before.
+- Publish gate refuses: a `readPublished` cid without `publishField`, one also in `public.read`, the
+  field in `createFields` or any `selfUpdate` list, and the field colliding with the status / assignee
+  / stamp / id / uid / email field. Public views may be handed `readPublished` collections; public
+  agents stay on `public.read` (their watch reads unfiltered, which the rules refuse).
+
+### Cancellation deadline: `public.submit[cid].window.withdrawUntilField` (#96, closes #95)
+
+"Cancel up to the day before" for bookings. `{ ref, collection, field }` — the submitter's
+`selfDelete` is accepted only while the time is before the referenced record's `field` (epoch
+millis). The desk's own delete is not bound.
+
+- Projected beside `fromField` / `untilField`.
+- Gate: the same reference checks as the closing bound (collection exists, `ref` in `createFields`,
+  target field is a number), a deadline without `selfDelete` is refused, and so is a `selfUpdate`
+  list containing the `ref` — the rules read the deadline off the stored row, so a movable ref would
+  let a submitter retarget a later deadline. (The same shape for `fromField` / `untilField` is #98.)
+
+### Test guards on `view/` (#89 closes #87, #90)
+
+- The `view/` self-containment guard treated `import { type A } from "…"` as erased; under
+  `verbatimModuleSyntax` it is not. The scan now reads the syntax tree (`test/importScan.ts`, shared
+  with `test_coreCompat.ts`) and has its own tests.
+- `view/` must also stay flat: MulmoTerminal's headless preview serves only top-level `.js` files, so a
+  nested module 404s even when it imports nothing.
+
+### Maintenance (#91, #92, #97)
+
+- Plan follow-ups recorded as done (#91).
+- devDependencies: `@mulmoclaude/core` ^5.8.0, `typescript-eslint` ^8.71.0, `@types/node`,
+  `eslint-plugin-security`, `eslint-plugin-sonarjs`, `prettier`, `type-coverage` (#92, #97). The core
+  peer range is unchanged (`^5.4.0`).
+
 ## 0.36.0 — 2026-09-23
 
 ### `@mulmoclaude/core` is now a peer of `^5.4.0`, and the declared range is something CI runs (#85, closes #84)
