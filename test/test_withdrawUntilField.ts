@@ -111,6 +111,13 @@ test("refuses a selfUpdate that could move the row the deadline is read from", (
   );
 });
 
+test("refuses a selfUpdate that could move the row the opening or closing time is read from", () => {
+  const window = { fromField: { ...DEADLINE, field: "opensAt" }, untilField: { ...DEADLINE, field: "closesAt" } };
+  const problems = publishProblems(booking({ window, selfUpdate: { booked: ["seat"] } }), CIDS, OWNER);
+  refuses(problems, "selfUpdate.booked includes 'seat', the fromField ref");
+  refuses(problems, "selfUpdate.booked includes 'seat', the untilField ref");
+});
+
 test("refuses a deadline with no selfDelete for it to bind", () => {
   refuses(publishProblems(booking({ selfDelete: undefined }), CIDS, OWNER), "withdrawUntilField is declared but selfDelete is not");
 });
