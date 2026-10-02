@@ -260,6 +260,24 @@ test("the schema is published whole, beside the config the rules read", () => {
   assert.equal(only.doc.publishedBy, "owner@salon.jp");
 });
 
+test("a collection's document names its stamp field, for staff who cannot open the app document", () => {
+  const stamped = AuthoredAppZ.parse({
+    aid: "app_stamped",
+    members: { "owner@salon.jp": { "*": "owner" } },
+    collections: { bookings: { submitOnly: true } },
+    public: { enabled: true, submit: { bookings: { auth: "verifiedEmail", createFields: ["note", "bookedAt"], stampField: "bookedAt" } } },
+  });
+  const schemas = [
+    { cid: "bookings", schema: SCHEMA },
+    { cid: "notes", schema: SCHEMA },
+  ];
+  const { schemas: docs } = projectApp(stamped, schemas, STAMP, null);
+  const docOf = (cid: string) => docs.find((entry) => entry.cid === cid)?.doc;
+  assert.equal(docOf("bookings")?.stampField, "bookedAt");
+  // Absent, not undefined: Firestore refuses an undefined value.
+  assert.equal(Object.hasOwn(docOf("notes") ?? {}, "stampField"), false);
+});
+
 test("the public config document carries no roster", () => {
   // `apps/{aid}/config/{docId}` is `allow read: if true`. It exists so a
   // public form can render itself; the roster is the reason `apps/{aid}`
