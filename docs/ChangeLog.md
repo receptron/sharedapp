@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.38.0 — 2026-10-02
+
+### The collection document names its stamp field (#101, receptron/mulmoserver#309)
+
+MulmoServer orders a records table newest first by `public.submit[cid].stampField`, which it read off the
+app document — closed to staff whose role covers a single collection, so they saw id order. Publish now
+also writes `stampField` on the collection's own document (`apps/{aid}/collections/{cid}`), which every
+reader of the table may open. Absent when the collection declares no stamp. Additive: no rules change, no
+protocol change; MulmoServer falls back to the app document for apps published before this (deployed).
+It takes effect for an app when it is republished.
+
+### Docs (#99)
+
+- ChangeLog entry for 0.37.0.
+
 ## 0.37.0 — 2026-10-02
 
 ### Selective publish: `collections[cid].publishField` + `public.readPublished` (#94, closes #93)
