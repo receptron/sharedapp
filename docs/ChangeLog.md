@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.38.1 — 2026-10-02
+
+### Refuse a `selfUpdate` that can rewrite any window ref (#100, closes #98)
+
+MulmoServer's rules read `window.fromField` / `untilField` off the submitter's row — on an update, the
+post-update value — so a `public.submit[cid].selfUpdate.<status>` list containing that `ref` let a
+submitter point their row at a record whose window is open and edit outside their own (reproduced in the
+Firestore emulator). 0.37.0 refused this for `withdrawUntilField` only; publish now refuses it for all
+three window refs.
+
+May newly refuse an app that declared such a `selfUpdate`. Checked against a stand-in apps checkout built
+from the mulmoterminal templates: `check:apps` passes, and only the deliberately movable shape is refused.
+
 ## 0.38.0 — 2026-10-02
 
 ### The collection document names its stamp field (#101, receptron/mulmoserver#309)
