@@ -70,7 +70,8 @@ test("refuses a publish field that is already another field", () => {
 });
 
 test("refuses a readPublished name that is not a collection here", () => {
-  refuses(box({ public: { readPublished: ["questoins"] } }), "public.readPublished");
+  // The unknown-cid line itself: "public.readPublished" alone also matches the no-publishField refusal.
+  refuses(box({ public: { readPublished: ["questoins"] } }), "public.readPublished names 'questoins', which is not a shared collection");
 });
 
 test("lets a public view be handed a readPublished collection", () => {
@@ -90,4 +91,11 @@ test("projects nothing new for an app that declares none", () => {
   const projected = projectApp(plain, [], STAMP, null);
   assert.equal(Object.hasOwn(projected.config, "readPublished"), false);
   assert.equal(at(at(projected.app, "public"), "readPublished"), undefined);
+});
+
+test("keeps public agents to public.read: their watch reads a collection unfiltered", () => {
+  // Deliberate, not an omission: the rules admit a readPublished listing only with the published
+  // filter, which an agent's subscription does not ask for — so the brief would be refused forever.
+  const greeter = { id: "greeter", audience: "public", watch: ["questions"], instruction: "質問に挨拶する。" };
+  refuses(AuthoredAppZ.parse({ ...box(), agents: [greeter] }), "public.readPublished rows need a filter");
 });

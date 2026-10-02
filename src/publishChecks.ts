@@ -1864,7 +1864,7 @@ function agentInstructionProblems(instruction: string, where: string): string[] 
 /** Why this audience is denied a read of `cid`, in the terms that audience's own rules use. */
 const unreadableBecause = (audience: ViewAudience, cid: string): string =>
   audience === "public"
-    ? "it is not in public.read, so the rules refuse the read and the subscription would never fire."
+    ? "it is not in public.read (public.readPublished rows need a filter an agent's watch does not apply), so the rules refuse the read and the subscription would never fire."
     : `it is not in participantRead, and public.submit.${cid} declares no emailField, no uidField and no idFrom "auth.uid", so there is no row the rules would call theirs.`;
 
 /** ONE cid a brief names, judged for the audience the brief is written for.
