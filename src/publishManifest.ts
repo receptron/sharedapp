@@ -268,6 +268,9 @@ const WindowZ = z
     until: z.iso.datetime().optional(),
     fromField: WindowRefZ.optional(),
     untilField: WindowRefZ.optional(),
+    /** The deadline on the SUBMITTER's own cancellation (`selfDelete`), read off the record the stored
+     *  row points at. The desk's delete is not bound by it. */
+    withdrawUntilField: WindowRefZ.optional(),
   })
   .strict();
 
