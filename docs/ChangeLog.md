@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.40.0 — 2026-10-03
+
+### The collection document names its publish field (#107, receptron/mulmoserver#309)
+
+Publish now also writes `collections[cid].publishField` on the collection's own document
+(`apps/{aid}/collections/{cid}`), beside `stampField` (0.38.0). MulmoServer draws the per-row publish
+switch for a writer whose role covers that collection alone — who cannot open the app document — from
+this field and the staff projection's write list (receptron/mulmoserver#328, deployed). Absent when the
+collection declares none. Additive: no rules change, no protocol change. Takes effect for an app when
+it is republished.
+
 ## 0.39.0 — 2026-10-03
 
 ### Per-app pseudonym ids: `idFrom: "pseudonym"` / `"pseudonym+field"` (#105, closes #104)
