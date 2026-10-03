@@ -8,6 +8,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
+import { byText } from "../src/byText.js";
 import { reachesIn } from "./importScan.js";
 
 const srcDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src");
@@ -26,7 +27,7 @@ const bareReaches = (entry: string): string[] => {
     }
   };
   visit(path.join(srcDir, entry));
-  return [...bare].sort();
+  return [...bare].sort(byText);
 };
 
 test("the browser entry loads nothing but zod and core's browser-safe subpaths", () => {
