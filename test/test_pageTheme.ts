@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 
 import { AuthoredAppZ } from "../src/publishManifest.js";
 import { projectApp, type PublishStamp } from "../src/publishProject.js";
+import { PublicThemeZ } from "../src/pageTheme.js";
 
 const STAMP: PublishStamp = { uid: "u", email: "o@x.jp", publishedAt: 1 };
 const parses = (theme: unknown) => AuthoredAppZ.safeParse({ aid: "a", members: {}, theme }).success;
@@ -45,4 +46,13 @@ test("config/public.theme carries what was declared, the banner only as a flag, 
   assert.deepEqual(configOf({ hue: 200 }).theme, { hue: 200 });
   assert.equal(Object.hasOwn(configOf(undefined), "theme"), false);
   assert.equal(JSON.stringify(configOf({ ticker: "x" }).theme).includes("views/"), false);
+});
+
+test("what the publisher projects, the page's schema reads back — one grammar for both", () => {
+  for (const theme of [{ hue: 200 }, { bar: ["#f39", "#fc0"], barText: "#fff", background: ["#abc"], icon: "🌸", ticker: "★", banner: "views/b.svg" }, {}]) {
+    assert.equal(PublicThemeZ.safeParse(configOf(theme).theme).success, true, JSON.stringify(theme));
+  }
+  for (const bad of [{ bar: ["red"] }, { banner: "views/b.svg" }, { glitter: 1 }, { barText: "#fff; x" }]) {
+    assert.equal(PublicThemeZ.safeParse(bad).success, false, JSON.stringify(bad));
+  }
 });

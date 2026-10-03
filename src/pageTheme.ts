@@ -6,6 +6,8 @@
 //   - the banner is a picture shown through `<img>` — where even an SVG's script does not run — and
 //     the host writes its bytes to `config/banner` at publish, so the page needs no URL and no bucket.
 
+import { z } from "zod";
+
 import type { AuthoredApp } from "./publishManifest.js";
 
 export const HEX_COLOR = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/u;
@@ -29,16 +31,29 @@ export const MAX_GRADIENT_STOPS = 3;
 
 export const isOneCharacter = (text: string): boolean => [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text)].length === 1;
 
+const HexColorZ = z.string().trim().regex(HEX_COLOR, { message: "is a colour written #rgb or #rrggbb" });
+/** One colour, or a gradient of up to three. */
+const GradientZ = z.array(HexColorZ).min(1).max(MAX_GRADIENT_STOPS);
+
+/** Every key but the banner, which the author names by path and the page receives as a flag. */
+const themeKeys = {
+  hue: z.number().int().min(0).max(359).optional(),
+  bar: GradientZ.optional(),
+  barText: HexColorZ.optional(),
+  background: GradientZ.optional(),
+  icon: z.string().trim().refine(isOneCharacter, { message: "is one character, such as one emoji" }).optional(),
+  ticker: z.string().trim().min(1).max(TICKER_MAX_CHARS).optional(),
+};
+
+/** `theme` in `app.json`. */
+export const AuthoredThemeZ = z.object({ ...themeKeys, banner: z.string().trim().regex(BANNER_PATH, { message: BANNER_SHAPE }).optional() }).strict();
+
+/** `config/public.theme` — what a page READS. The page parses with this, so the rule that admitted the
+ *  declaration is the rule that admits it on the way out: one grammar, not two. */
+export const PublicThemeZ = z.object({ ...themeKeys, banner: z.literal(true).optional() }).strict();
+
 /** What `config/public.theme` carries: the declaration less the banner's path, which only the host needs. */
-export interface PageTheme {
-  hue?: number;
-  bar?: string[];
-  barText?: string;
-  background?: string[];
-  icon?: string;
-  ticker?: string;
-  banner?: true;
-}
+export type PageTheme = z.infer<typeof PublicThemeZ>;
 
 const BANNER_FLAG: { banner: true } = { banner: true };
 
