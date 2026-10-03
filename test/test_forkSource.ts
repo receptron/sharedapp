@@ -7,7 +7,7 @@ import type { CollectionSchema } from "@mulmoclaude/core/collection";
 import { AuthoredAppZ } from "../src/publishManifest.js";
 import { publishProblems } from "../src/publishChecks.js";
 import { projectApp, type PublishStamp } from "../src/publishProject.js";
-import { forkFrom, projectForkSource } from "../src/forkSource.js";
+import { forkFrom, forkSourceProblems, projectForkSource } from "../src/forkSource.js";
 import { protocolFor } from "../src/appProtocol.js";
 
 const OWNER = "owner@tally.jp";
@@ -135,7 +135,10 @@ test("the copy goes through the publish gate: what publish would refuse, a fork 
   const votes = { auth: "anonymous", idFrom: "pseudonym", uidForm: "pseudonym", createFields: ["choice", "status"], initialStatus: "voted" };
   const forked = forkFrom({ ...doc, app: { ...doc.app, public: { ...doc.app.public, submit: { votes } } } }, REQUEST);
   assert.equal(forked.ok, false);
-  assert.equal(forked.problems.some((problem) => problem.includes("uidForm")), true);
+  assert.equal(
+    forked.problems.some((problem) => problem.includes("uidForm")),
+    true,
+  );
 });
 
 test("forkable beside agents[] is refused at publish; either alone is not", () => {
@@ -153,4 +156,36 @@ test("forkable beside agents[] is refused at publish; either alone is not", () =
     problemsOf({}).some((problem) => problem.includes("forkable")),
     false,
   );
+});
+
+test("a source that names a member or the owner anywhere is refused before it is written", () => {
+  const clean = authored();
+  assert.deepEqual(forkSourceProblems(clean, source(), [{ id: "desk", html: "<p>Votes</p>" }]), []);
+  const named = authored({ name: `Ask ${OWNER.toUpperCase()}` });
+  assert.equal(forkSourceProblems(named, projectForkSource(named, SCHEMAS, PUBLISHED_AT), []).length, 1);
+  const labelled: CollectionSchema = {
+    ...voteSchema,
+    fields: { ...voteSchema.fields, choice: { type: "enum", label: `Ask ${STAFF}`, values: ["red", "blue"] } },
+  };
+  assert.equal(forkSourceProblems(clean, projectForkSource(clean, [{ cid: "votes", schema: labelled }], PUBLISHED_AT), []).length, 1);
+  assert.equal(forkSourceProblems(clean, source(), [{ id: "desk", html: `<p>owner uid_owner</p>` }]).length, 1);
+});
+
+test("a schema whose fields are not field specs is refused, never thrown on", () => {
+  const doc = source();
+  for (const field of [null, 1, "x", { label: "no type" }, { type: "enum", values: [1] }]) {
+    const bad = { ...doc, schemas: { votes: { ...voteSchema, fields: { ...voteSchema.fields, choice: field } } } };
+    assert.equal(forkFrom(bad, REQUEST).ok, false, JSON.stringify(field));
+  }
+});
+
+test("the app's own protocol floor survives the fork and is held by the gate", () => {
+  const doc = source();
+  assert.equal(forkFrom({ ...doc, app: { ...doc.app, protocol: "3.0.0" } }, REQUEST).ok, true);
+  assert.equal(forkFrom({ ...doc, app: { ...doc.app, protocol: "4.0.0" } }, REQUEST).ok, false);
+});
+
+test("an address is found whatever its case on the roster and in the text", () => {
+  const mixed = authored({ members: { "Mixed@Tally.jp": { "*": "owner" } }, name: "Ask mixed@tally.jp" });
+  assert.equal(forkSourceProblems(mixed, projectForkSource(mixed, SCHEMAS, PUBLISHED_AT), []).length, 1);
 });

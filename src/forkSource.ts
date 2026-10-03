@@ -50,11 +50,35 @@ export function projectForkSource(authored: AuthoredApp, schemas: { cid: string;
   };
 }
 
+/** Who the source names, wherever the author wrote it: an address on the roster or the owner's uid in
+ *  an app name, a label, an enum value or a page's HTML would be published to anyone by `config/fork`.
+ *  The host runs this before writing the source, with every page it is about to copy, and refuses
+ *  `forkable` while one is found. Matched case-insensitively, as addresses are. */
+export function forkSourceProblems(authored: AuthoredApp, source: ForkSourceDoc, pages: { id: string; html: string }[]): string[] {
+  const identities = [...Object.keys(authored.members), ...(authored.owner === undefined ? [] : [authored.owner])].map((identity) => identity.toLowerCase());
+  const places = [
+    { where: "the declaration or a schema", text: JSON.stringify(source) },
+    ...pages.map((page) => ({ where: `the page '${page.id}'`, text: page.html })),
+  ];
+  return places.flatMap(({ where, text }) => {
+    const lowered = text.toLowerCase();
+    const found = identities.filter((identity) => lowered.includes(identity));
+    return found.length === 0
+      ? []
+      : [`\`forkable\` would publish ${found.join(", ")} (written in ${where}) to anyone who opens the public page. Remove it there, or drop \`forkable\`.`];
+  });
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 
-// Shallow on purpose: the source is written by its owner alone (`config/*` is owner-written), and a
-// schema the core validator would refuse breaks only the forker's copy of that owner's own app.
-const isCollectionSchema = (value: unknown): value is CollectionSchema => isRecord(value) && typeof value.primaryKey === "string" && isRecord(value.fields);
+// Down to each field's `type` and `values` — what the gate reads. Not the core validator, which this
+// package does not import at runtime; a deeper fault breaks only a copy of the source owner's own app,
+// and `forkFrom` turns anything the gate throws on into a refusal.
+const isStringList = (value: unknown): boolean => Array.isArray(value) && value.every((entry) => typeof entry === "string");
+const isFieldSpec = (value: unknown): boolean =>
+  isRecord(value) && typeof value.type === "string" && (value.values === undefined || isStringList(value.values));
+const isCollectionSchema = (value: unknown): value is CollectionSchema =>
+  isRecord(value) && typeof value.primaryKey === "string" && isRecord(value.fields) && Object.values(value.fields).every(isFieldSpec);
 
 function protocolReadable(protocol: unknown): string[] {
   const stated = typeof protocol === "string" ? protocolOf(protocol) : null;
@@ -101,7 +125,17 @@ export function forkFrom(data: unknown, request: ForkRequest): ForkResult {
     ...(request.slug === undefined ? {} : { slug: request.slug }),
   });
   if (!parsed.success) return { ok: false, problems: parsed.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`) };
-  const collections = schemas.map(({ cid, schema }) => ({ cid, primaryKey: schema.primaryKey }));
-  const problems = [...publishProblems(parsed.data, collections, request.email), ...schemaRefProblems(parsed.data, schemas)];
+  const problems = gateProblems(parsed.data, schemas, request.email);
   return problems.length > 0 ? { ok: false, problems } : { ok: true, app: parsed.data, schemas, views };
+}
+
+/** The publish gate, with a throw read as a refusal: the source is another person's document, and
+ *  the gate was written for declarations the author's own host had already parsed. */
+function gateProblems(app: AuthoredApp, schemas: { cid: string; schema: CollectionSchema }[], email: string): string[] {
+  const collections = schemas.map(({ cid, schema }) => ({ cid, primaryKey: schema.primaryKey }));
+  try {
+    return [...publishProblems(app, collections, email), ...schemaRefProblems(app, schemas)];
+  } catch (error) {
+    return [`the fork source could not be checked: ${error instanceof Error ? error.message : String(error)}`];
+  }
 }

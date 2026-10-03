@@ -12,6 +12,9 @@ The sharedapp half of web forking. Design and order across repos: receptron/mulm
 - `forkFrom(data, { aid, email, name?, slug? })` → the forker's authored app (the forker as the only
   owner), validated by `AuthoredAppZ` and run through `publishProblems` + `schemaRefProblems`, so a
   copy is never a declaration publish would refuse.
+- `forkSourceProblems(authored, source, pages)`: the host runs it before writing the source and
+  refuses `forkable` while a roster address or the owner uid appears anywhere in the source or the
+  pages' HTML (case-insensitive).
 - `forkable` beside `agents[]` is refused at publish (`forkCheck.ts`): the copy would run someone's
   agent at an app nobody priced.
 
