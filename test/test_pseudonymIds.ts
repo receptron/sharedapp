@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import { AuthoredAppZ } from "../src/publishManifest.js";
 import { publishProblems } from "../src/publishChecks.js";
 import { ownScope } from "../src/appViews.js";
+import { projectApp, projectAppViews } from "../src/publishProject.js";
 import { idOwnerOf, pseudonymOf } from "../src/view/idStrategy.js";
 import { recordId, recordOf, type DrawnForm, type SubmitSpec, type WritableField } from "../src/view/submit.js";
 import { protocolFor, APP_PROTOCOL, APP_PROTOCOL_BASE } from "../src/appProtocol.js";
@@ -138,4 +139,21 @@ test("uidForm pseudonym publishes beside a pseudonym id, and is refused without 
 test("projects uidForm onto the own-row selector, so a reader queries by the pseudonym", () => {
   const app = poll({ idFrom: "auto", uidField: "voter", uidForm: "pseudonym", createFields: ["choice", "voter", "status"], selfUpdate: { voted: ["choice"] } });
   assert.deepEqual(ownScope(app, "votes"), { cid: "votes", scope: "own", uidField: "voter", uidForm: "pseudonym" });
+});
+
+test("the published submit blocks carry uidForm, so a host writes and queries the pseudonym", () => {
+  // The wire, not a hand-built spec: if projection ever dropped uidForm, a host would fall back to
+  // writing the raw uid into the field.
+  const app = poll({ idFrom: "auto", uidField: "voter", uidForm: "pseudonym", createFields: ["choice", "voter", "status"], selfUpdate: { voted: ["choice"] } });
+  const stamp = { uid: "uid_owner", email: OWNER, publishedAt: 1, commit: "c" };
+  const { config } = projectApp(app, [], stamp, null);
+  assert.equal(config.protocol, "3.0.0");
+  assert.deepEqual([config.submit.votes?.uidField, config.submit.votes?.uidForm], ["voter", "pseudonym"]);
+  const withDesk = AuthoredAppZ.parse({ ...app, views: [{ id: "desk", audience: "member", path: "views/desk.html", collections: ["votes"] }] });
+  const tiers = projectAppViews(withDesk, stamp).filter((tier) => tier.views.length > 0);
+  assert.equal(tiers.length, 1);
+  tiers.forEach((tier) => {
+    const submit = (tier.config.submit ?? {})["votes"];
+    assert.deepEqual([submit?.uidField, submit?.uidForm, tier.config.protocol], ["voter", "pseudonym", "3.0.0"], tier.tier);
+  });
 });

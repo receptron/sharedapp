@@ -108,8 +108,10 @@ export function protocolFor(app: {
   const submits = Object.values(app.public?.submit ?? {});
   const namedBySlug = submits.some((submit) => submit?.idFrom === "slug");
   // MAJOR 3 for the same reason as a slug id, one major up because a reader that knows major 2 does
-  // not know it: an older `recordId` builds a random id where the rules require the pseudonym, and
-  // an older member page cannot find the reader's own row by `ownDocId: "pseudonym"`.
+  // not know it: an older `recordId` builds a random id where the rules require the pseudonym, an
+  // older member page cannot find the reader's own row by `ownDocId: "pseudonym"`, and — for
+  // `uidForm` — an older `recordOf` writes the raw uid into `uidField` and an older own-row query
+  // compares it with the uid, where the rules hold the pseudonym.
   const pseudonymous = submits.some((submit) => submit?.idFrom === "pseudonym" || submit?.idFrom === "pseudonym+field" || submit?.uidForm === "pseudonym");
   if (pseudonymous) return APP_PROTOCOL;
   return drawnHere || namedBySlug ? APP_PROTOCOL_ARTICLE : APP_PROTOCOL_BASE;
