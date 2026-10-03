@@ -45,9 +45,9 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@mulmoclaude/core": "^5.8.0",
+    "@mulmoclaude/core": "^5.8.1",
     "@types/node": "^26.6.4",
-    "eslint": "^10.11.0",
+    "eslint": "^10.12.0",
     "eslint-plugin-security": "^4.2.0",
     "eslint-plugin-sonarjs": "^4.2.2",
     "prettier": "^3.9.9",
