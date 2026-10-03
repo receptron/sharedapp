@@ -47,6 +47,7 @@ import { statusFieldOf } from "./statusField.js";
 import { byText } from "./byText.js";
 import { publicReadable, readPublishedProblems } from "./publishReadPublished.js";
 import { idFromSubmitter, idFromSubmitterAndField, usesPseudonym } from "./view/idStrategy.js";
+import { forkProblems } from "./forkCheck.js";
 
 /** What publish knows about a shared collection in this repository, as far as
  *  these checks are concerned: its cid and the schema key its records are
@@ -961,6 +962,7 @@ export function publishProblems(app: AuthoredApp, collections: readonly Publisha
     ...readPublishedProblems(app),
     ...viewProblems(app, collections),
     ...agentProblems(app, collections),
+    ...forkProblems(app),
   ];
 }
 
