@@ -48,6 +48,7 @@ import { byText } from "./byText.js";
 import { publicReadable, readPublishedProblems } from "./publishReadPublished.js";
 import { idFromSubmitter, idFromSubmitterAndField, usesPseudonym } from "./view/idStrategy.js";
 import { forkProblems } from "./forkCheck.js";
+import { shareCardProblems, shareCardSchemaProblems } from "./shareCard.js";
 
 /** What publish knows about a shared collection in this repository, as far as
  *  these checks are concerned: its cid and the schema key its records are
@@ -963,6 +964,7 @@ export function publishProblems(app: AuthoredApp, collections: readonly Publisha
     ...viewProblems(app, collections),
     ...agentProblems(app, collections),
     ...forkProblems(app),
+    ...shareCardProblems(app),
   ];
 }
 
@@ -2032,6 +2034,7 @@ export function schemaRefProblems(app: AuthoredApp, schemas: { cid: string; sche
     ...Object.entries(app.collections ?? {}).flatMap(([cid, collection]) => mailRefProblems(schemaOf, cid, collection)),
     ...Object.entries(app.collections ?? {}).flatMap(([cid, collection]) => refInRefProblems(schemaOf, cid, collection)),
     ...(app.views ?? []).flatMap((view, index) => articleRefProblems(schemaOf, view, `views[${index}]`)),
+    ...shareCardSchemaProblems(app, schemas),
   ];
 }
 

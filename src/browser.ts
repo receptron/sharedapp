@@ -30,3 +30,4 @@ export {
   type ForkRequest,
   type ForkResult,
 } from "./forkSource.js";
+export { type ShareCard } from "./shareCard.js";
