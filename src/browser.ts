@@ -31,4 +31,4 @@ export {
   type ForkResult,
 } from "./forkSource.js";
 export { type ShareCard } from "./shareCard.js";
-export { BANNER_DOC, BANNER_TYPES, HEX_COLOR, type PageTheme } from "./pageTheme.js";
+export { BANNER_DOC, BANNER_TYPES, HEX_COLOR, PublicThemeZ, type PageTheme } from "./pageTheme.js";
