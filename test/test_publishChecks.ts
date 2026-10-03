@@ -1801,9 +1801,9 @@ test("carries the app's hue onto the drawn page, and refuses one nobody would dr
   assert.deepEqual(magazinePage(undefined, { hue: 359 }), []);
 });
 
-test("refuses a theme on an app whose pages are all its own HTML", () => {
-  // The silent no-op: nothing draws a page from the declaration, so the colour means nothing and
-  // the manifest reads as though it had been set.
+test("accepts a theme on an app whose pages are all its own HTML — it colours the page around them", () => {
+  // It used to be refused as a no-op: only a platform-drawn article read it. The theme now dresses the
+  // public page itself (bar, ground, icon, ticker, banner), which every app has.
   const problems = publishProblems(
     app({
       collections: { bookings: { statusField: "status", transitions: { initial: ["booked"] } } },
@@ -1814,7 +1814,7 @@ test("refuses a theme on an app whose pages are all its own HTML", () => {
     CIDS,
     OWNER,
   );
-  refuses(problems, "nothing draws a page from this app");
+  assert.ok(!problems.some((problem) => problem.includes("theme")));
 });
 
 test("a bounded magazine publishes", () => {

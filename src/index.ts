@@ -105,6 +105,9 @@ export { APP_PROTOCOL, APP_PROTOCOL_ARTICLE, APP_PROTOCOL_BASE, protocolFor, pro
 // about a standing instruction without stopping for it.
 export { publishProblems, agentWarnings, schemaRefProblems, bindsSubmitterIdentity, type PublishableCollection } from "./publishChecks.js";
 
+// How an app's public page looks (`config/public.theme`) and where the host puts its banner.
+export { pageThemeProjection, BANNER_DOC, BANNER_MAX_BYTES, BANNER_PATH, BANNER_TYPES, type PageTheme } from "./pageTheme.js";
+
 // The text a link to one row shows on a social network (`config/public.shareCard`).
 export { shareCardProjection, type ShareCard } from "./shareCard.js";
 

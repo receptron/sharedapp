@@ -1775,30 +1775,11 @@ function articleCostProblems(app: AuthoredApp, view: NormalizedView): string[] {
   return problems;
 }
 
-/** A colour for a page nobody draws.
- *
- *  `theme` is read by the runtime that DRAWS a page from the declaration, and since the index went
- *  back to the app there is exactly one such page: the ARTICLE at `/a/{slug}/{id}`. An app whose
- *  pages are all its own HTML styles them itself and never looks here, so the key would sit in the
- *  manifest meaning nothing — the same silent no-op `viewLiveProblems` refuses one key over.
- *
- *  It does NOT move the protocol, and that asymmetry is the point: a reader too old to know `hue`
- *  draws the article in its default colours, which is the article. A reader too old to know
- *  `article` sends every link ever shared to the index instead, which is not. */
-function themeProblems(app: AuthoredApp, views: readonly NormalizedView[]): string[] {
-  if (app.theme === undefined || views.some((view) => view.article !== undefined)) return [];
-  return [
-    "theme sets a colour and no view declares an `article` block, so nothing draws a page from this app's declaration and the key does nothing. " +
-      "A page written as HTML carries its own colours. Delete `theme`, or publish articles.",
-  ];
-}
-
 function viewProblems(app: AuthoredApp, collections: readonly PublishableCollection[]): string[] {
   const normalized = normalizeViews(app);
   if (!normalized.ok) return normalized.problems;
   const known = new Set(collections.map((collection) => collection.cid));
   return [
-    ...themeProblems(app, normalized.views),
     ...normalized.views.flatMap((view) => [
       ...viewPathProblems(view),
       ...view.collections.flatMap((cid) => viewCollectionProblems(app, view, cid, known)),
