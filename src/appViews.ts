@@ -334,6 +334,8 @@ export interface ProjectedViewCollection {
    *  know this key sees `scope: "own"` with neither of the other two and must
    *  refuse the view rather than draw it unnarrowed. */
   uidField?: string;
+  /** `scope: "own"` — `uidField` holds the reader's per-app pseudonym rather than their uid. */
+  uidForm?: "pseudonym";
   /** `scope: "own"` — the row is the document whose id is the reader's uid, or their per-app
    *  pseudonym (`pseudonymOf`). A reader that does not know `"pseudonym"` must refuse the view. */
   ownDocId?: "auth.uid" | "pseudonym";
@@ -400,7 +402,8 @@ export function participantScope(app: AuthoredApp, cid: string, participantRead:
 export function ownScope(app: AuthoredApp, cid: string): ProjectedViewCollection | null {
   const submit: AuthoredSubmit | undefined = app.public?.submit?.[cid];
   if (submit?.emailField !== undefined) return { cid, scope: "own", emailField: submit.emailField };
-  if (submit?.uidField !== undefined) return { cid, scope: "own", uidField: submit.uidField };
+  if (submit?.uidField !== undefined)
+    return { cid, scope: "own", uidField: submit.uidField, ...(submit.uidForm === undefined ? {} : { uidForm: submit.uidForm }) };
   if (submit?.idFrom === "auth.uid") return { cid, scope: "own", ownDocId: "auth.uid" };
   if (submit?.idFrom === "pseudonym") return { cid, scope: "own", ownDocId: "pseudonym" };
   return null;

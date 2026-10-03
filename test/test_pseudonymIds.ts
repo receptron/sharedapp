@@ -8,7 +8,8 @@ import { AuthoredAppZ } from "../src/publishManifest.js";
 import { publishProblems } from "../src/publishChecks.js";
 import { ownScope } from "../src/appViews.js";
 import { idOwnerOf, pseudonymOf } from "../src/view/idStrategy.js";
-import { recordId } from "../src/view/submit.js";
+import { recordId, recordOf, type DrawnForm, type SubmitSpec, type WritableField } from "../src/view/submit.js";
+import { protocolFor, APP_PROTOCOL, APP_PROTOCOL_BASE } from "../src/appProtocol.js";
 
 const OWNER = "owner@poll.jp";
 const CIDS = [{ cid: "votes", primaryKey: "id" }];
@@ -113,4 +114,28 @@ test("refuses a uidField beside a pseudonym: it would write the uid the pseudony
 
 test("projects the reader's own row by pseudonym for a member page", () => {
   assert.deepEqual(ownScope(poll(), "votes"), { cid: "votes", scope: "own", ownDocId: "pseudonym" });
+});
+
+test("uidForm pseudonym: the field holds the pseudonym, and the app needs protocol 3", async () => {
+  const declared: SubmitSpec = { createFields: ["taskId", "holder"], uidField: "holder", uidForm: "pseudonym" };
+  const drawn: DrawnForm = { fields: {} };
+  const typed: WritableField[] = [{ name: "taskId", label: "Task", required: true }];
+  const pseudonym = nodeHash(`${UID}:${AID}`);
+  const written = recordOf(typed, drawn, declared, { taskId: "t1", holder: "forged" }, { uid: UID, email: null, pseudonym }, () => "now");
+  assert.equal(written.holder, pseudonym);
+  // Without the pseudonym the field is left empty — the rules refuse — rather than given the uid.
+  const missing = recordOf(typed, drawn, declared, { taskId: "t1" }, { uid: UID, email: null }, () => "now");
+  assert.equal(Object.hasOwn(missing, "holder"), false);
+  assert.equal(protocolFor({ public: { submit: { claims: { uidForm: "pseudonym" } } } }), APP_PROTOCOL);
+  assert.equal(protocolFor({ public: { submit: { claims: {} } } }), APP_PROTOCOL_BASE);
+});
+
+test("uidForm pseudonym publishes beside a pseudonym id, and is refused without a uidField", () => {
+  assert.deepEqual(publishProblems(poll({ uidField: "voter", uidForm: "pseudonym", createFields: ["choice", "voter", "status"] }), CIDS, OWNER), []);
+  refuses(publishProblems(poll({ idFrom: "auth.uid", uidForm: "pseudonym" }), CIDS, OWNER), 'uidForm is "pseudonym" but no uidField is declared');
+});
+
+test("projects uidForm onto the own-row selector, so a reader queries by the pseudonym", () => {
+  const app = poll({ idFrom: "auto", uidField: "voter", uidForm: "pseudonym", createFields: ["choice", "voter", "status"], selfUpdate: { voted: ["choice"] } });
+  assert.deepEqual(ownScope(app, "votes"), { cid: "votes", scope: "own", uidField: "voter", uidForm: "pseudonym" });
 });

@@ -88,7 +88,7 @@ export const APP_PROTOCOL_BASE = "1.0.0";
  *  rather than half of it. That is the intended outcome, and it is why the READER SHIPS FIRST. */
 export function protocolFor(app: {
   views?: readonly { article?: unknown }[] | undefined;
-  public?: { submit?: Record<string, { idFrom?: string | undefined } | undefined> | undefined } | undefined;
+  public?: { submit?: Record<string, { idFrom?: string | undefined; uidForm?: string | undefined } | undefined> | undefined } | undefined;
 }): string {
   // A page the reader must know how to DRAW. `article` rather than the `type` this clause was
   // written for: the platform no longer draws the INDEX, so an unknowing reader finds the app's own
@@ -110,7 +110,7 @@ export function protocolFor(app: {
   // MAJOR 3 for the same reason as a slug id, one major up because a reader that knows major 2 does
   // not know it: an older `recordId` builds a random id where the rules require the pseudonym, and
   // an older member page cannot find the reader's own row by `ownDocId: "pseudonym"`.
-  const pseudonymous = submits.some((submit) => submit?.idFrom === "pseudonym" || submit?.idFrom === "pseudonym+field");
+  const pseudonymous = submits.some((submit) => submit?.idFrom === "pseudonym" || submit?.idFrom === "pseudonym+field" || submit?.uidForm === "pseudonym");
   if (pseudonymous) return APP_PROTOCOL;
   return drawnHere || namedBySlug ? APP_PROTOCOL_ARTICLE : APP_PROTOCOL_BASE;
 }
