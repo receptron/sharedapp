@@ -327,6 +327,9 @@ const SubmitZ = z
      *  delete-and-retake. Nobody can type a uid, so there was no reassignment
      *  UI to keep. */
     uidField: z.string().trim().min(1).optional(),
+    /** What `uidField` holds: the uid (absent), or the app's pseudonym of it (`"pseudonym"`), so a row the
+     *  world may read does not carry the uid every app of this project shares. */
+    uidForm: z.literal("pseudonym").optional(),
     createFields: z.array(z.string().trim().min(1)).min(1),
     initialStatus: z.string().trim().min(1).optional(),
     /** `field` is the mode that makes a CONTESTED resource exclusive: the

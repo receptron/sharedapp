@@ -38,6 +38,9 @@ import { idFromSubmitter, idFromSubmitterAndField } from "./idStrategy.js";
 export interface Submitter {
   uid: string;
   email: string | null;
+  /** This submitter's pseudonym for the app (`pseudonymOf`), for a `uidForm: "pseudonym"` field. A host
+   *  that leaves it out writes no value there, and the rules refuse the create rather than take the uid. */
+  pseudonym?: string | undefined;
 }
 
 /** One collection's `public.submit` declaration, as `config/public` publishes it.
@@ -57,6 +60,8 @@ export interface SubmitSpec {
    *  a person can type. Drawn as a box, whatever the visitor puts in it is refused, and the refusal
    *  names nothing. */
   uidField?: string | undefined;
+  /** `"pseudonym"`: `uidField` holds the submitter's per-app pseudonym rather than the uid. */
+  uidForm?: string | undefined;
   /** The value the status field must hold on a create. */
   initialStatus?: string | undefined;
   idFrom?: string | undefined;
@@ -216,10 +221,17 @@ export const recordOf = (
   // the account carries. It goes on after `written`, so a page that managed to send a value for it
   // — an old host still drawing the box, a frame that composed its own record — has that value
   // replaced rather than submitted and refused.
-  const uid = submit.uidField !== undefined && account !== null && account.uid !== "" ? [[submit.uidField, account.uid] as const] : [];
+  const uid = submit.uidField !== undefined && account !== null ? uidEntry(submit.uidField, submit.uidForm, account) : [];
   const status = submit.initialStatus !== undefined && drawn.statusField !== undefined ? [[drawn.statusField, submit.initialStatus] as const] : [];
   const stamp = submit.stampField !== undefined ? [[submit.stampField, serverTime()] as const] : [];
   return Object.fromEntries([...written, ...email, ...uid, ...status, ...stamp]);
+};
+
+/** The `uidField` entry: the uid, or the pseudonym under `uidForm: "pseudonym"`. Nothing when the value
+ *  is missing, so the rules refuse the create rather than receive the wrong identity. */
+const uidEntry = (field: string, form: string | undefined, account: Submitter): (readonly [string, string])[] => {
+  const value = form === "pseudonym" ? account.pseudonym : account.uid;
+  return value === undefined || value === "" ? [] : [[field, value] as const];
 };
 
 /** The record's value for a field, as the rules would read it. A non-string is empty rather than

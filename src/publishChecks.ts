@@ -448,10 +448,13 @@ function submitCoherenceProblems(app: AuthoredApp, cid: string, submit: Authored
       `public.submit.${cid}.idFrom is "${submit.idFrom ?? ""}" but no idField is declared: the rules rebuild the document id from that field and refuse every create.`,
     );
   }
-  if (usesPseudonym(submit.idFrom) && submit.uidField !== undefined) {
+  if (submit.uidForm !== undefined && submit.uidField === undefined) {
+    problems.push(`public.submit.${cid}.uidForm is "${submit.uidForm}" but no uidField is declared: it says what that field holds, and there is none.`);
+  }
+  if (usesPseudonym(submit.idFrom) && submit.uidField !== undefined && submit.uidForm !== "pseudonym") {
     problems.push(
       `public.submit.${cid}.idFrom is "${submit.idFrom ?? ""}" and names uidField '${submit.uidField}': the pseudonym keeps the uid out of the document id, ` +
-        "and the uidField writes it into the row — the same uid every other app of this project sees. Drop the uidField; the id already says whose row it is.",
+        'and the uidField writes it into the row — the same uid every other app of this project sees. Drop the uidField (the id already says whose row it is), or declare uidForm "pseudonym" so it holds the pseudonym.',
     );
   }
   problems.push(...fieldIdProblems(cid, submit, collection?.statusField));
