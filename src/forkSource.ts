@@ -74,7 +74,9 @@ const isRecord = (value: unknown): value is Record<string, unknown> => typeof va
 // Down to each field's `type` and `values` — what the gate reads. Not the core validator, which this
 // package does not import at runtime; a deeper fault breaks only a copy of the source owner's own app,
 // and `forkFrom` turns anything the gate throws on into a refusal.
-const isStringList = (value: unknown): boolean => Array.isArray(value) && value.every((entry) => typeof entry === "string");
+const isList = (value: unknown): value is unknown[] => Array.isArray(value);
+const isString = (value: unknown): value is string => typeof value === "string";
+const isStringList = (value: unknown): value is string[] => isList(value) && value.every(isString);
 const isFieldSpec = (value: unknown): boolean =>
   isRecord(value) && typeof value.type === "string" && (value.values === undefined || isStringList(value.values));
 const isCollectionSchema = (value: unknown): value is CollectionSchema =>
@@ -114,8 +116,7 @@ export function forkFrom(data: unknown, request: ForkRequest): ForkResult {
   if (protocol.length > 0) return { ok: false, problems: protocol };
   const source = ForkableAppZ.safeParse(data.app);
   const schemas = schemasOf(data.schemas);
-  const views =
-    Array.isArray(data.views) && data.views.every((id) => typeof id === "string") ? data.views.filter((id): id is string => typeof id === "string") : null;
+  const views = isStringList(data.views) ? data.views : null;
   if (!source.success || schemas === null || views === null) return { ok: false, problems: ["the fork source is malformed."] };
   const parsed = AuthoredAppZ.safeParse({
     ...source.data,
