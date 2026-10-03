@@ -153,7 +153,7 @@ test("the published submit blocks carry uidForm, so a host writes and queries th
   const tiers = projectAppViews(withDesk, stamp).filter((tier) => tier.views.length > 0);
   assert.equal(tiers.length, 1);
   tiers.forEach((tier) => {
-    const submit = (tier.config.submit ?? {})["votes"];
+    const submit = tier.config.submit["votes"];
     assert.deepEqual([submit?.uidField, submit?.uidForm, tier.config.protocol], ["voter", "pseudonym", "3.0.0"], tier.tier);
   });
 });
