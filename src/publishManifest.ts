@@ -777,6 +777,9 @@ export const AuthoredAppZ = z
      *  published as documents that quietly do not keep the promises the author
      *  relied on. */
     protocol: z.string().trim().min(1).optional(),
+    /** Whether a visitor may copy this app from its public page — see `forkSource.ts`. Saying yes
+     *  also says the staff pages may be read by anyone, since the copy is made of them. */
+    forkable: z.boolean().optional(),
   })
   .strict();
 

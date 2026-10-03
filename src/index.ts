@@ -105,6 +105,19 @@ export { APP_PROTOCOL, APP_PROTOCOL_ARTICLE, APP_PROTOCOL_BASE, protocolFor, pro
 // about a standing instruction without stopping for it.
 export { publishProblems, agentWarnings, schemaRefProblems, bindsSubmitterIdentity, type PublishableCollection } from "./publishChecks.js";
 
+// The copy a visitor forks from (`config/fork`), and the forker's app made of it.
+export {
+  FORK_SOURCE_DOC,
+  forkViewDocId,
+  projectForkSource,
+  forkSourceProblems,
+  forkFrom,
+  type ForkSourceDoc,
+  type ForkableApp,
+  type ForkRequest,
+  type ForkResult,
+} from "./forkSource.js";
+
 // The standing job a published app asks an agent sitting at it to do: the declaration, where each
 // audience's brief is published, and what a reader is entitled to make of it.
 export { agentsFor, agentCids, agentTierCids, AGENT_ID_PATTERN, AGENT_INSTRUCTION_MAX, RESERVED_AGENT_IDS, type ProjectedAgent } from "./appAgents.js";
