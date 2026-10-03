@@ -5,6 +5,8 @@ import assert from "node:assert/strict";
 import { AuthoredAppZ } from "../src/publishManifest.js";
 import { projectApp, type PublishStamp } from "../src/publishProject.js";
 import { PublicThemeZ } from "../src/pageTheme.js";
+import * as entry from "../src/index.js";
+import * as browser from "../src/browser.js";
 
 const STAMP: PublishStamp = { uid: "u", email: "o@x.jp", publishedAt: 1 };
 const parses = (theme: unknown) => AuthoredAppZ.safeParse({ aid: "a", members: {}, theme }).success;
@@ -55,4 +57,9 @@ test("what the publisher projects, the page's schema reads back — one grammar 
   for (const bad of [{ bar: ["red"] }, { banner: "views/b.svg" }, { glitter: 1 }, { barText: "#fff; x" }]) {
     assert.equal(PublicThemeZ.safeParse(bad).success, false, JSON.stringify(bad));
   }
+});
+
+test("the page's schema is reachable from both entries", () => {
+  assert.equal(entry.PublicThemeZ, PublicThemeZ);
+  assert.equal(browser.PublicThemeZ, PublicThemeZ);
 });
