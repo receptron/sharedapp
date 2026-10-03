@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.41.0 — 2026-10-03
+
+### `uidForm: "pseudonym"` — a `uidField` that holds the app's pseudonym (#109, receptron/mulmoserver#325)
+
+Where the document id is spent on exclusivity (`idFrom: "field"` — a claimed task, a booked slot), whose
+row it is lives in `uidField`, which wrote the raw uid into a world-readable row. With
+`uidForm: "pseudonym"` the field holds the submitter's per-app pseudonym (`pseudonymOf`), the value
+MulmoServer's rules compare it with (receptron/mulmoserver#330).
+
+- `recordOf` writes `Submitter.pseudonym` there — hosts fill it with `pseudonymOf(uid, aid)`; with no
+  pseudonym the field is left out and the rules refuse, never the uid
+- The own-row selector carries `uidForm`, so a reader queries by the pseudonym
+- An app using it is stamped protocol 3.0.0
+- Publish refuses `uidForm` without `uidField`, and allows `idFrom: "pseudonym"` beside a `uidField`
+  when it carries `uidForm: "pseudonym"`
+
 ## 0.40.0 — 2026-10-03
 
 ### The collection document names its publish field (#107, receptron/mulmoserver#309)
