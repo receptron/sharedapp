@@ -64,6 +64,21 @@ test("the declaration is strict, and collection and textField go together", () =
   assert.equal(parses({ collection: "questions", textField: "text", title: "Ask me" }), true);
 });
 
+test("icon is one character and image one picture in views/", () => {
+  const parses = (shareCard: unknown) => AuthoredAppZ.safeParse({ aid: "a", members: {}, shareCard }).success;
+  for (const icon of ["🔢", "👨‍👩‍👧", "A", "素"]) assert.equal(parses({ icon }), true, icon);
+  for (const icon of ["", "🔢🔢", "ab"]) assert.equal(parses({ icon }), false, icon);
+  for (const image of ["views/card.png", "views/card.jpg", "views/c-1.jpeg", "views/x.webp"]) assert.equal(parses({ image }), true, image);
+  for (const image of ["card.png", "views/sub/card.png", "views/../x.png", "views/card.gif", "views/.png", "/views/card.png", "views/card.svg"]) {
+    assert.equal(parses({ image }), false, image);
+  }
+});
+
+test("the projection carries the icon and only THAT there is an image, never its path", () => {
+  const card = projectApp(app({ read: [] }, { icon: "🔢", image: "views/card.png" }), SCHEMAS, STAMP, null).config.shareCard;
+  assert.deepEqual(card, { icon: "🔢", image: true });
+});
+
 test("an app-only card names no collection, so it needs none readable and no schema", () => {
   for (const card of [{}, { title: "Which prime?" }]) {
     assert.deepEqual(cardProblems(app({ read: [] }, card)), []);

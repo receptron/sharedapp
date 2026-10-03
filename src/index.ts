@@ -106,7 +106,7 @@ export { APP_PROTOCOL, APP_PROTOCOL_ARTICLE, APP_PROTOCOL_BASE, protocolFor, pro
 export { publishProblems, agentWarnings, schemaRefProblems, bindsSubmitterIdentity, type PublishableCollection } from "./publishChecks.js";
 
 // The text a link to one row shows on a social network (`config/public.shareCard`).
-export { shareCardProjection, type ShareCard } from "./shareCard.js";
+export { shareCardProjection, SHARE_IMAGE_DOC, SHARE_IMAGE_MAX_BYTES, type ShareCard } from "./shareCard.js";
 
 // The copy a visitor forks from (`config/fork`), and the forker's app made of it.
 export {

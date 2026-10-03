@@ -733,6 +733,10 @@ const SlugZ = z
  *  already know. */
 /** The longest app card title — it is drawn large on a 1200×630 image. */
 const SHARE_TITLE_MAX_CHARS = 200;
+/** One file directly in `views/`, of a kind the card renderer reads — the same place a page's HTML lives. */
+const SHARE_IMAGE_PATH = /^views\/[A-Za-z0-9][A-Za-z0-9_-]*\.(?:png|jpe?g|webp)$/u;
+const SHARE_IMAGE_SHAPE = "is one PNG, JPEG or WebP file directly inside views/ (e.g. views/card.png)";
+const isOneCharacter = (text: string): boolean => [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text)].length === 1;
 
 export const AuthoredAppZ = z
   .object({
@@ -789,6 +793,10 @@ export const AuthoredAppZ = z
         collection: NameZ.optional(),
         textField: z.string().trim().min(1).optional(),
         title: z.string().trim().min(1).max(SHARE_TITLE_MAX_CHARS).optional(),
+        /** One character — an emoji — drawn large in the card's corner. */
+        icon: z.string().trim().refine(isOneCharacter, { message: "is one character, such as one emoji" }).optional(),
+        /** An image in this repository, drawn as the card's background — see `shareCard.ts`. */
+        image: z.string().trim().regex(SHARE_IMAGE_PATH, { message: SHARE_IMAGE_SHAPE }).optional(),
       })
       .strict()
       .refine((card) => (card.collection === undefined) === (card.textField === undefined), {

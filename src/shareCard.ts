@@ -18,7 +18,19 @@ export interface ShareCard {
   collection?: string;
   textField?: string;
   title?: string;
+  icon?: string;
+  /** Present when the app ships a background image; the host writes its bytes to `config/shareImage`. */
+  image?: true;
 }
+
+/** Where the host writes the card's background image, beside `config/public`: world-readable, like the
+ *  card it becomes. Base64 in a document, so no Storage bucket or rule is needed. */
+export const SHARE_IMAGE_DOC = "shareImage";
+/** The largest background image, in bytes before encoding — a document holds 1 MiB, and base64 adds a third. */
+export const SHARE_IMAGE_MAX_BYTES = 700_000;
+
+/** The projection says THAT there is an image, not where it lives in the repository. */
+const IMAGE_FLAG: { image: true } = { image: true };
 
 export function shareCardProblems(app: AuthoredApp): string[] {
   const collection = app.shareCard?.collection;
@@ -51,6 +63,8 @@ export const shareCardProjection = (app: AuthoredApp): { shareCard?: ShareCard }
       ...(card.collection === undefined ? {} : { collection: card.collection }),
       ...(card.textField === undefined ? {} : { textField: card.textField }),
       ...(card.title === undefined ? {} : { title: card.title }),
+      ...(card.icon === undefined ? {} : { icon: card.icon }),
+      ...(card.image === undefined ? {} : IMAGE_FLAG),
     },
   };
 };
