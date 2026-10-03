@@ -13,7 +13,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { parseAuthoredApp } from "../src/publishManifest.js";
+import { parseAuthoredApp } from "../src/authoredAppFile.js";
 
 const OWNER = "owner@salon.jp";
 const base = { aid: "app_test", members: { [OWNER]: { "*": "owner" } } };

@@ -14,7 +14,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { parseAuthoredApp } from "../src/publishManifest.js";
+import { parseAuthoredApp } from "../src/authoredAppFile.js";
 import { appSlugDoc, APP_SLUGS_COLLECTION } from "../src/publishProject.js";
 import { byText } from "../src/byText.js";
 

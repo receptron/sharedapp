@@ -19,7 +19,7 @@ import { isSafeCustomViewPath } from "@mulmoclaude/core/collection/paths";
 import { parseAppManifest, type AppManifestResult } from "@mulmoclaude/core/collection/server";
 
 import { reachesIn, UNRESOLVED, type ModuleReach } from "./importScan.js";
-import { parseAuthoredApp } from "../src/publishManifest.js";
+import { parseAuthoredApp } from "../src/authoredAppFile.js";
 import { byText } from "../src/byText.js";
 
 test("isValidCollectionName accepts the slug shape and refuses everything that could build a path", () => {

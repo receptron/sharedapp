@@ -6,8 +6,8 @@
 // loader could disagree about. Discovery needs to know which app a collection
 // belongs to; it has no business knowing who is on the roster. So the roster
 // and the public config are read HERE, by the only thing that consumes them.
-// `aid` is still read through `parseAppManifest` — one parse of one field, not
-// a second opinion about it.
+// `aid` is still read through `parseAppManifest` (in `authoredAppFile.ts`, which keeps core's server
+// half out of this module so a browser can load it) — one parse of one field, not a second opinion.
 //
 // AUTHORED, NOT PUBLISHED. What this module produces is the shape a human
 // wrote. The Firestore document is derived from it by `publishProject.ts`
@@ -38,7 +38,6 @@
 
 import { z } from "zod";
 import { isValidCollectionName } from "@mulmoclaude/core/collection";
-import { parseAppManifest, type AppManifestResult } from "@mulmoclaude/core/collection/server";
 // Values only; `appViews` imports nothing but types from here, so the pair is
 // not a runtime cycle.
 import { VIEW_AUDIENCES } from "./appViews.js";
@@ -793,23 +792,6 @@ export type AuthoredMail = z.infer<typeof MailZ>;
 export type AuthoredView = z.infer<typeof ViewZ>;
 
 export type AuthoredAppResult = { ok: true; app: AuthoredApp } | { ok: false; problems: string[] };
-
-/** Parse the authored declaration out of `app.json`'s text.
- *
- *  Returns a LIST of problems rather than throwing, for the same reason
- *  `loadAppManifest` returns a failure: the caller is a gate whose entire job
- *  is to hand the author something to act on. Every problem is reported at
- *  once — publish is a manual step, and a parser that stops at the first key
- *  makes it N round trips. */
-export function parseAuthoredApp(raw: string): AuthoredAppResult {
-  // Reuse the one-field parse so `aid`'s rule has a single statement, and so a
-  // file that is not even JSON says so in the same words discovery uses.
-  const manifest: AppManifestResult = parseAppManifest(raw);
-  if (!manifest.ok) return { ok: false, problems: [manifest.kind === "missing" ? "app.json is missing" : manifest.detail] };
-  const parsed = AuthoredAppZ.safeParse(JSON.parse(raw));
-  if (!parsed.success) return { ok: false, problems: authoredProblems(parsed.error) };
-  return { ok: true, app: parsed.data };
-}
 
 /** zod issues as one actionable line each: `public.submit.responses.auth: …`. */
 export function authoredProblems(error: z.ZodError): string[] {
