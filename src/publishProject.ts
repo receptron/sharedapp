@@ -38,6 +38,7 @@
 
 import type { CollectionSchema } from "@mulmoclaude/core/collection";
 import { protocolFor } from "./appProtocol.js";
+import { shareCardProjection, type ShareCard } from "./shareCard.js";
 import {
   limitFor,
   normalizeViews,
@@ -128,6 +129,8 @@ export interface PublishedConfigDoc extends Record<string, unknown> {
   /** `{ <cid>: <publishField> }` — the collections whose published rows a visitor reads, and the field
    *  the page filters on (the rules admit the listing only with that filter). Absent when none. */
   readPublished?: Record<string, string>;
+  /** What a link to one row draws on a social network (`shareCard.ts`). Absent when not declared. */
+  shareCard?: ShareCard;
   /** Present (and `true`) when the app may be copied from its public page — so the page can offer it
    *  without reading `config/fork`. Absent otherwise, never `false`. */
   forkable?: true;
@@ -310,6 +313,13 @@ function readPublishedProjection(authored: AuthoredApp): Pick<PublishedConfigDoc
   return entries.length === 0 ? {} : { readPublished: Object.fromEntries(entries) };
 }
 
+/** What a visitor's page is told about reading rows: the published-only collections, and the field a
+ *  link to one row is drawn from. Together because both are about what a visitor sees of a row. */
+const visitorReadProjection = (authored: AuthoredApp): Pick<PublishedConfigDoc, "readPublished" | "shareCard"> => ({
+  ...readPublishedProjection(authored),
+  ...shareCardProjection(authored),
+});
+
 export function projectApp(
   authored: AuthoredApp,
   schemas: { cid: string; schema: CollectionSchema }[],
@@ -367,7 +377,7 @@ export function projectApp(
     enabled: authored.public?.enabled === true,
     read: authored.public?.read ?? [],
     // Absent rather than empty, so an app that declares none publishes the document it did before.
-    ...readPublishedProjection(authored),
+    ...visitorReadProjection(authored),
     submit,
     // The submit cids and only those: a self-write is declared inside `public.submit[cid]`, so a
     // collection nobody may submit to has nothing here to say. Absent rather than empty for the

@@ -779,6 +779,11 @@ export const AuthoredAppZ = z
     /** Whether a visitor may copy this app from its public page — see `forkSource.ts`. Saying yes
      *  also says the staff pages may be read by anyone, since the copy is made of them. */
     forkable: z.boolean().optional(),
+    /** The text a link to one row shows on a social network — see `shareCard.ts`. */
+    shareCard: z
+      .object({ collection: NameZ, textField: z.string().trim().min(1) })
+      .strict()
+      .optional(),
   })
   .strict();
 
