@@ -195,3 +195,10 @@ test("the host and the browser reach every fork function through the package ent
   for (const name of ["projectForkSource", "forkSourceProblems", "forkFrom", "forkViewDocId"] as const) assert.equal(typeof entry[name], "function", name);
   assert.equal(entry.FORK_SOURCE_DOC, "fork");
 });
+
+test("the public config says forkable only when the app is, and never writes false", () => {
+  const stamp: PublishStamp = { uid: "uid_owner", email: OWNER, publishedAt: PUBLISHED_AT };
+  assert.equal(projectApp(authored(), SCHEMAS, stamp, null).config.forkable, true);
+  assert.equal(Object.hasOwn(projectApp(authored({ forkable: false }), SCHEMAS, stamp, null).config, "forkable"), false);
+  assert.equal(Object.hasOwn(projectApp(authored({ forkable: undefined }), SCHEMAS, stamp, null).config, "forkable"), false);
+});

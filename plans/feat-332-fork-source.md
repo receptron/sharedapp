@@ -15,6 +15,7 @@ The sharedapp half of web forking. Design and order across repos: receptron/mulm
 - `forkSourceProblems(authored, source, pages)`: the host runs it before writing the source and
   refuses `forkable` while a roster address or the owner uid appears anywhere in the source or the
   pages' HTML (case-insensitive).
+- `config/public.forkable: true` when declared (absent otherwise), so the public page offers a copy without reading `config/fork`. The deployed reader ignores unknown top-level keys (`publicConfigFrom`).
 - `forkable` beside `agents[]` is refused at publish (`forkCheck.ts`): the copy would run someone's
   agent at an app nobody priced.
 

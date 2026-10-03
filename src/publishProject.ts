@@ -128,6 +128,9 @@ export interface PublishedConfigDoc extends Record<string, unknown> {
   /** `{ <cid>: <publishField> }` — the collections whose published rows a visitor reads, and the field
    *  the page filters on (the rules admit the listing only with that filter). Absent when none. */
   readPublished?: Record<string, string>;
+  /** Present (and `true`) when the app may be copied from its public page — so the page can offer it
+   *  without reading `config/fork`. Absent otherwise, never `false`. */
+  forkable?: true;
   submit: Record<string, Record<string, unknown>>;
   /** What a VISITOR may change about their own row here — the same shape every tier config carries,
    *  and for the same purpose: it tells the page which buttons exist, so a control is drawn where
@@ -387,6 +390,7 @@ export function projectApp(
     publishedAt: stamp.publishedAt,
   };
   if (authored.name !== undefined) config.name = authored.name;
+  if (authored.forkable === true) config.forkable = true;
 
   return {
     app,
