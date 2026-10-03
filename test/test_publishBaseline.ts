@@ -25,7 +25,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { parseAuthoredApp } from "../src/publishManifest.js";
+import { parseAuthoredApp } from "../src/authoredAppFile.js";
 import { publishProblems, schemaRefProblems } from "../src/publishChecks.js";
 import { projectApp, type PublishedApp, type PublishStamp } from "../src/publishProject.js";
 

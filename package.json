@@ -15,6 +15,10 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./browser": {
+      "types": "./dist/browser.d.ts",
+      "default": "./dist/browser.js"
+    },
     "./view": {
       "types": "./dist/view/index.d.ts",
       "default": "./dist/view/index.js"

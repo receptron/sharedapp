@@ -38,9 +38,9 @@
 // Design: mulmoterminal `plans/refactor-shared-app-module.md`
 
 // What an author may declare, and how it parses.
+export { parseAuthoredApp } from "./authoredAppFile.js";
 export {
   AuthoredAppZ,
-  parseAuthoredApp,
   APP_ROLES,
   type AuthoredApp,
   type AuthoredCollectionConfig,
