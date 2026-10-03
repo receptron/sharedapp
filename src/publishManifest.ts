@@ -731,6 +731,9 @@ const SlugZ = z
  *  experience than quietly not needing it. It is also a uid rather than an
  *  address, so an author has nothing to write here that publish does not
  *  already know. */
+/** The longest app card title — it is drawn large on a 1200×630 image. */
+const SHARE_TITLE_MAX_CHARS = 200;
+
 export const AuthoredAppZ = z
   .object({
     aid: NameZ,
@@ -779,10 +782,18 @@ export const AuthoredAppZ = z
     /** Whether a visitor may copy this app from its public page — see `forkSource.ts`. Saying yes
      *  also says the staff pages may be read by anyone, since the copy is made of them. */
     forkable: z.boolean().optional(),
-    /** The text a link to one row shows on a social network — see `shareCard.ts`. */
+    /** What a link to this app — and, with `collection` + `textField`, to one of its rows — shows on a
+     *  social network. See `shareCard.ts`. */
     shareCard: z
-      .object({ collection: NameZ, textField: z.string().trim().min(1) })
+      .object({
+        collection: NameZ.optional(),
+        textField: z.string().trim().min(1).optional(),
+        title: z.string().trim().min(1).max(SHARE_TITLE_MAX_CHARS).optional(),
+      })
       .strict()
+      .refine((card) => (card.collection === undefined) === (card.textField === undefined), {
+        message: "collection and textField go together: both draw one row's card, and neither alone names anything to draw",
+      })
       .optional(),
   })
   .strict();

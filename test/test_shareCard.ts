@@ -52,9 +52,27 @@ test("the field must exist and be text", () => {
   assert.equal(cardProblems(app({ read: ["questions"] }, { collection: "questions", textField: "votes" })).length, 1);
 });
 
-test("the declaration is strict: no unknown key, both keys required", () => {
-  assert.equal(AuthoredAppZ.safeParse({ aid: "a", members: {}, shareCard: { collection: "questions" } }).success, false);
-  assert.equal(AuthoredAppZ.safeParse({ aid: "a", members: {}, shareCard: { collection: "questions", textField: "text", image: "x" } }).success, false);
+test("the declaration is strict, and collection and textField go together", () => {
+  const parses = (shareCard: unknown) => AuthoredAppZ.safeParse({ aid: "a", members: {}, shareCard }).success;
+  assert.equal(parses({ collection: "questions" }), false);
+  assert.equal(parses({ textField: "text" }), false);
+  assert.equal(parses({ collection: "questions", textField: "text", image: "x" }), false);
+  assert.equal(parses({ title: "" }), false);
+  assert.equal(parses({ title: "x".repeat(201) }), false);
+  assert.equal(parses({}), true);
+  assert.equal(parses({ title: "Which prime?" }), true);
+  assert.equal(parses({ collection: "questions", textField: "text", title: "Ask me" }), true);
+});
+
+test("an app-only card names no collection, so it needs none readable and no schema", () => {
+  for (const card of [{}, { title: "Which prime?" }]) {
+    assert.deepEqual(cardProblems(app({ read: [] }, card)), []);
+  }
+});
+
+test("config/public carries only the keys declared", () => {
+  assert.deepEqual(projectApp(app({ read: [] }, {}), SCHEMAS, STAMP, null).config.shareCard, {});
+  assert.deepEqual(projectApp(app({ read: [] }, { title: "Which prime?" }), SCHEMAS, STAMP, null).config.shareCard, { title: "Which prime?" });
 });
 
 test("config/public carries the card when declared, and nothing when not", () => {
