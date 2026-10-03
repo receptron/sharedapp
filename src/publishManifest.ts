@@ -38,6 +38,7 @@
 
 import { z } from "zod";
 import { isValidCollectionName } from "@mulmoclaude/core/collection";
+import { BANNER_PATH, BANNER_SHAPE, HEX_COLOR, MAX_GRADIENT_STOPS, TICKER_MAX_CHARS, isOneCharacter } from "./pageTheme.js";
 // Values only; `appViews` imports nothing but types from here, so the pair is
 // not a runtime cycle.
 import { VIEW_AUDIENCES } from "./appViews.js";
@@ -731,6 +732,10 @@ const SlugZ = z
  *  experience than quietly not needing it. It is also a uid rather than an
  *  address, so an author has nothing to write here that publish does not
  *  already know. */
+const HexColorZ = z.string().trim().regex(HEX_COLOR, { message: "is a colour written #rgb or #rrggbb" });
+/** One colour, or a gradient of up to three. */
+const GradientZ = z.array(HexColorZ).min(1).max(MAX_GRADIENT_STOPS);
+
 /** The longest app card title — it is drawn large on a 1200×630 image. */
 const SHARE_TITLE_MAX_CHARS = 200;
 
@@ -767,7 +772,15 @@ export const AuthoredAppZ = z
      *  the platform's job to keep coherent. A hue says whose magazine it is without letting the
      *  declaration become a stylesheet. */
     theme: z
-      .object({ hue: z.number().int().min(0).max(359) })
+      .object({
+        hue: z.number().int().min(0).max(359).optional(),
+        bar: GradientZ.optional(),
+        barText: HexColorZ.optional(),
+        background: GradientZ.optional(),
+        icon: z.string().trim().refine(isOneCharacter, { message: "is one character, such as one emoji" }).optional(),
+        ticker: z.string().trim().min(1).max(TICKER_MAX_CHARS).optional(),
+        banner: z.string().trim().regex(BANNER_PATH, { message: BANNER_SHAPE }).optional(),
+      })
       .strict()
       .optional(),
     /** The version of the PUBLISH CONTRACT this app is written against — see

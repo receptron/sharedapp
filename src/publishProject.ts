@@ -39,6 +39,7 @@
 import type { CollectionSchema } from "@mulmoclaude/core/collection";
 import { protocolFor } from "./appProtocol.js";
 import { shareCardProjection, type ShareCard } from "./shareCard.js";
+import { pageThemeProjection, type PageTheme } from "./pageTheme.js";
 import {
   limitFor,
   normalizeViews,
@@ -131,6 +132,8 @@ export interface PublishedConfigDoc extends Record<string, unknown> {
   readPublished?: Record<string, string>;
   /** What a link to one row draws on a social network (`shareCard.ts`). Absent when not declared. */
   shareCard?: ShareCard;
+  /** How the public page looks (`pageTheme.ts`). Absent when not declared. */
+  theme?: PageTheme;
   /** Present (and `true`) when the app may be copied from its public page — so the page can offer it
    *  without reading `config/fork`. Absent otherwise, never `false`. */
   forkable?: true;
@@ -313,11 +316,12 @@ function readPublishedProjection(authored: AuthoredApp): Pick<PublishedConfigDoc
   return entries.length === 0 ? {} : { readPublished: Object.fromEntries(entries) };
 }
 
-/** What a visitor's page is told about reading rows: the published-only collections, and the field a
- *  link to one row is drawn from. Together because both are about what a visitor sees of a row. */
-const visitorReadProjection = (authored: AuthoredApp): Pick<PublishedConfigDoc, "readPublished" | "shareCard"> => ({
+/** What a visitor's page is told beyond the forms: the published-only collections, what a shared link
+ *  draws, and how the page looks. Together because all three are about what a visitor sees. */
+const visitorPageProjection = (authored: AuthoredApp): Pick<PublishedConfigDoc, "readPublished" | "shareCard" | "theme"> => ({
   ...readPublishedProjection(authored),
   ...shareCardProjection(authored),
+  ...pageThemeProjection(authored),
 });
 
 export function projectApp(
@@ -377,7 +381,7 @@ export function projectApp(
     enabled: authored.public?.enabled === true,
     read: authored.public?.read ?? [],
     // Absent rather than empty, so an app that declares none publishes the document it did before.
-    ...visitorReadProjection(authored),
+    ...visitorPageProjection(authored),
     submit,
     // The submit cids and only those: a self-write is declared inside `public.submit[cid]`, so a
     // collection nobody may submit to has nothing here to say. Absent rather than empty for the
@@ -450,7 +454,7 @@ function publicViewProjection(
     // drawing this page, and that runtime is handed the view — a colour parked at the top of the
     // document would be one more thing every reader has to know to look for, for a value that
     // means nothing to a page the author wrote.
-    ...(app.theme === undefined ? {} : { hue: app.theme.hue }),
+    ...(app.theme?.hue === undefined ? {} : { hue: app.theme.hue }),
     ...(view.live === undefined ? {} : { live: view.live }),
     // Keyed by cid rather than riding on each entry, because a public page's
     // `collections` is a list of NAMES: it has no per-collection object to
