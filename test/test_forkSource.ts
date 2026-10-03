@@ -9,6 +9,7 @@ import { publishProblems } from "../src/publishChecks.js";
 import { projectApp, type PublishStamp } from "../src/publishProject.js";
 import { forkFrom, forkSourceProblems, projectForkSource } from "../src/forkSource.js";
 import { protocolFor } from "../src/appProtocol.js";
+import * as entry from "../src/index.js";
 
 const OWNER = "owner@tally.jp";
 const STAFF = "staff@tally.jp";
@@ -188,4 +189,9 @@ test("the app's own protocol floor survives the fork and is held by the gate", (
 test("an address is found whatever its case on the roster and in the text", () => {
   const mixed = authored({ members: { "Mixed@Tally.jp": { "*": "owner" } }, name: "Ask mixed@tally.jp" });
   assert.equal(forkSourceProblems(mixed, projectForkSource(mixed, SCHEMAS, PUBLISHED_AT), []).length, 1);
+});
+
+test("the host and the browser reach every fork function through the package entry", () => {
+  for (const name of ["projectForkSource", "forkSourceProblems", "forkFrom", "forkViewDocId"] as const) assert.equal(typeof entry[name], "function", name);
+  assert.equal(entry.FORK_SOURCE_DOC, "fork");
 });

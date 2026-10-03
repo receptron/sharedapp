@@ -110,6 +110,7 @@ export {
   FORK_SOURCE_DOC,
   forkViewDocId,
   projectForkSource,
+  forkSourceProblems,
   forkFrom,
   type ForkSourceDoc,
   type ForkableApp,
