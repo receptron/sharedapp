@@ -85,9 +85,9 @@ jobs:
   # that, every other job runs above the floor and the declared minimum is a claim nothing runs.
   # This job installs the floor itself and runs what depends on core's API.
   #
-  # The floor is read out of `package.json` rather than written here, so moving the peer range
-  # moves this job with it. A range it cannot read as a single `^X.Y.Z` fails the job rather than
-  # testing some other version.
+  # The floors are read out of `package.json` rather than written here, so moving the peer range
+  # moves this job with it. Each `||` alternative is one major's floor and is run in turn; an
+  # alternative it cannot read as `^X.Y.Z` fails the job rather than testing some other version.
   core-floor:
     runs-on: ubuntu-latest
     steps:
@@ -96,12 +96,14 @@ jobs:
         with:
           node-version: "22.x"
       - run: yarn install --frozen-lockfile
-      - name: Install the floor of the declared core range
+      - name: Run typecheck and test at each floor of the declared core range
         run: |
-          floor=$(node -p "const range = require('./package.json').peerDependencies['@mulmoclaude/core']; const m = /^\^(\d+\.\d+\.\d+)$/.exec(range); if (m === null) throw new Error('peer range is not a single ^X.Y.Z: ' + range); m[1]")
-          yarn add --dev "@mulmoclaude/core@$floor" --ignore-scripts
-          installed=$(node -p "require('./node_modules/@mulmoclaude/core/package.json').version")
-          echo "declared floor $floor, installed $installed"
-          test "$installed" = "$floor"
-      - run: yarn typecheck
-      - run: yarn test
+          floors=$(node -p "const range = require('./package.json').peerDependencies['@mulmoclaude/core']; range.split('||').map((part) => { const m = /^\^(\d+\.\d+\.\d+)$/.exec(part.trim()); if (m === null) throw new Error('peer range alternative is not ^X.Y.Z: ' + part); return m[1]; }).join(' ')")
+          for floor in $floors; do
+            yarn add --dev "@mulmoclaude/core@$floor" --ignore-scripts
+            installed=$(node -p "require('./node_modules/@mulmoclaude/core/package.json').version")
+            echo "declared floor $floor, installed $installed"
+            test "$installed" = "$floor"
+            yarn typecheck
+            yarn test
+          done
