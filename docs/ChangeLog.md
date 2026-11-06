@@ -1,5 +1,82 @@
 # Changelog
 
+## 0.47.1 — 2026-11-07
+
+### Accept `@mulmoclaude/core` 6 as a peer (#119)
+
+- `peerDependencies["@mulmoclaude/core"]`: `^5.4.0` → `^5.4.0 || ^6.0.0`. The three symbols this package
+  imports from core (`isSafeCustomViewPath`, `isValidCollectionName`, `parseAppManifest`) are unchanged in 6.
+- The development dependency on core moves to `^6.0.0`, so the suite runs against core 6.
+- The `core-floor` CI job now installs the floor of EACH `||` alternative (5.4.0, then 6.0.0) and runs
+  typecheck and test at each, instead of refusing a union range.
+
+## 0.47.0 — 2026-10-04
+
+### One theme grammar in Zod — `AuthoredThemeZ` / `PublicThemeZ` (#118, receptron/mulmoserver#336)
+
+The page-theme rules are written once, in Zod 4. `AuthoredThemeZ` is `theme` in `app.json` (the banner is a
+path); `PublicThemeZ` is `config/public.theme` (the banner is `true`). `PublicThemeZ` is exported from the
+main entry and from `@receptron/sharedapp/browser`, so a page parses what it reads with the same grammar that
+admitted the declaration. `publishManifest.ts` uses `AuthoredThemeZ` instead of its inline object; behaviour
+for declarations is unchanged. First version the mulmoserver page side depends on.
+
+## 0.46.0 — 2026-10-04 (tagged, not published to npm)
+
+### `theme` dresses the whole public page (#117, receptron/mulmoserver#336)
+
+`theme` grows from one hue into a way to dress every public page:
+
+- `bar` (1–3 colours, a gradient) and `barText`
+- `background` (1–3 colours)
+- `icon` (one character) and `ticker` (a marquee, at most 120 characters)
+- `banner` (`views/<name>.png|jpg|jpeg|webp|svg`) — projected only as `banner: true`; the host writes its
+  bytes to `config/banner` (`BANNER_DOC`, at most `BANNER_MAX_BYTES`)
+
+`hue` keeps its meaning and becomes optional. Colours are hex only, so no CSS reaches the page. `theme` on an
+app with no article page is no longer refused. Its changes ship in 0.47.0.
+
+## 0.45.0 — 2026-10-04
+
+### App-only share cards (#115, receptron/mulmoserver#336)
+
+`shareCard.collection` and `shareCard.textField` become an optional pair (both or neither), and `title`
+(at most 200 characters, default the app's name) is what the app's own card draws. `"shareCard": {}` means
+a card for the app at `/s/{slug}` and none per row — for apps that show totals rather than one row's text.
+Backwards compatible with 0.44.0 declarations.
+
+## 0.44.0 — 2026-10-04
+
+### `shareCard` declaration (#114, receptron/mulmoserver#336)
+
+`app.json` gains `"shareCard": { "collection": "<cid>", "textField": "<field>" }`, naming which field of which
+collection a link to one of its rows draws on a social network. Publish refuses a collection no visitor reads,
+a `textField` the schema does not declare, and one that is not string / text / markdown / enum. Projected to
+`config/public.shareCard`. Whether a given row may be drawn stays mulmoserver's decision. No protocol bump.
+
+## 0.43.0 — 2026-10-03
+
+### `@receptron/sharedapp/browser` entry (#113, receptron/mulmoserver#332)
+
+An entry a web page can bundle: the projections, path helpers, `normalizeViews`, `AuthoredAppZ` and the fork
+functions, without the reach into `@mulmoclaude/core/collection/server` (which pulled native DuckDB bindings
+into a browser build). `parseAuthoredApp` moves verbatim to `src/authoredAppFile.ts` and is still exported
+from the main entry. A test pins the browser entry's runtime import graph to `zod`,
+`@mulmoclaude/core/collection` and `@mulmoclaude/core/collection/paths`.
+
+## 0.42.0 — 2026-10-03 (tagged, not published to npm)
+
+### Fork source — `forkable` and `config/fork` (#112, receptron/mulmoserver#332)
+
+- `app.json` gains `forkable` (absent = not forkable). Declaring it makes the staff pages readable by anyone.
+- `projectForkSource` builds the `config/fork` document from the authored declaration minus every key naming
+  a person or identity (`aid`, `slug`, `aidEnv`, `owner`, `members`, `agents`), plus the schemas, the view ids
+  and the protocol. The host writes each page's HTML at `config/fork:view:{id}`.
+- `forkFrom` turns a fork source into the forker's declaration (the forker as sole owner) and runs it through
+  the publish checks; it refuses a source carrying `members` / `owner` / `agents`, or a newer protocol major.
+- `forkable` beside `agents[]` is refused at publish.
+
+Also: development dependencies updated (#111). Its changes ship in 0.43.0.
+
 ## 0.41.0 — 2026-10-03
 
 ### `uidForm: "pseudonym"` — a `uidField` that holds the app's pseudonym (#109, receptron/mulmoserver#325)
