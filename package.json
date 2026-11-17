@@ -45,11 +45,11 @@
     "zod": "^4.6.7"
   },
   "peerDependencies": {
-    "@mulmoclaude/core": "^5.4.0 || ^6.0.0"
+    "@mulmoclaude/core": "^5.4.0 || ^6.0.0 || ^7.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@mulmoclaude/core": "^6.0.0",
+    "@mulmoclaude/core": "^7.2.0",
     "@types/node": "^26.6.6",
     "eslint": "^10.14.0",
     "eslint-plugin-security": "^4.2.1",
