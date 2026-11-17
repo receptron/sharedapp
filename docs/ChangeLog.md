@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.47.2 — 2026-11-18
+
+### Accept `@mulmoclaude/core` 7 as a peer (#124)
+
+- `peerDependencies["@mulmoclaude/core"]`: `^5.4.0 || ^6.0.0` → `^5.4.0 || ^6.0.0 || ^7.0.0`. core 7.0.0's only
+  breaking change is its optional `firebase` peer moving to `^13.0.0`; the symbols this package imports from core
+  (`isSafeCustomViewPath`, `isValidCollectionName`, `parseAppManifest` and the collection types) are unchanged, and
+  none of the subpaths it imports reaches `firebase`.
+- Without it, npm refused to install this package next to core 7 (`ERESOLVE`), which blocked MulmoTerminal from
+  taking core 7.2 (receptron/mulmoterminal#3296).
+- The development dependency on core moves to `^7.2.0`, and the `core-floor` CI job now also runs typecheck and test
+  at 7.0.0.
+
+### Maintenance (#121, #122, #123)
+
+- Dependency refreshes: `zod` and the development tooling to their newest in-range versions (#121), and a lockfile
+  refresh with `package.json` unchanged (#123).
+- `resolutions: { minimatch: ^11.0.5 }` takes minimatch's `globparts` denial-of-service advisory, which every
+  dependent still pins below the fixed major; `yarn audit` is clean (#122). Development dependencies only — nothing
+  in the published package changes.
+
 ## 0.47.1 — 2026-11-07
 
 ### Accept `@mulmoclaude/core` 6 as a peer (#119)
