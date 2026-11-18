@@ -49,16 +49,16 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@mulmoclaude/core": "^7.2.0",
+    "@mulmoclaude/core": "^7.2.1",
     "@types/node": "^26.6.6",
-    "eslint": "^10.14.0",
+    "eslint": "^10.15.0",
     "eslint-plugin-security": "^4.2.1",
     "eslint-plugin-sonarjs": "^4.2.2",
-    "prettier": "^3.9.10",
+    "prettier": "^3.10.1",
     "tsx": "^4.23.15",
     "type-coverage": "^2.31.2",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.72.1"
+    "typescript-eslint": "^8.73.0"
   },
   "publishConfig": {
     "access": "public"
